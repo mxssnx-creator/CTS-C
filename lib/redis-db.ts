@@ -1,0 +1,3557 @@
+/**
+ * Redis Database Layer - High Performance Edition v3.0
+ * In-memory Redis client for Next.js runtime
+ * Handles all database operations for connections, trades, positions, settings
+ * Optimized for 80K+ ops/sec with logging disabled
+ * @version 3.0.0 - Cache rebuild forced
+ *
+ * IMPORTANT: This file must NOT import 'fs' or 'path' as it's used by client components
+ */
+
+import { nanoid } from "nanoid"
+
+// Force webpack cache invalidation
+const REDIS_DB_VERSION = "3.0.0"
+void REDIS_DB_VERSION
+
+interface RedisData {
+  strings: Map<string, string>
+  hashes: Map<string, Record<string, string>>
+  sets: Map<string, Set<string>>
+  lists: Map<string, string[]>
+  sorted_sets: Map<string, Array<{ score: number; member: string }>>
+  ttl: Map<string, number> // key -> expiration timestamp in ms
+  requestStats: {
+    lastSecond: number
+    requestCount: number
+    operationsPerSecond: number
+  }
+}
+
+// Global storage for persistence across hot reloads
+const globalForRedis = globalThis as unknown as {
+  __redis_data?: RedisData
+  // In-flight guard for loadFromDisk — ensures concurrent initRedis() calls
+  // from different module scopes share a single disk-read rather than racing
+  // to overwrite each other's post-migration state.
+  __redis_load_promise?: Promise<boolean>
+  // In-flight guard for the CORE init (client construction + snapshot load +
+  // ping), shared across module scopes. Migrations call ensureCoreRedis()
+  // instead of initRedis() so the init→runMigrations→init cycle can't deadlock.
+  __redis_core_promise?: Promise<void>
+  // In-flight guard for the FULL init (core + migrations). All callers await
+  // this single promise, so no request proceeds with un-migrated data — the
+  // race that existed when isConnected flipped true before migrations ran.
+  __redis_init_promise?: Promise<void>
+  // True once the on-disk snapshot has been loaded (or confirmed absent) for
+  // this process. Gated on its own flag — not on the presence of __redis_data —
+  // because the constructor always creates the data maps, so a sync getter that
+  // builds the instance early would otherwise make the loader think the
+  // snapshot was already applied and skip it, booting with an empty store.
+  __redis_snapshot_loaded?: boolean
+  // Global equivalent of the module-scoped `isConnected` flag. Allows fresh
+  // Next.js dev route modules (which re-evaluate and get isConnected=false) to
+  // see the real connected state without re-running initRedis/migrations.
+  __redis_fully_connected?: boolean
+  __cts_runtime_instance_id?: string
+  __redis_persistence_tick_started?: boolean
+  __redis_signals_attached?: boolean
+  __redis_last_successful_save_at?: number
+  __redis_last_successful_load_at?: number
+}
+
+export class InlineLocalRedis {
+  private data: RedisData
+
+  constructor() {
+    // Use global storage for persistence across hot reloads
+    if (!globalForRedis.__redis_data) {
+      // Initialize with defaults. Do NOT fire loadFromDisk() here — initRedis()
+      // awaits it explicitly after construction when wasEmpty=true. Firing a
+      // background load here races with initRedis() and overwrites migration
+      // writes (ensureBaseConnections / migration 021) because the unawaited
+      // Promise settles AFTER migrations have already set is_enabled_dashboard=1.
+      globalForRedis.__redis_data = {
+        strings: new Map(),
+        hashes: new Map(),
+        sets: new Map(),
+        lists: new Map(),
+        sorted_sets: new Map(),
+        ttl: new Map(),
+        requestStats: {
+          lastSecond: Math.floor(Date.now() / 1000),
+          requestCount: 0,
+          operationsPerSecond: 0,
+        },
+      }
+    }
+
+    // Ensure ttl map exists for older data structures
+    if (!globalForRedis.__redis_data.ttl) {
+      globalForRedis.__redis_data.ttl = new Map()
+    }
+
+    this.data = globalForRedis.__redis_data
+
+    // Run cleanup every 60 seconds to remove expired keys
+    this.startTTLCleanup();
+
+    // Schedule periodic disk snapshots every 5 minutes
+    this.startPersistence();
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Disk persistence (snapshot-based, single instance)
+  // ──────────────────────────────────────────────────────────────────────
+  //
+  // The "local Redis" is in-memory only, so without a snapshot every
+  // deploy / container restart / serverless cold-start wipes EVERYTHING:
+  // connections, settings, progression counters, prehistoric flags.
+  //
+  // This implementation does the simplest thing that survives a restart on
+  // a single warm instance:
+  //   • saveToDisk():       JSON-serialise data, write atomically (tmp + rename)
+  //   • saveToDiskSync():   same, blocking — used in SIGTERM/SIGINT/beforeExit
+  //   • loadFromDisk():     read + restore Maps/Sets; rename corrupt file aside
+  //   • startPersistence(): once-per-process 5-min interval + signal handlers
+  //
+  // Notes:
+  //   • Defaults to `<cwd>/.v0-data/redis-snapshot.json`, falls back to
+  //     `/tmp/v0-redis-snapshot.json` if the cwd path is not writable
+  //     (Vercel serverless restricts writes outside `/tmp`).
+  //   • This is NOT cross-instance durable. Vercel `/tmp` is per warm
+  //     instance; a fresh cold instance starts empty and rebuilds via
+  //     migrations. Swap the body of save/load for Vercel Blob to gain
+  //     cross-instance durability without changing this surface.
+  //   • Browser builds: every entry point exits early via the `process`
+  //     guard so client bundles never pull in `node:fs`. We use dynamic
+  //     `await import("node:fs/promises")` to keep the file's "no static
+  //     fs/path imports" contract (see header comment).
+  //
+  // Failure-mode philosophy: the in-memory store keeps working regardless
+  // of disk failures — the only observable effect of a broken disk is a
+  // single rate-limited warning per minute and no cross-restart recovery.
+
+  private static lastSaveErrorWarn = 0
+
+  /** Resolve snapshot path; honours `V0_REDIS_SNAPSHOT_PATH` env override. */
+  private async resolveSnapshotPath(): Promise<{ dir: string; file: string } | null> {
+    if (typeof process === "undefined" || !process.versions?.node) return null
+    try {
+      // Bare specifier (no `node:` URI scheme) — Webpack 5's bundler can
+      // analyse this and Node's resolver maps it to the built-in. The
+      // `node:path` form triggers `UnhandledSchemeError` on the Edge
+      // build because Webpack's scheme handler doesn't recognise it.
+      // Bare imports are aliased to `false` for the Edge runtime in
+      // `next.config.mjs`, which short-circuits the load (the runtime
+      // guard above already returns `null` before this line ever runs).
+      const path = await import("path")
+      const explicit = process.env.V0_REDIS_SNAPSHOT_PATH
+      if (explicit) {
+        return { dir: path.dirname(explicit), file: explicit }
+      }
+      // Prefer cwd/.v0-data; fall back to /tmp in restricted environments.
+      const primary = path.join(process.cwd(), ".v0-data", "redis-snapshot.json")
+      return { dir: path.dirname(primary), file: primary }
+    } catch {
+      return null
+    }
+  }
+
+  /** Fallback: write to `/tmp` when the primary path is read-only. */
+  private async tmpFallbackPath(): Promise<{ dir: string; file: string } | null> {
+    if (typeof process === "undefined" || !process.versions?.node) return null
+    try {
+      // Bare specifier — see comment in `resolveSnapshotPath`.
+      const path = await import("path")
+      return { dir: "/tmp", file: path.join("/tmp", "v0-redis-snapshot.json") }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Build a JSON-safe snapshot of the in-memory data. We can't JSON-stringify
+   * Maps and Sets directly, so we materialise them as arrays of entries.
+   * Format is versioned (`v: 1`) so future shape changes can migrate cleanly.
+   */
+  private buildSnapshot(): string {
+    const d = this.data
+    return JSON.stringify({
+      v: 1,
+      savedAt: Date.now(),
+      strings: Array.from(d.strings.entries()),
+      hashes: Array.from(d.hashes.entries()),
+      sets: Array.from(d.sets.entries()).map(([k, s]) => [k, Array.from(s)]),
+      lists: Array.from(d.lists.entries()),
+      sorted_sets: Array.from(d.sorted_sets.entries()),
+      ttl: Array.from(d.ttl.entries()),
+    })
+  }
+
+  /** Restore Maps/Sets from a parsed snapshot. Tolerant of partial files. */
+  private applySnapshot(parsed: any): boolean {
+    if (!parsed || typeof parsed !== "object") return false
+    const d = this.data
+    try {
+      if (Array.isArray(parsed.strings))
+        d.strings = new Map(parsed.strings)
+      if (Array.isArray(parsed.hashes))
+        d.hashes = new Map(parsed.hashes)
+      if (Array.isArray(parsed.sets))
+        d.sets = new Map(parsed.sets.map(([k, s]: [string, string[]]) => [k, new Set(s)]))
+      if (Array.isArray(parsed.lists))
+        d.lists = new Map(parsed.lists)
+      if (Array.isArray(parsed.sorted_sets))
+        d.sorted_sets = new Map(parsed.sorted_sets)
+      if (Array.isArray(parsed.ttl))
+        d.ttl = new Map(parsed.ttl)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Single rate-limited warning per minute so a broken disk doesn't spam logs. */
+  private warnRateLimited(msg: string, err: unknown): void {
+    const now = Date.now()
+    if (now - InlineLocalRedis.lastSaveErrorWarn < 60_000) return
+    InlineLocalRedis.lastSaveErrorWarn = now
+    const detail = err instanceof Error ? err.message : String(err)
+    console.warn(`[v0] [Redis Persistence] ${msg}: ${detail}`)
+  }
+
+  async loadFromDisk(): Promise<boolean> {
+    // ── Safety guard: prevent snapshot reload if engine is running ──
+    // In dev mode, multiple Next.js workers each call initRedis()
+    // independently. Each worker loads the snapshot, which can overwrite
+    // lock values held by a live engine in a different worker. This causes
+    // "ownership loss" crashes. Check the global flag published by the
+    // trade-engine coordinator; if ANY engine is active, skip the reload.
+    const globalCtx = globalThis as any
+    const coordinator = globalCtx.__tradeEngineCoordinator
+    const coordinatorHasEngines =
+      coordinator &&
+      typeof coordinator.getActiveEngineCount === "function" &&
+      Number(coordinator.getActiveEngineCount()) > 0
+    if (globalCtx.__engine_manager_instance?.isEngineRunning || coordinatorHasEngines) {
+      console.log(`[v0] [Redis] Snapshot reload skipped: engine/coordinator running in this process`)
+      return false
+    }
+
+    const target = await this.resolveSnapshotPath()
+    if (!target) return false
+    // Bare specifier — see comment in `resolveSnapshotPath`. Type alias
+    // also drops the `node:` prefix so the bundler doesn't analyse it.
+    let fs: typeof import("fs/promises")
+    try {
+      fs = await import("fs/promises")
+    } catch {
+      return false
+    }
+    // Try primary path, then `/tmp` fallback.
+    const candidates = [target, await this.tmpFallbackPath()].filter(Boolean) as Array<{ file: string }>
+    for (const c of candidates) {
+      try {
+        const raw = await fs.readFile(c.file, "utf8")
+        const parsed = JSON.parse(raw)
+        if (this.applySnapshot(parsed)) {
+          globalForRedis.__redis_last_successful_load_at = Date.now()
+          const keys =
+            this.data.strings.size + this.data.hashes.size + this.data.sets.size +
+            this.data.lists.size + this.data.sorted_sets.size
+          console.log(`[v0] [Redis Persistence] Restored ${keys} keys from ${c.file}`)
+          return true
+        }
+        // Parsed but didn't fit — quarantine and continue.
+        try { await fs.rename(c.file, `${c.file}.corrupt-${Date.now()}`) } catch {}
+      } catch (err: any) {
+        if (err?.code === "ENOENT") continue // no snapshot yet
+        if (err instanceof SyntaxError) {
+          // Corrupt JSON — move it aside so we don't keep failing.
+          try { await fs.rename(c.file, `${c.file}.corrupt-${Date.now()}`) } catch {}
+          continue
+        }
+        // Other I/O error — try fallback.
+        continue
+      }
+    }
+    return false
+  }
+
+  async saveToDisk(): Promise<boolean> {
+    const primary = await this.resolveSnapshotPath()
+    if (!primary) return false
+    // Bare specifier — see comment in `resolveSnapshotPath`.
+    let fs: typeof import("fs/promises")
+    try {
+      fs = await import("fs/promises")
+    } catch {
+      return false
+    }
+    const json = this.buildSnapshot()
+    // Try primary then `/tmp` fallback so a read-only cwd doesn't lose data.
+    const candidates = [primary, await this.tmpFallbackPath()].filter(Boolean) as Array<{ dir: string; file: string }>
+    for (const c of candidates) {
+      try {
+        await fs.mkdir(c.dir, { recursive: true })
+        const tmpPath = `${c.file}.tmp`
+        await fs.writeFile(tmpPath, json, "utf8")
+        // Atomic on POSIX — readers either see old or new, never partial.
+        await fs.rename(tmpPath, c.file)
+        globalForRedis.__redis_last_successful_save_at = Date.now()
+        return true
+      } catch (err) {
+        // Try next fallback. Only warn after we've exhausted everything.
+        if (c === candidates[candidates.length - 1]) {
+          this.warnRateLimited(`save failed (${c.file})`, err)
+        }
+        continue
+      }
+    }
+    return false
+  }
+
+  /** Synchronous variant for SIGTERM / SIGINT / beforeExit handlers. */
+  saveToDiskSync(): boolean {
+    if (typeof process === "undefined" || !process.versions?.node) return false
+    // Type aliases use bare specifiers so TypeScript's emitted .d.ts
+    // (and any incremental compile cache) don't carry `node:` URIs that
+    // could re-enter the bundler graph.
+    let fsSync: typeof import("fs"), pathMod: typeof import("path")
+    try {
+      // Node 24 exposes built-ins without relying on a module-scoped require.
+      // That distinction matters in Next's standalone webpack chunks, where
+      // `Function("return require")` has no access to webpack's local require
+      // and silently disabled the final SIGTERM snapshot.
+      const getBuiltinModule = (process as any).getBuiltinModule as
+        | ((name: string) => any)
+        | undefined
+      if (!getBuiltinModule) return false
+      fsSync = getBuiltinModule("fs")
+      pathMod = getBuiltinModule("path")
+      if (!fsSync || !pathMod) return false
+    } catch {
+      return false
+    }
+    const explicit = process.env.V0_REDIS_SNAPSHOT_PATH
+    const primaryFile = explicit || pathMod.join(process.cwd(), ".v0-data", "redis-snapshot.json")
+    const tmpFile = pathMod.join("/tmp", "v0-redis-snapshot.json")
+    const json = this.buildSnapshot()
+    for (const file of [primaryFile, tmpFile]) {
+      try {
+        const dir = pathMod.dirname(file)
+        fsSync.mkdirSync(dir, { recursive: true })
+        const tmp = `${file}.tmp`
+        fsSync.writeFileSync(tmp, json, "utf8")
+        fsSync.renameSync(tmp, file)
+        globalForRedis.__redis_last_successful_save_at = Date.now()
+        return true
+      } catch {
+        continue
+      }
+    }
+    return false
+  }
+
+  async startPersistence(): Promise<boolean> {
+    if (typeof process === "undefined" || !process.versions?.node) return false
+    if (globalForRedis.__redis_persistence_tick_started) return true
+    globalForRedis.__redis_persistence_tick_started = true
+
+    // ── Dev-mode optimization: disable periodic snapshots ──
+    // In Next.js dev mode, module reloads + multiple workers independently
+    // load/save snapshots, causing stale lock values to overwrite live engine
+    // lock tokens → "ownership loss" crashes every ~75s. In dev, disable
+    // periodic snapshots; in production, the 5-minute cycle is safe.
+    if (process.env.NODE_ENV === "development") {
+      console.log(`[v0] [Redis] Dev mode: periodic snapshot disabled to prevent lock churn`)
+      return true // Mark as started so we don't retry
+    }
+
+    // Frequent configurable snapshot tick. The default limits crash-window
+    // data loss to 30 seconds while keeping serialization off the hot path.
+    // process open during a graceful exit.
+    const configuredInterval = Number(process.env.REDIS_SNAPSHOT_INTERVAL_MS)
+    const SNAPSHOT_INTERVAL_MS = Number.isFinite(configuredInterval)
+      ? Math.min(Math.max(Math.trunc(configuredInterval), 5_000), 5 * 60_000)
+      : 30_000
+    const t = setInterval(() => {
+      this.saveToDisk().catch(() => { /* warned inside saveToDisk */ })
+    }, SNAPSHOT_INTERVAL_MS)
+    if (typeof t.unref === "function") t.unref()
+
+    // Flush-on-exit handlers (idempotent).
+    if (!globalForRedis.__redis_signals_attached) {
+      globalForRedis.__redis_signals_attached = true
+      const flush = () => { try { this.saveToDiskSync() } catch {} }
+      // setMaxListeners is a NodeEventEmitter API; guard for ts safety.
+      try { (process as any).setMaxListeners?.(50) } catch {}
+      process.on("SIGTERM", flush)
+      process.on("SIGINT", flush)
+      process.on("beforeExit", flush)
+    }
+    return true
+  }
+
+  getPersistenceStatus(): {
+    mode: "atomic-local-snapshot"
+    path: string
+    intervalMs: number
+    lastSuccessfulSaveAt: number | null
+    lastSuccessfulLoadAt: number | null
+  } {
+    const configuredInterval = Number(process.env.REDIS_SNAPSHOT_INTERVAL_MS)
+    const intervalMs = Number.isFinite(configuredInterval)
+      ? Math.min(Math.max(Math.trunc(configuredInterval), 5_000), 5 * 60_000)
+      : 30_000
+    return {
+      mode: "atomic-local-snapshot",
+      path: process.env.V0_REDIS_SNAPSHOT_PATH || ".v0-data/redis-snapshot.json",
+      intervalMs,
+      lastSuccessfulSaveAt: globalForRedis.__redis_last_successful_save_at || null,
+      lastSuccessfulLoadAt: globalForRedis.__redis_last_successful_load_at || null,
+    }
+  }
+
+  private startTTLCleanup(): void {
+    // TTL-based cleanup + LRU eviction when heap memory exceeds threshold.
+    // In dev mode the InlineLocalRedis emulator holds the ENTIRE dataset on
+    // the Node heap (in prod this lives in real Redis, off-heap). During live
+    // trading the per-cycle pipeline writes thousands of `pseudo_position:*`
+    // and `config_set:*` hashes plus a growing `pseudo_positions:{conn}` set
+    // every second; left unchecked this drove heapUsed past the 4GB V8 ceiling
+    // and OOM-killed next-server seconds after live trading began (verified:
+    // RSS climbing 1.5GB→7.3GB within a single ~60s window, GC unable to
+    // reduce — i.e. genuinely retained, not transient churn).
+    const globalCleanup = globalThis as unknown as { __redis_cleanup_started?: boolean }
+    if (globalCleanup.__redis_cleanup_started) return
+    globalCleanup.__redis_cleanup_started = true
+
+    // Fire FREQUENTLY: with 20 symbols live-trading the pipeline writes ~20x
+    // more keys per second than a 5-symbol run. 2s catches bursts before they
+    // compound across multiple intervals. The handler is cheap (~ms) when
+    // heap is below threshold so the extra polling is negligible.
+    const CLEANUP_INTERVAL_MS = 2_000
+    // Trigger eviction at 400 MB heapUsed (reduced from 600).  Real Redis clients run off-heap;
+    // Very aggressive for dev mode to prevent OOM on 4GB VM with 15+ symbols.
+    // Total safe limit: 400MB heap + 1.6GB persistent = 2GB, leaving 2GB system buffer.
+    const HEAP_PRESSURE_MB = 400
+
+    // Run an immediate targeted flush SYNCHRONOUSLY before migrations at startup
+    // to clear volatile key families that accumulate across hot-reload cycles
+    // (the globalThis Map persists between Next.js hot-reloads without a full
+    // process restart). This MUST run in dev BEFORE migrations are called, not
+    // after, to ensure migrations see a clean state. This runs UNCONDITIONALLY
+    // in dev — even if totalKeys is low — because the OOM-causing families
+    // (strategies: lists, indication: strings, pseudo_position: hashes) can hold
+    // 20+ MB each while only occupying a few hundred key slots.
+      try {
+        if (process.env.NODE_ENV === "development") {
+          let flushed = 0
+
+          // 1. strategies:{conn}:{symbol}:* — per-cycle set blobs (real:sets,
+          //    base:sets, main:sets) and fp:v2 fingerprint caches. Written by
+          //    strategy-coordinator.ts on every realtime cycle; dev bypasses
+          //    are throttled (every 50th cycle) or gated on NODE_ENV, but stale
+          //    keys from prior hot-reload cycles remain in the Map.
+          //    Also covers lpush lists from strategy-evaluator.ts (storeStrategyResult
+          //    now returns early in dev, but pre-bypass runs left stale list keys).
+          //
+          //    PRESERVE: strategies_active:{conn} — coordinator current counts
+          //    (per-symbol per-stage). This hash is read by the stats API every
+          //    second and must survive hot-reloads.
+          for (const key of this.data.lists.keys()) {
+            if (key.startsWith("strategies:")) { this.data.lists.delete(key); flushed++ }
+          }
+          for (const key of this.data.hashes.keys()) {
+            // Preserve strategies_active hash — it contains live coordinator counts
+            if (key.startsWith("strategies_active:")) continue
+            if (key.startsWith("strategies:") || key.startsWith("settings:strategies")) {
+              this.data.hashes.delete(key); flushed++
+            }
+          }
+          for (const key of this.data.strings.keys()) {
+            if (key.startsWith("strategies:") || key.startsWith("settings:strategies")) {
+              this.data.strings.delete(key); flushed++
+            }
+          }
+
+          // 2. indication:{conn}:{symbol} — per-symbol indication strings/hashes
+          //    (200 keys × ~3 KB each = 0.6 MB). Written every indication cycle;
+          //    stale copies from hot-reload cycles remain.
+          for (const key of this.data.strings.keys()) {
+            if (key.startsWith("indication:") || key.startsWith("indications:")) {
+              this.data.strings.delete(key); flushed++
+            }
+          }
+          for (const key of this.data.hashes.keys()) {
+            if (key.startsWith("indication:") || key.startsWith("indications:")) {
+              this.data.hashes.delete(key); flushed++
+            }
+          }
+
+          // 2b. prehistoric cache-gate + progress-tracker keys only.
+          //
+          // The engine uses TWO separate keys to decide whether to re-run prehistoric:
+          //   a) `prehistoric_loaded:{conn}` (plain string "1") — the 24-h cache gate
+          //      in engine-manager.ts. If this key survives a sandbox reset / full-DB
+          //      wipe the engine skips the entire ConfigSetProcessor pass and stamps
+          //      fake completion fields with 0 candles/indicators. Wipe it so every
+          //      fresh-DB session re-runs prehistoric from scratch.
+          //   b) `prehistoric:progress:{conn}` — the PrehistoricProgressTracker hash.
+          //      Stale from prior session; wipe so the UI progress bar resets cleanly.
+          //
+          // DO NOT wipe:
+          //   - `prehistoric:{conn}` hash (is_complete, symbols_processed, etc.) —
+          //     the stats route reads this; wiping causes candlesLoaded=0 forever.
+          //   - `progression:{conn}` hash (placed_count, filled_count, cycle counters)
+          //     — live counters that must survive hot-reloads.
+          //   - `strategies_active:{conn}` — written by coordinator each cycle.
+          //   - `pi_history:*` — written by ConfigSetProcessor; must survive.
+          for (const key of this.data.strings.keys()) {
+            if (key.startsWith("prehistoric_loaded:")) {
+              this.data.strings.delete(key); flushed++
+            }
+          }
+          for (const key of this.data.hashes.keys()) {
+            if (key.startsWith("prehistoric:progress:")) {
+              this.data.hashes.delete(key); flushed++
+            }
+          }
+
+          // 3. pseudo_position:{conn}:{id} + pseudo_positions:{conn} set —
+          //    createPseudoPositionsFromRealSets() bypassed in dev but prior runs
+          //    left 400 position hashes (0.6 MB) + membership sets.
+          for (const key of this.data.hashes.keys()) {
+            if (key.startsWith("pseudo_position:") || key.startsWith("settings:pseudo_position")) {
+              this.data.hashes.delete(key); flushed++
+            }
+          }
+          for (const key of this.data.strings.keys()) {
+            if (key.startsWith("pseudo_position:") || key.startsWith("settings:pseudo_position")) {
+              this.data.strings.delete(key); flushed++
+            }
+          }
+          for (const key of this.data.sets.keys()) {
+            if (key.startsWith("pseudo_positions:") || key.startsWith("real_pseudo_positions:")) {
+              this.data.sets.delete(key); flushed++
+            }
+          }
+
+          // 4. live:position:{id} hashes + live:positions:{conn} lists —
+          //    In dev, live positions are real BingX orders whose orderId/SL/TP
+          //    are valid only for the session that placed them.  On hot-reload
+          //    the in-memory InlineLocalRedis is fresh but the persisted dev DB
+          //    still holds the old position hashes.  The reconcile loop then
+          //    issues exchange API calls for each stale position (×44 = 44 API
+          //    calls on startup), blowing ~200-400 MB and sometimes triggering
+          //    OOM before prehistoric can complete.  Wipe them unconditionally
+          //    on dev startup so each session begins with a clean slate.
+          //    NOTE: setSettings("live:position:…") prepends "settings:" so we
+          //    must clear both "live:position:*" AND "settings:live:position:*".
+          for (const key of this.data.hashes.keys()) {
+            if (
+              key.startsWith("live:position:") ||
+              key.startsWith("settings:live:position:")
+            ) { this.data.hashes.delete(key); flushed++ }
+          }
+          for (const key of this.data.lists.keys()) {
+            if (
+              key.startsWith("live:positions:") ||
+              key.startsWith("settings:live:positions:")
+            ) { this.data.lists.delete(key); flushed++ }
+          }
+          for (const key of this.data.strings.keys()) {
+            if (
+              key.startsWith("live:positions:") ||
+              key.startsWith("live:position:")  ||
+              key.startsWith("settings:live:position:") ||
+              key.startsWith("settings:live:positions:")
+            ) { this.data.strings.delete(key); flushed++ }
+          }
+          for (const key of this.data.sets.keys()) {
+            if (
+              key.startsWith("live:positions:") ||
+              key.startsWith("settings:live:positions:")
+            ) { this.data.sets.delete(key); flushed++ }
+          }
+
+          if (flushed > 0) {
+            console.log(`[v0] [Redis Memory] Dev startup flush: cleared ${flushed} stale volatile keys`)
+          }
+        }
+
+        // Full eviction pass for remaining pressure (covers non-dev or larger leftovers).
+        const totalKeys = this.data.strings.size + this.data.hashes.size +
+                          this.data.sets.size + this.data.lists.size + this.data.sorted_sets.size
+        if (totalKeys > 5_000) {
+          console.log(`[v0] [Redis Memory] Startup: ${totalKeys} stale keys after flush, evicting...`)
+          this.evictOldRecords()
+          ;(globalThis as any).gc?.()
+          const after = this.data.strings.size + this.data.hashes.size +
+                        this.data.sets.size + this.data.lists.size + this.data.sorted_sets.size
+          console.log(`[v0] [Redis Memory] Startup eviction complete: ${totalKeys} → ${after} keys`)
+        }
+      } catch (err) {
+        console.warn(`[v0] [Redis Memory] Dev startup flush error:`, err)
+      }
+
+    const ttlCleanupTimer = setInterval(() => {
+      try {
+        // First, clean up expired keys
+        this.cleanupExpiredKeys()
+
+        // Check memory pressure: evict if heap, RSS, or key count is too high.
+        // heapUsed alone is insufficient — after a heavy live-trading session the GC
+        // reduces heapUsed to ~600 MB (below the 800 MB trigger) while RSS stays at
+        // 4+ GB because V8 holds committed pages for future allocation. RSS is a better
+        // proxy for true process-level memory pressure, especially on the 6 GB VM where
+        // total system RAM (RSS_all_processes) matters more than individual heap metrics.
+        const mem = process.memoryUsage?.() || { heapUsed: 0, rss: 0 }
+        const heapUsedMB = mem.heapUsed / 1024 / 1024
+        const rssMB      = mem.rss      / 1024 / 1024
+        // RSS trigger: evict when process RSS exceeds 3 GB (leaves 3 GB+ for OS/other).
+        // heapUsed trigger: evict when V8 heap exceeds 800 MB.
+    const RSS_PRESSURE_MB      = 2_000 // Reduced from 2500 for 4GB VM safety (aggressive eviction)
+        const totalKeys = this.data.strings.size + this.data.hashes.size +
+                          this.data.sets.size + this.data.lists.size + this.data.sorted_sets.size
+        const MAX_TOTAL_KEYS = 8_000
+        const shouldEvict = heapUsedMB > HEAP_PRESSURE_MB || rssMB > RSS_PRESSURE_MB || totalKeys > MAX_TOTAL_KEYS
+        if (shouldEvict) {
+          if (rssMB > RSS_PRESSURE_MB) {
+            console.log(`[v0] [Redis Memory] RSS at ${rssMB.toFixed(0)}MB (>${RSS_PRESSURE_MB}MB), evicting old records...`)
+          } else if (heapUsedMB > HEAP_PRESSURE_MB) {
+            console.log(`[v0] [Redis Memory] Heap at ${heapUsedMB.toFixed(0)}MB, evicting old records...`)
+          } else {
+            console.log(`[v0] [Redis Memory] Key count at ${totalKeys} (>${MAX_TOTAL_KEYS}), evicting old records...`)
+          }
+          console.log(`[v0] [Redis Memory] Top key families: ${this.describeKeyFamilies()}`)
+          this.evictOldRecords()
+          // Nudge GC if exposed (dev runs with --expose-gc sometimes); the
+          // emulator frees Map references above, this returns them to the OS.
+          ;(globalThis as any).gc?.()
+        }
+      } catch (err) {
+        // Swallow errors so the cleanup timer doesn't die
+      }
+    }, CLEANUP_INTERVAL_MS)
+    ttlCleanupTimer.unref?.()
+  }
+
+  /**
+   * Diagnostic: histogram of key counts (and rough sizes for big sets/strings)
+   * grouped by the first two `:`-separated segments. Lets the memory-pressure
+   * log show exactly WHICH key families grow instead of guessing.
+   */
+  private describeKeyFamilies(): string {
+    const counts = new Map<string, { n: number; approxBytes: number }>()
+    const famOf = (k: string) => k.split(":").slice(0, 2).join(":")
+    const bump = (k: string, bytes: number) => {
+      const fam = famOf(k)
+      const cur = counts.get(fam) || { n: 0, approxBytes: 0 }
+      cur.n++
+      cur.approxBytes += bytes
+      counts.set(fam, cur)
+    }
+    try {
+      for (const [k, v] of this.data.strings.entries()) bump(k, typeof v === "string" ? v.length : 64)
+      for (const [k, h] of this.data.hashes.entries()) {
+        let bytes = 0
+        for (const f in h) bytes += f.length + (h[f]?.length ?? 0) + 32
+        bump(k, bytes)
+      }
+      for (const [k, s] of this.data.sets.entries()) bump(k, s.size * 48)
+      for (const [k, l] of this.data.lists.entries()) {
+        let bytes = 0
+        for (const item of l) bytes += (item?.length ?? 0) + 16
+        bump(k, bytes)
+      }
+      for (const [k, z] of this.data.sorted_sets.entries()) bump(k, z.length * 64)
+      const top = [...counts.entries()]
+        .sort((a, b) => b[1].approxBytes - a[1].approxBytes)
+        .slice(0, 8)
+        .map(([fam, c]) => `${fam}=${c.n}keys/${(c.approxBytes / 1048576).toFixed(1)}MB`)
+      return top.join(" | ")
+    } catch {
+      return "unavailable"
+    }
+  }
+
+  private cleanupExpiredKeys(): number {
+    const now = Date.now()
+    const ttlMap = this.data.ttl
+    if (!ttlMap) return 0
+
+    let cleaned = 0
+    for (const [key, expireAt] of ttlMap.entries()) {
+      if (now >= expireAt) {
+        this.deleteKey(key)
+        ttlMap.delete(key)
+        cleaned++
+      }
+    }
+    return cleaned
+  }
+
+  private evictOldRecords(): number {
+    // LRU/FIFO eviction of the key families that accumulate unboundedly on the
+    // Node heap in the dev emulator. In production these live in real Redis
+    // (off-heap) so this is a dev-only safety net, but it is essential: during
+    // live trading the pipeline creates thousands of these per minute.
+    let evicted = 0
+
+    // Keys that must NEVER be evicted by memory pressure — they are either
+    // stateful operator decisions or live-position tracking records.
+    //
+    // IMPORTANT: "settings:*" was previously fully protected, but
+    // "settings:pseudo_position*" and "settings:strategies*" are high-volume
+    // transient pipeline data (not operator config) and must be evictable.
+    // The protected guard is narrowed to the genuine operator sub-families only.
+    const isProtected = (k: string): boolean => {
+      if (k.startsWith("live:position:"))    return true  // open/closed live positions
+      if (k.startsWith("live:positions:"))   return true  // open/closed index LISTs
+      if (k.startsWith("progression:"))      return true  // progression counters
+      if (/^prehistoric:[^:]+$/.test(k))     return true  // prehistoric summary hash for stats
+      if (/^prehistoric:[^:]+:symbols$/.test(k)) return true  // processed-symbol denominator set
+      if (/^prehistoric:[^:]+:done$/.test(k)) return true  // realtime gate marker
+      if (/^prehistoric:[^:]+:firstpass:done$/.test(k)) return true  // first-pass gate
+      if (k.startsWith("connection:"))       return true  // exchange credentials
+      if (k.startsWith("strategy_count:"))   return true  // strategy count totals
+      if (k.startsWith("real_pi_acc:"))      return true  // real PI accumulation
+      if (k.startsWith("axis_pos_acc:"))     return true  // axis position accumulation
+      if (k.startsWith("app_settings"))      return true  // global app settings
+      if (k.startsWith("trade_engine:"))     return true  // engine state
+      if (k.startsWith("_migration"))        return true  // migration markers
+      if (k.startsWith("_schema_version"))   return true  // schema version
+      if (k.startsWith("market_data:"))      return true  // candle blobs (separate cap)
+      // strategies:{conn}:live:count — single small key used for dashboard display;
+      // written once per cycle (not per symbol) and must survive the strategies:* cap.
+      if (/^strategies:[^:]+:live:count$/.test(k)) return true
+      // strategies:{conn}:*:total — per-stage set counts for the dashboard.
+      if (/^strategies:[^:]+:[^:]+:total$/.test(k)) return true
+      // Protect genuine operator settings but NOT transient pipeline families.
+      // settings:pseudo_position* and settings:strategies* are written every
+      // realtime cycle and must be subject to FIFO caps.
+      if (k.startsWith("settings:")) {
+        // Transient pipeline families — NOT protected
+        if (k.startsWith("settings:pseudo_position")) return false
+        if (k.startsWith("settings:strategies"))       return false
+        return true  // all other settings: keys are protected operator config
+      }
+      return false
+    }
+
+    // ── Single-pass categorisation ────────────────────────────────────────────
+    // The previous multi-pass approach iterated all keys once per family rule
+    // (13 hash rules + 9 string rules + 1 candle rule + 1 list rule = 24 passes).
+    // At 8000 keys that was 192,000 startsWith() comparisons per eviction run,
+    // every 2 seconds. The new approach iterates each store ONCE and categorises
+    // into named buckets in-place using early-exit prefix switching — O(N) total
+    // with ~8× fewer comparisons per key (average 3 prefix checks vs 24).
+    //
+    // Bucket names mirror the old family rules, so the cap values are unchanged.
+    const isDev = process.env.NODE_ENV === "development"
+
+    // Caps indexed by bucket name (shared between hash and string passes)
+    const CAPS: Record<string, number> = {
+      pseudo_position:     isDev ? 0 : 2000,
+      s_pseudo_position:   isDev ? 0 : 1500,  // settings:pseudo_position
+      strategies:          isDev ? 0 : 100,
+      s_strategies:        isDev ? 5 : 20,    // settings:strategies
+      config_set:          isDev ? 200 : 1500,
+      strategy_positions:  isDev ? 100 : 1000,
+      strategy_detail:     isDev ? 100 : 1000,
+      real_stage:          isDev ? 100 : 1000,
+      indication:          isDev ? 0 : 500,
+      indications:         isDev ? 0 : 100,
+      prehistoric:         20,
+      live_history:        isDev ? 100 : 500,
+      // string-only
+      indications_str:     isDev ? 0 : 50,
+      dedup:               isDev ? 500 : 3000,
+      candle_cache:        20,
+      candles:             20,
+    }
+
+    // Classify a key into a bucket name; returns null for protected/untracked keys.
+    // The switch-ladder uses fast prefix tests ordered by probability of hit —
+    // high-frequency pipeline keys first, protected-class checks last.
+    const classify = (k: string): string | null => {
+      if (isProtected(k)) return null
+      // Transient pipeline families (highest write frequency)
+      if (k.startsWith("pseudo_position:"))     return "pseudo_position"
+      if (k.startsWith("settings:pseudo_position")) return "s_pseudo_position"
+      if (k.startsWith("settings:strategies"))  return "s_strategies"
+      if (k.startsWith("strategies:")) {
+        if (k.startsWith("strategies:all") ||
+            k.startsWith("strategies:counter") ||
+            k.startsWith("strategies:metadata")) return null
+        return "strategies"
+      }
+      if (k.startsWith("indication:"))          return "indication"
+      if (k.startsWith("indications:"))         return "indications"
+      if (k.startsWith("config_set:") ||
+          k.includes(":config_set:"))            return "config_set"
+      if (k.startsWith("strategy:")) {
+        if (k.includes(":positions"))            return "strategy_positions"
+        if (k.includes(":detail"))               return "strategy_detail"
+        return null
+      }
+      if (k.startsWith("real_stage:") ||
+          k.startsWith("realstage:"))            return "real_stage"
+      if (k.startsWith("prehistoric:"))          return "prehistoric"
+      if (k.startsWith("live_positions:") &&
+          k.includes(":history"))                return "live_history"
+      if (k.startsWith("strategy_detail:"))      return "strategy_detail"
+      if (k.startsWith("candle_cache:") ||
+          k.startsWith("market_data_cache:"))    return "candle_cache"
+      if (k.startsWith("market_data:") &&
+          k.endsWith(":candles"))                return "candles"
+      if (k.includes(":exists:") ||
+          k.includes(":dedup:"))                 return "dedup"
+      return null
+    }
+
+    // Helper: trim a bucket array to its cap and evict.
+    const trimBucket = (bucket: string[], cap: number): number => {
+      if (bucket.length <= cap) return 0
+      const drop = bucket.length - cap
+      for (let i = 0; i < drop; i++) this.deleteKey(bucket[i])
+      return drop
+    }
+
+    // ── HASH single-pass ──────────────────────────────────────────────────
+    const hashBuckets = new Map<string, string[]>()
+    for (const [key] of this.data.hashes.entries()) {
+      const bucket = classify(key)
+      if (bucket === null) continue
+      let arr = hashBuckets.get(bucket)
+      if (!arr) { arr = []; hashBuckets.set(bucket, arr) }
+      arr.push(key)
+    }
+    for (const [bucket, keys] of hashBuckets) {
+      const cap = CAPS[bucket] ?? 0
+      evicted += trimBucket(keys, cap)
+    }
+
+    // ── STRING single-pass ────────────────────────────────────────────────
+    // indications:* string blobs get a lower string cap (vs hash cap) since
+    // the blob format is larger than the hash representation.
+    const strBuckets = new Map<string, string[]>()
+    for (const [key] of this.data.strings.entries()) {
+      const bucket = classify(key)
+      if (bucket === null) continue
+      // String-specific override for indications: lower cap.
+      const strBucket = bucket === "indications" ? "indications_str" : bucket
+      let arr = strBuckets.get(strBucket)
+      if (!arr) { arr = []; strBuckets.set(strBucket, arr) }
+      arr.push(key)
+    }
+    for (const [bucket, keys] of strBuckets) {
+      const cap = CAPS[bucket] ?? 0
+      evicted += trimBucket(keys, cap)
+    }
+
+    // ── LIST single-pass ────────────��────────���──────────────────────────��─�����
+    // strategies:* lists from strategy-evaluator — capped at 0 in dev.
+    {
+      const listCap = isDev ? 0 : 50
+      const listKeys: string[] = []
+      for (const [key] of this.data.lists.entries()) {
+        if (!isProtected(key) && key.startsWith("strategies:")) listKeys.push(key)
+      }
+      evicted += trimBucket(listKeys, listCap)
+    }
+
+    // ── Membership sets — prune oversized pseudo-position id sets ─────────
+    const SET_MEMBER_CAP = 4000
+    for (const [key, members] of this.data.sets.entries()) {
+      if (
+        (key.startsWith("pseudo_positions:") || key.startsWith("real_pseudo_positions:")) &&
+        members.size > SET_MEMBER_CAP
+      ) {
+        const arr = Array.from(members)
+        const keep = new Set(arr.slice(arr.length - SET_MEMBER_CAP))
+        this.data.sets.set(key, keep)
+        evicted += arr.length - keep.size
+      }
+    }
+
+    if (evicted > 10) {
+      console.log(`[v0] [Redis Memory] Evicted ${evicted} old records to reduce memory pressure`)
+    }
+    return evicted
+  }
+
+  private isExpired(key: string): boolean {
+    const ttlMap = this.data.ttl
+    if (!ttlMap) return false
+
+    const expireAt = ttlMap.get(key)
+    if (expireAt && Date.now() >= expireAt) {
+      // Only delete expired keys during explicit cleanup operations
+      // Not on every read operation!
+      // this.deleteKey(key)
+      // ttlMap.delete(key)
+      return true
+    }
+    return false
+  }
+
+  private deleteKey(key: string): void {
+    this.data.strings.delete(key)
+    this.data.hashes.delete(key)
+    this.data.sets.delete(key)
+    this.data.lists.delete(key)
+    this.data.sorted_sets.delete(key)
+    this.data.ttl?.delete(key)
+  }
+
+  private setKeyTTL(key: string, seconds: number): void {
+    if (!this.data.ttl) {
+      this.data.ttl = new Map()
+    }
+    this.data.ttl.set(key, Date.now() + seconds * 1000)
+  }
+
+  private trackOperation(): void {
+    // Lightweight: just increment the counter. Rate is computed lazily on read.
+    const stats = this.data.requestStats
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (nowSec !== stats.lastSecond) {
+      // New second window: snapshot ops/sec from previous window and reset
+      stats.operationsPerSecond = stats.requestCount
+      stats.requestCount = 0
+      stats.lastSecond = nowSec
+    }
+    stats.requestCount++
+  }
+
+  async ping() {
+    return "PONG"
+  }
+
+  async info(): Promise<string> {
+    const totalKeys = await this.dbSize()
+    return [`redis_version:local-inline`, `db0:keys=${totalKeys}`, `uptime_in_seconds:${Math.floor(process.uptime())}`].join("\n")
+  }
+
+  async get(key: string): Promise<string | null> {
+    this.trackOperation()
+    if (this.isExpired(key)) return null
+    return this.data.strings.get(key) ?? null
+  }
+
+  /**
+   * Set a string value with optional TTL and atomic-acquire semantics.
+   *
+   * Returns `"OK"` on success, `null` when `NX` was requested and the key
+   * already existed (Redis-standard). The previous `Promise<void>`
+   * signature could not represent the "not acquired" case, which made it
+   * impossible to build atomic locks on top of `client.set` —
+   * `acquireLock`, the cron sweep guard, and other check-then-act
+   * locations all silently raced because they had no way to learn
+   * whether they actually won the slot.
+   *
+   * Options:
+   *   - `EX`: TTL seconds (matches existing usage everywhere).
+   *   - `NX`: only set if the key does NOT already exist. Combined with
+   *     `EX` this is the canonical "atomic acquire-or-fail" primitive
+   *     (`SET key val NX EX ttl`). When the key is already present we
+   *     return `null` and DO NOT touch the value or refresh the TTL.
+   *   - `XX`: only set if the key DOES exist (mirror of NX, for
+   *     symmetry with the real Redis API surface).
+   */
+  async set(
+    key: string,
+    value: string,
+    options?: { EX?: number; NX?: boolean; XX?: boolean },
+  ): Promise<string | null> {
+    this.trackOperation()
+    if (options?.NX || options?.XX) {
+      // Honour TTL on the existence-check too — an expired key counts
+      // as "does not exist" for NX, and as "exists" for XX.
+      const exists = !this.isExpired(key) && this.data.strings.has(key)
+      if (options.NX && exists) return null
+      if (options.XX && !exists) return null
+    }
+    this.data.strings.set(key, value)
+    if (options?.EX) {
+      this.setKeyTTL(key, options.EX)
+    }
+    return "OK"
+  }
+
+  async setex(key: string, seconds: number, value: string): Promise<void> {
+    this.data.strings.set(key, value)
+    this.setKeyTTL(key, seconds)
+  }
+
+  async incr(key: string): Promise<number> {
+    return this.incrby(key, 1)
+  }
+
+  async incrby(key: string, increment: number): Promise<number> {
+    if (this.isExpired(key)) {
+      this.data.strings.set(key, String(increment))
+      return increment
+    }
+    const current = parseInt(this.data.strings.get(key) || "0", 10)
+    const newValue = current + increment
+    this.data.strings.set(key, String(newValue))
+    return newValue
+  }
+
+  async del(...keys: string[]): Promise<number> {
+    let count = 0
+    for (const key of keys) {
+      const exists = this.data.strings.has(key) ||
+        this.data.hashes.has(key) ||
+        this.data.sets.has(key) ||
+        this.data.lists.has(key) ||
+        this.data.sorted_sets.has(key)
+
+      if (exists) {
+        this.deleteKey(key)
+        count++
+      }
+    }
+    return count
+  }
+
+  async flushDb(): Promise<void> {
+    this.data.strings.clear()
+    this.data.hashes.clear()
+    this.data.sets.clear()
+    this.data.lists.clear()
+    this.data.sorted_sets.clear()
+    this.data.ttl?.clear()
+  }
+
+  /**
+   * Root-cause fix for "data still remaining after Reset DB".
+   *
+   * The previous clear-progressions route deleted keys from in-memory Maps
+   * via `client.del(...)` but never updated the snapshot file on disk.
+   * The next HTTP request triggers `loadFromDisk()` which restored all
+   * deleted keys from the stale snapshot, making the reset appear to have
+   * no effect. This method atomically deletes from memory AND overwrites
+   * the snapshot so both layers stay consistent after a reset.
+   *
+   * Deletes all keys whose prefix is NOT in `protectedPrefixes`.
+   * `forceClearPrefixes` overrides protection for runtime caches that
+   * share a protected namespace (e.g. `connection:test:*`).
+   */
+  async flushRuntimeKeys(
+    protectedPrefixes: readonly string[],
+    forceClearPrefixes: readonly string[] = [],
+  ): Promise<{ deleted: number; protected: number; buckets: Record<string, number> }> {
+    const checkProtected = (key: string): boolean => {
+      for (const fc of forceClearPrefixes) {
+        if (key.startsWith(fc)) return false
+      }
+      for (const p of protectedPrefixes) {
+        if (key.startsWith(p)) return true
+      }
+      return false
+    }
+    const bucketOf = (key: string): string => {
+      const idx = key.indexOf(":")
+      return idx > 0 ? key.slice(0, idx) + ":*" : key
+    }
+    const allKeys = new Set<string>([
+      ...this.data.strings.keys(),
+      ...this.data.hashes.keys(),
+      ...this.data.sets.keys(),
+      ...this.data.lists.keys(),
+      ...this.data.sorted_sets.keys(),
+    ])
+    let deleted = 0
+    let protectedCount = 0
+    // Build bucket summary BEFORE deletion so the response reflects what
+    // was actually removed — not what survived.
+    const buckets: Record<string, number> = {}
+    for (const key of allKeys) {
+      if (checkProtected(key)) {
+        protectedCount++
+      } else {
+        const b = bucketOf(key)
+        buckets[b] = (buckets[b] || 0) + 1
+        this.deleteKey(key)
+        deleted++
+      }
+    }
+    if (this.data.ttl) {
+      for (const key of this.data.ttl.keys()) {
+        if (!checkProtected(key)) this.data.ttl.delete(key)
+      }
+    }
+    // Immediately overwrite the snapshot so loadFromDisk() on the next
+    // cold-start or hot-reload only restores protected keys. Without this
+    // step, a hot-reload or cold-start resurrects the deleted runtime data.
+    await this.saveToDisk()
+    return { deleted, protected: protectedCount, buckets }
+  }
+
+  /**
+   * Flush the in-memory state to disk without any deletions.
+   * Call this after any batch of writes that MUST be durable before the
+   * next request (e.g. after connection-flag resets in clear-progressions).
+   */
+  async persistNow(): Promise<boolean> {
+    return this.saveToDisk()
+  }
+
+  async hset(key: string, dataOrField: Record<string, string> | string, value?: string): Promise<number> {
+    this.trackOperation()
+    const existing = this.data.hashes.get(key) || {}
+    // Support both hset(key, { field: value }) and hset(key, "field", "value")
+    if (typeof dataOrField === "string" && value !== undefined) {
+      this.data.hashes.set(key, { ...existing, [dataOrField]: value })
+      return 1
+    }
+    const data = dataOrField as Record<string, string>
+    const updates = Object.keys(data).length
+    this.data.hashes.set(key, { ...existing, ...data })
+    return updates
+  }
+
+  async hmset(...args: string[]): Promise<void> {
+    this.trackOperation()
+    if (args.length < 3) return
+    const key = args[0]
+    const obj: Record<string, string> = {}
+    for (let i = 1; i < args.length; i += 2) {
+      obj[args[i]] = args[i + 1]
+    }
+    this.data.hashes.set(key, { ...this.data.hashes.get(key), ...obj })
+  }
+
+  async hgetall(key: string): Promise<Record<string, string>> {
+    this.trackOperation()
+    // REAL REDIS SEMANTICS: node-redis hGetAll returns {} for missing keys,
+    // never null. The previous null return deviated from that and caused an
+    // entire class of "Cannot read properties of null" crashes in callers
+    // that (correctly, per redis docs) did not null-check.
+    // Also return a SHALLOW COPY — returning the live hash reference let
+    // callers that mutate the result silently corrupt the in-memory store.
+    if (this.isExpired(key)) return {}
+    const hash = this.data.hashes.get(key)
+    return hash ? { ...hash } : {}
+  }
+
+  async hlen(key: string): Promise<number> {
+    const hash = this.data.hashes.get(key)
+    return hash ? Object.keys(hash).length : 0
+  }
+
+  async hget(key: string, field: string): Promise<string | null> {
+    if (this.isExpired(key)) return null
+    const hash = this.data.hashes.get(key)
+    return hash?.[field] ?? null
+  }
+
+  async hdel(key: string, ...fields: string[]): Promise<number> {
+    const hash = this.data.hashes.get(key)
+    if (!hash) return 0
+    let deleted = 0
+    for (const field of fields) {
+      if (field in hash) {
+        delete hash[field]
+        deleted++
+      }
+    }
+    if (Object.keys(hash).length === 0) {
+      this.data.hashes.delete(key)
+    }
+    return deleted
+  }
+
+  async hincrby(key: string, field: string, increment: number): Promise<number> {
+    const hash = this.data.hashes.get(key) || {}
+    const currentValue = parseInt(hash[field] || "0", 10)
+    const newValue = currentValue + increment
+    hash[field] = String(newValue)
+    this.data.hashes.set(key, hash)
+    return newValue
+  }
+
+  async hincrbyfloat(key: string, field: string, increment: number): Promise<number> {
+    const hash = this.data.hashes.get(key) || {}
+    const currentValue = parseFloat(hash[field] || "0")
+    const newValue = currentValue + increment
+    hash[field] = String(newValue)
+    this.data.hashes.set(key, hash)
+    return newValue
+  }
+
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    this.trackOperation()
+    const set = this.data.sets.get(key) || new Set()
+    const sizeBefore = set.size
+    for (const member of members) {
+      if (member) set.add(member)
+    }
+    this.data.sets.set(key, set)
+    return set.size - sizeBefore
+  }
+
+  async scard(key: string): Promise<number> {
+    if (this.isExpired(key)) return 0
+    return this.data.sets.get(key)?.size ?? 0
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    this.trackOperation()
+    if (this.isExpired(key)) return []
+    return Array.from(this.data.sets.get(key) || new Set())
+  }
+
+  async sismember(key: string, member: string): Promise<number> {
+    if (this.isExpired(key)) return 0
+    const set = this.data.sets.get(key)
+    return set?.has(member) ? 1 : 0
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    const set = this.data.sets.get(key)
+    if (!set) return 0
+    let removed = 0
+    for (const member of members) {
+      if (set.delete(member)) removed++
+    }
+    if (set.size === 0) this.data.sets.delete(key)
+    else this.data.sets.set(key, set)
+    return removed
+  }
+
+  async expire(key: string, seconds: number): Promise<number> {
+    const exists = this.data.strings.has(key) ||
+                   this.data.hashes.has(key) ||
+                   this.data.sets.has(key) ||
+                   this.data.lists.has(key) ||
+                   this.data.sorted_sets.has(key)
+    if (exists) {
+      this.setKeyTTL(key, seconds)
+      return 1
+    }
+    return 0
+  }
+
+  async lpush(key: string, ...values: string[]): Promise<number> {
+    const list = this.data.lists.get(key) || []
+    for (let i = values.length - 1; i >= 0; i--) {
+      list.unshift(values[i])
+    }
+    this.data.lists.set(key, list)
+    return list.length
+  }
+
+  async rpush(key: string, ...values: string[]): Promise<number> {
+    const list = this.data.lists.get(key) || []
+    list.push(...values)
+    this.data.lists.set(key, list)
+    return list.length
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    if (this.isExpired(key)) return []
+    const list = this.data.lists.get(key) || []
+    const len = list.length
+    const normalizedStart = start < 0 ? Math.max(0, len + start) : start
+    const normalizedStop = stop < 0 ? len + stop : stop
+    return list.slice(normalizedStart, normalizedStop + 1)
+  }
+
+  async ltrim(key: string, start: number, stop: number): Promise<void> {
+    const list = this.data.lists.get(key)
+    if (!list) return
+    const len = list.length
+    const normalizedStart = start < 0 ? Math.max(0, len + start) : start
+    const normalizedStop = stop < 0 ? len + stop : stop
+    const trimmed = list.slice(normalizedStart, normalizedStop + 1)
+    this.data.lists.set(key, trimmed)
+  }
+
+  async llen(key: string): Promise<number> {
+    if (this.isExpired(key)) return 0
+    return this.data.lists.get(key)?.length ?? 0
+  }
+
+  /**
+   * Remove `count` occurrences of `value` from the list at `key`.
+   * Semantics match Redis `LREM`:
+   *   count > 0 — remove head→tail
+   *   count < 0 — remove tail→head
+   *   count = 0 — remove every occurrence
+   *
+   * Previously this method didn't exist on the in-memory adapter, which made
+   * `live-stage.savePosition()` throw `TypeError: client.lrem is not a function`
+   * on every position close and prevented the closed-index bookkeeping from
+   * running. That in turn made `getLivePositions` re-scan terminal rows
+   * forever and is visible in the server logs at live-stage.ts:156.
+   */
+  async lrem(key: string, count: number, value: string): Promise<number> {
+    if (this.isExpired(key)) return 0
+    const list = this.data.lists.get(key)
+    if (!list || list.length === 0) return 0
+    let removed = 0
+    const wantAll = count === 0
+    const target = Math.abs(count)
+    if (count >= 0) {
+      for (let i = 0; i < list.length; ) {
+        if (list[i] === value && (wantAll || removed < target)) {
+          list.splice(i, 1)
+          removed++
+        } else {
+          i++
+        }
+      }
+    } else {
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i] === value && (wantAll || removed < target)) {
+          list.splice(i, 1)
+          removed++
+        }
+      }
+    }
+    if (list.length === 0) {
+      this.data.lists.delete(key)
+    } else {
+      this.data.lists.set(key, list)
+    }
+    return removed
+  }
+
+  /**
+   * Return the zero-based index of the first matching list element, or null.
+   * Mirrors Redis LPOS for the subset of behavior used by live position
+   * archive deduplication.
+   */
+  async lpos(key: string, value: string): Promise<number | null> {
+    if (this.isExpired(key)) return null
+    const list = this.data.lists.get(key)
+    if (!list || list.length === 0) return null
+    const index = list.indexOf(value)
+    return index >= 0 ? index : null
+  }
+
+  /**
+   * Pop and return the first element of the list at `key`. Returns null when
+   * the list is empty or missing. Added for parity with `lpush`/`rpush` so
+   * upstream callers that move items between queues don't blow up.
+   */
+  async lpop(key: string): Promise<string | null> {
+    if (this.isExpired(key)) return null
+    const list = this.data.lists.get(key)
+    if (!list || list.length === 0) return null
+    const head = list.shift() ?? null
+    if (list.length === 0) this.data.lists.delete(key)
+    return head
+  }
+
+  async rpop(key: string): Promise<string | null> {
+    if (this.isExpired(key)) return null
+    const list = this.data.lists.get(key)
+    if (!list || list.length === 0) return null
+    const tail = list.pop() ?? null
+    if (list.length === 0) this.data.lists.delete(key)
+    return tail
+  }
+
+  async dbSize(): Promise<number> {
+    return this.data.strings.size + this.data.hashes.size + this.data.sets.size + this.data.lists.size + this.data.sorted_sets.size
+  }
+
+  async keys(pattern: string): Promise<string[]> {
+    const regexPattern = pattern
+      .replace(/\*/g, ".*")
+      .replace(/\?/g, ".")
+    const regex = new RegExp(`^${regexPattern}$`)
+
+    const uniqueKeys = new Set<string>()
+    const keyCollections = [
+      this.data.strings.keys(),
+      this.data.hashes.keys(),
+      this.data.sets.keys(),
+      this.data.lists.keys(),
+      this.data.sorted_sets.keys(),
+    ]
+
+    for (const collection of keyCollections) {
+      for (const key of collection) {
+        if (this.isExpired(key)) continue
+        if (regex.test(key)) uniqueKeys.add(key)
+      }
+    }
+
+    return Array.from(uniqueKeys)
+  }
+
+  async zadd(key: string, score: number, member: string): Promise<number> {
+    const set = this.data.sorted_sets.get(key) || []
+    const existingIndex = set.findIndex((entry) => entry.member === member)
+    if (existingIndex >= 0) {
+      set[existingIndex] = { score, member }
+      this.data.sorted_sets.set(key, set.sort((a, b) => a.score - b.score))
+      return 0
+    }
+    set.push({ score, member })
+    this.data.sorted_sets.set(key, set.sort((a, b) => a.score - b.score))
+    return 1
+  }
+
+  async zrangebyscore(key: string, min: number | string, max: number | string): Promise<string[]> {
+    if (this.isExpired(key)) return []
+    const set = this.data.sorted_sets.get(key) || []
+    const minValue = min === "-inf" ? Number.NEGATIVE_INFINITY : Number(min)
+    const maxValue = max === "+inf" ? Number.POSITIVE_INFINITY : Number(max)
+    return set.filter((entry) => entry.score >= minValue && entry.score <= maxValue).map((entry) => entry.member)
+  }
+
+  async zremrangebyscore(key: string, min: number | string, max: number | string): Promise<number> {
+    const set = this.data.sorted_sets.get(key) || []
+    const minValue = min === "-inf" ? Number.NEGATIVE_INFINITY : Number(min)
+    const maxValue = max === "+inf" ? Number.POSITIVE_INFINITY : Number(max)
+    const before = set.length
+    const remaining = set.filter((entry) => entry.score < minValue || entry.score > maxValue)
+    if (remaining.length === 0) this.data.sorted_sets.delete(key)
+    else this.data.sorted_sets.set(key, remaining)
+    return before - remaining.length
+  }
+
+  /** Return members in ascending score order between indices start and stop (inclusive). */
+  async zrange(key: string, start: number, stop: number): Promise<string[]> {
+    if (this.isExpired(key)) return []
+    const set = this.data.sorted_sets.get(key) || []
+    const sorted = [...set].sort((a, b) => a.score - b.score)
+    const end = stop < 0 ? sorted.length + stop + 1 : stop + 1
+    return sorted.slice(start < 0 ? Math.max(0, sorted.length + start) : start, end).map(e => e.member)
+  }
+
+  /** Return members in descending score order between indices start and stop (inclusive). */
+  async zrevrange(key: string, start: number, stop: number): Promise<string[]> {
+    if (this.isExpired(key)) return []
+    const set = this.data.sorted_sets.get(key) || []
+    const sorted = [...set].sort((a, b) => b.score - a.score)
+    const end = stop < 0 ? sorted.length + stop + 1 : stop + 1
+    return sorted.slice(start < 0 ? Math.max(0, sorted.length + start) : start, end).map(e => e.member)
+  }
+
+  /** Return the score of a member in a sorted set. */
+  async zscore(key: string, member: string): Promise<string | null> {
+    if (this.isExpired(key)) return null
+    const set = this.data.sorted_sets.get(key)
+    if (!set) return null
+    const entry = set.find(e => e.member === member)
+    return entry !== undefined ? String(entry.score) : null
+  }
+
+  /** Return the cardinality (number of members) of a sorted set. */
+  async zcard(key: string): Promise<number> {
+    if (this.isExpired(key)) return 0
+    return (this.data.sorted_sets.get(key) || []).length
+  }
+
+  async trackDatabaseOperation(limit: number): Promise<{ current: number; limit: number; exceeded: boolean }> {
+    const globalTracker = globalThis as unknown as { __db_ops_tracker?: { timestamp: number; count: number } }
+    const now = Date.now()
+
+    if (!globalTracker.__db_ops_tracker) {
+      globalTracker.__db_ops_tracker = { timestamp: now, count: 0 }
+    }
+
+    const tracker = globalTracker.__db_ops_tracker
+    const windowStart = now - 60000
+
+    if (tracker.timestamp < windowStart) {
+      tracker.timestamp = now
+      tracker.count = 0
+    }
+
+    tracker.count++
+    tracker.timestamp = now
+
+    return {
+      current: tracker.count,
+      limit: limit,
+      exceeded: limit > 0 && tracker.count > limit,
+    }
+  }
+
+  async getDatabaseOperationCount(): Promise<number> {
+    const globalTracker = globalThis as unknown as { __db_ops_tracker?: { timestamp: number; count: number } }
+    if (!globalTracker.__db_ops_tracker) return 0
+
+    const now = Date.now()
+    const windowStart = now - 60000
+
+    if (globalTracker.__db_ops_tracker.timestamp < windowStart) {
+      return 0
+    }
+
+    return globalTracker.__db_ops_tracker.count
+  }
+
+  async load(): Promise<void> {
+    // No-op: data is already in global memory
+  }
+
+  async cleanupExpiredKeysPublic(): Promise<number> {
+    return this.cleanupExpiredKeys()
+  }
+
+  async exists(key: string): Promise<number> {
+    const exists = this.data.strings.has(key) ||
+                   this.data.hashes.has(key) ||
+                   this.data.sets.has(key) ||
+                   this.data.lists.has(key) ||
+                   this.data.sorted_sets.has(key)
+    return exists ? 1 : 0
+  }
+
+  async ttl(key: string): Promise<number> {
+    const ttlMap = this.data.ttl
+    if (!ttlMap || !ttlMap.has(key)) {
+      const existsResult = await this.exists(key)
+      if (existsResult === 0) return -2
+      return -1
+    }
+
+    const expireAt = ttlMap.get(key)!
+    const now = Date.now()
+    if (now >= expireAt) {
+      return -2
+    }
+
+    return Math.floor((expireAt - now) / 1000)
+  }
+
+  /**
+   * Pipeline / MULTI compatibility shim.
+   *
+   * The in-memory `InlineLocalRedis` has zero network round-trips — every
+   * op resolves in microseconds against a `Map`. Real pipelining (batching
+   * commands into one RTT) is therefore meaningless for this backend.
+   * BUT several call sites (and every real Upstash/ioredis client in the
+   * wild) expect a chainable `client.multi()` that queues commands and
+   * executes them on `.exec()`. Without a compatible shim here, callers
+   * crash with "client.multi is not a function" and — because most of
+   * those call sites wrap in try/catch that swallow errors — the failures
+   * go undetected (e.g. prefetchMarketDataBatch, close-path pipelines).
+   *
+   * This shim records `(method, args)` pairs and dispatches them
+   * sequentially on `.exec()` via the real method on the same instance,
+   * returning an array of results in order — same contract as upstash's
+   * and ioredis's pipeline APIs. Sequential execution is correct (Map
+   * ops are synchronous) and still zero-RTT. If this project ever swaps
+   * in a network Redis client, the caller code is already shaped for a
+   * real pipeline.
+   */
+  multi(): {
+    [k: string]: any
+    exec: () => Promise<any[]>
+  } {
+    const ops: Array<{ method: string; args: any[] }> = []
+    const self = this as unknown as Record<string, any>
+    const queue = new Proxy(
+      {},
+      {
+        get: (_target, prop: string) => {
+          if (prop === "exec") {
+            return async (): Promise<any[]> => {
+              const results: any[] = []
+              for (const { method, args } of ops) {
+                const fn = self[method]
+                if (typeof fn !== "function") {
+                  // Unknown command: push a null result so caller index
+                  // alignment isn't broken.
+                  results.push(null)
+                  continue
+                }
+                try {
+                  results.push(await fn.apply(self, args))
+                } catch (err) {
+                  // Match upstash/ioredis: include the error per-slot.
+                  results.push(err)
+                }
+              }
+              return results
+            }
+          }
+          // Chainable command recorder.
+          return (...args: any[]) => {
+            ops.push({ method: prop, args })
+            return queue
+          }
+        },
+      },
+    ) as { [k: string]: any; exec: () => Promise<any[]> }
+    return queue
+  }
+
+  /**
+   * Alias for `multi()` — upstash-redis's client exposes both names. Keeps
+   * any caller that happened to standardize on `pipeline()` working.
+   */
+  pipeline(): ReturnType<InlineLocalRedis["multi"]> {
+    return this.multi()
+  }
+}
+
+let redisInstance: InlineLocalRedis | null = null
+let isConnected = false          // FULLY ready: core + migrations complete
+let coreInitialized = false      // core ready: client constructed + snapshot loaded + ping ok
+let connectionsInitialized = false
+let migrationsRan = false
+
+function isNextBuildPhase(): boolean {
+  const lifecycle = process.env.npm_lifecycle_event || ""
+  const argv = process.argv.join(" ")
+  return (
+    process.env.NEXT_PHASE === "phase-production-build" ||
+    lifecycle === "build" ||
+    lifecycle === "vercel-build" ||
+    /\bnext(\.js)?\s+build\b/.test(argv)
+  )
+}
+
+/**
+ * Ensure the CORE Redis client is ready: instance constructed, on-disk
+ * snapshot loaded, and ping verified. This deliberately does NOT run
+ * migrations.
+ *
+ * `runMigrations()` (in redis-migrations.ts) calls THIS — never initRedis() —
+ * to bring the store up. That breaks what would otherwise be a deadlock:
+ * initRedis() awaits a shared promise whose body awaits runMigrations(); if
+ * runMigrations() awaited initRedis() it would await the very promise it is
+ * running inside. Splitting core init out removes the cycle entirely.
+ *
+ * Idempotent and concurrency-safe: a single core-init promise is shared
+ * across all callers/module scopes via globalForRedis.
+ */
+export async function ensureCoreRedis(): Promise<void> {
+  if (coreInitialized && redisInstance) return
+  if (globalForRedis.__redis_core_promise) return globalForRedis.__redis_core_promise
+
+  globalForRedis.__redis_core_promise = (async () => {
+    // Ensure the instance exists. A sync getter (getRedisClient/getClient) may
+    // have constructed it already; the constructor only initialises empty Maps
+    // and never loads the snapshot — that is done explicitly below.
+    if (!redisInstance) {
+      redisInstance = new InlineLocalRedis()
+    }
+
+    // Load the on-disk snapshot EXACTLY ONCE per process, gated on the global
+    // snapshot flag (not on data-map presence). This runs even when a sync
+    // getter built the empty instance first, and is skipped on hot-reload (the
+    // flag persists on globalThis), so we never overwrite live post-migration
+    // state. Concurrent callers across module scopes share one load promise.
+    if (!globalForRedis.__redis_snapshot_loaded) {
+      if (!globalForRedis.__redis_load_promise) {
+        globalForRedis.__redis_load_promise = redisInstance
+          .loadFromDisk()
+          .then((ok) => { globalForRedis.__redis_snapshot_loaded = true; return ok })
+          .catch(() => { globalForRedis.__redis_snapshot_loaded = true; return false })
+        globalForRedis.__redis_load_promise.finally(() => {
+          globalForRedis.__redis_load_promise = undefined
+        })
+      }
+      await globalForRedis.__redis_load_promise
+    }
+
+    const pong = await redisInstance.ping()
+    if (pong !== "PONG") {
+      console.error("[v0] [Redis] Connection test failed")
+    }
+    coreInitialized = true
+  })()
+
+  try {
+    await globalForRedis.__redis_core_promise
+  } finally {
+    // Always clear: on success coreInitialized guards the fast path; on failure
+    // the next caller must be able to retry from scratch.
+    globalForRedis.__redis_core_promise = undefined
+  }
+}
+
+/**
+ * Full initialisation: core Redis + schema migrations. `isConnected` only
+ * becomes true AFTER migrations have completed, and every caller awaits the
+ * SAME shared promise. This closes the cold-start race where isConnected
+ * flipped true before migrations ran, letting concurrent route handlers read
+ * un-migrated data. Identical behaviour in dev (`next dev`) and production
+ * (`next start` / Vercel) — both invoke instrumentation.register() which calls
+ * this, and every server action / route guards on it via ensureRedisInitialized.
+ */
+export async function initRedis(): Promise<void> {
+  // Build/deploy builders import route modules while collecting page data.
+  // Runtime Redis hydration/migrations are not needed for static analysis and
+  // can exceed hosted builder deadlines (kilo.ai). Provide an empty, connected
+  // in-memory client for build-time reads and defer real migrations to runtime.
+  if (isNextBuildPhase()) {
+    if (!redisInstance) redisInstance = new InlineLocalRedis()
+    isConnected = true
+    coreInitialized = true
+    connectionsInitialized = true
+    migrationsRan = true
+    globalForRedis.__redis_snapshot_loaded = true
+    globalForRedis.__redis_fully_connected = true
+    return
+  }
+
+  // Next.js dev can re-evaluate this module for a newly compiled route while
+  // keeping the InlineLocalRedis data on globalThis. In that case the
+  // module-scoped `isConnected` / `migrationsRan` flags reset to false even
+  // though another module instance has already completed core init +
+  // migrations. Honour the global ready marker so route compilation does not
+  // re-run all migrations and overwrite operator-saved state (symbols,
+  // connection mode, progression snapshots) back to migration defaults.
+  if (globalForRedis.__redis_fully_connected) {
+    isConnected = true
+    coreInitialized = true
+    connectionsInitialized = true
+    migrationsRan = true
+    return
+  }
+  if (isConnected) return
+
+  // DEV ONLY — flush stale live positions on every initRedis() call.
+  //
+  // The InlineLocalRedis instance lives on globalThis.__redis_data and is
+  // reused across Next.js hot-reloads (the constructor only fires once per
+  // process). Each hot-reload resets module-level `isConnected` to false and
+  // calls initRedis() again — but __redis_init_promise is still set, so the
+  // async IIFE below is skipped.  We must flush HERE, before the promise guard,
+  // so stale live:position:* keys (44 from the previous session) and dedup
+  // locks don't carry over and silently block all new live order placement.
+  //
+  // A __redis_live_flush_token prevents double-clearing within a single module
+  // evaluation cycle (e.g. if two routes call initRedis() concurrently).
+  if (process.env.NODE_ENV === "development") {
+    const token = Date.now()
+    const g = globalForRedis as any
+    if (!g.__redis_live_flush_token || g.__redis_live_flush_token !== g.__redis_live_flush_applied) {
+      g.__redis_live_flush_applied = token
+      g.__redis_live_flush_token  = token
+      try {
+        const data = g.__redis_data as typeof globalForRedis.__redis_data | undefined
+        if (data) {
+          let cleared = 0
+          const isLiveKey = (k: string) =>
+            k.startsWith("live:position:") ||
+            k.startsWith("live:positions:") ||
+            k.startsWith("settings:live:position:") ||
+            k.startsWith("settings:live:positions:") ||
+            k.startsWith("live:lock:")
+          for (const key of data.strings.keys()) {
+            if (isLiveKey(key)) { data.strings.delete(key); cleared++ }
+          }
+          for (const key of data.lists.keys()) {
+            if (isLiveKey(key)) { data.lists.delete(key); cleared++ }
+          }
+          for (const key of data.hashes.keys()) {
+            if (isLiveKey(key)) { data.hashes.delete(key); cleared++ }
+          }
+          if (cleared > 0) {
+            console.log(`[v0] [Redis] Dev initRedis flush: cleared ${cleared} stale live position/lock keys`)
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  if (globalForRedis.__redis_init_promise) return globalForRedis.__redis_init_promise
+
+  globalForRedis.__redis_init_promise = (async () => {
+    await ensureCoreRedis()
+
+    if (!migrationsRan) {
+      // runMigrations() calls ensureCoreRedis() internally (NOT initRedis), so
+      // there is no re-entrancy with the promise we are currently inside.
+      //
+      // SAFETY: Wrap migrations with a runtime deadline, but never mark Redis
+      // connected if the deadline/error fires. The old path swallowed the error
+      // and continued with a partially migrated schema, which is exactly how
+      // production ended up with missing progress containers, stalled counts,
+      // and zombie running flags after deploy/restart. Build-time imports are
+      // already short-circuited above, so runtime must prefer correctness and
+      // retryability over serving on an incomplete schema.
+      const { runMigrations, resetMigrationRunState } = await import("@/lib/redis-migrations")
+      const MIGRATIONS_DEADLINE_MS = isProductionEnvironment() ? 180_000 : 60_000
+      let migrationTimer: ReturnType<typeof setTimeout> | undefined
+      // SAFETY: Wrap with a 90-second deadline. Production coverage repair can
+      // legitimately scan/seed every connection on cold start; 35s caused false
+      // deadline errors even when routes recovered. Keep a deadline for real
+      // deadlocks, but allow complete establishment to finish cleanly.
+      // (e.g. by calling initRedis() internally, which awaits THIS very
+      // promise), the race rejects after 90 s so the server becomes
+      // responsive. The underlying migration may still resolve later, but
+      // the server is unblocked. The migration runner also has its own
+      // per-migration 30-second deadline for individual migrations.
+      try {
+        await Promise.race([
+          runMigrations(),
+          new Promise<never>((_, reject) => {
+            migrationTimer = setTimeout(
+              () => reject(new Error(`runMigrations() exceeded ${MIGRATIONS_DEADLINE_MS}ms global deadline — retrying on next request`)),
+              MIGRATIONS_DEADLINE_MS,
+            )
+          }),
+        ])
+        migrationsRan = true
+      } catch (migErr) {
+        console.error("[v0] [Redis] runMigrations deadline/error:", migErr instanceof Error ? migErr.message : migErr)
+        resetMigrationRunState()
+        migrationsRan = false
+        throw migErr
+      } finally {
+        if (migrationTimer) clearTimeout(migrationTimer)
+      }
+    }
+
+    connectionsInitialized = true
+    isConnected = true
+    globalForRedis.__redis_fully_connected = true
+  })()
+
+  try {
+    await globalForRedis.__redis_init_promise
+  } catch (error) {
+    // Boot must never crash the runtime. Log, reset retry state, and let the
+    // next caller re-attempt the full sequence (a transient migration failure
+    // should not permanently disable migrations for the whole process, which
+    // is exactly what the previous `migrationsRan = true`-on-failure did).
+    console.error("[v0] [Redis] initialization error (will retry on next call):", error)
+    migrationsRan = false
+  } finally {
+    // Clear the shared promise unless we fully succeeded, so retries get a
+    // fresh run. Once isConnected is true the top-of-function guard short-
+    // circuits and the promise is never consulted again.
+    if (!isConnected) {
+      globalForRedis.__redis_init_promise = undefined
+    }
+  }
+}
+
+// NOTE: these sync getters intentionally do NOT set isConnected/coreInitialized.
+// Flipping isConnected here was a latent hazard: if a getter ran before
+// initRedis() (e.g. import-time code), initRedis() would early-return and SKIP
+// MIGRATIONS and the snapshot load entirely. They now only guarantee a non-null
+// client; ensureCoreRedis()/initRedis() own readiness state and snapshot load.
+export function getClient(): InlineLocalRedis {
+  if (!redisInstance) {
+    redisInstance = new InlineLocalRedis()
+  }
+  return redisInstance
+}
+
+export function getRedisClient(): InlineLocalRedis {
+  if (!redisInstance) {
+    redisInstance = new InlineLocalRedis()
+  }
+  return redisInstance
+}
+
+export async function ensureRedisInitialized(): Promise<void> {
+  if (!isConnected || !redisInstance) {
+    await initRedis()
+  }
+}
+
+export function isRedisConnected(): boolean {
+  // The module-scoped `isConnected` is false in freshly-evaluated Next.js dev
+  // route modules that never called initRedis() in their own scope. Fall back
+  // to the globalThis flag which is set by the engine's full init path and
+  // survives across module re-evaluations.
+  return isConnected || !!globalForRedis.__redis_fully_connected
+}
+
+// ========== Helpers ==========
+
+function convertToString(value: any): string {
+  if (value === true) return "1"
+  if (value === false) return "0"
+  if (value === null || value === undefined) return ""
+  return String(value)
+}
+
+function isEnabledFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === "1" || value === "true"
+}
+
+function flattenForHmset(obj: Record<string, any>): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined && value !== null) {
+      if (typeof value === "object" && !Array.isArray(value)) {
+        result[key] = JSON.stringify(value)
+      } else if (Array.isArray(value)) {
+        result[key] = JSON.stringify(value)
+      } else {
+        result[key] = convertToString(value)
+      }
+    }
+  }
+  return result
+}
+
+function parseHashValue(value: unknown): unknown {
+  // Guard against undefined/null
+  if (value === undefined || value === null) return null
+
+  // CRITICAL: Must be string to use string methods - fixes "value.startsWith is not a function"
+  if (typeof value !== "string") {
+    // Return non-string values as-is (numbers, booleans, objects already parsed)
+    return value
+  }
+
+  // Now value is guaranteed to be a string
+  const strValue: string = value
+
+  if (strValue === "") return ""
+
+  // Try to parse as JSON first (only for strings that look like JSON)
+  if ((strValue.startsWith("{") && strValue.endsWith("}")) ||
+      (strValue.startsWith("[") && strValue.endsWith("]"))) {
+    try {
+      return JSON.parse(strValue)
+    } catch {
+      return strValue
+    }
+  }
+
+  // Check for boolean-like values
+  if (strValue === "1" || strValue === "true") return true
+  if (strValue === "0" || strValue === "false") return false
+
+  // Check for numeric values
+  if (/^-?\d+$/.test(strValue)) return parseInt(strValue, 10)
+  if (/^-?\d+\.\d+$/.test(strValue)) return parseFloat(strValue)
+
+  return strValue
+}
+
+function parseHash(hash: Record<string, string> | null): Record<string, any> | null {
+  // Empty hash → null. Real Redis hGetAll returns {} for missing keys (the
+  // emulator now matches that), but getSettings' contract is `any | null`
+  // and every caller relies on `getSettings(...) || fallback` to detect
+  // "no value". A truthy {} here broke those fallbacks (e.g. /api/orders
+  // crashed calling .slice on {} instead of the [] default).
+  if (!hash || Object.keys(hash).length === 0) return null
+  const result: Record<string, any> = {}
+  for (const [key, value] of Object.entries(hash)) {
+    result[key] = parseHashValue(value)
+  }
+  return result
+}
+
+// ========== Connection Operations ==========
+
+export async function getConnection(id: string): Promise<any | null> {
+  await initRedis()
+  const client = getClient()
+  const hash = await client.hgetall(`connection:${id}`)
+  return parseHash(hash)
+}
+
+// ──────────�������─────────────────────────────────────────────��───────────────────
+// PERF: in-memory TTL cache for `getAllConnections`.
+// The dashboard polls every ~8s and each active card fans out multiple
+// per-connection requests. Without this cache we issue N KEYS + N HGETALL
+// ops per poll per component. A short TTL (1.5s) dedupes bursts without
+// introducing user-visible staleness (all writes invalidate the cache
+// immediately via `invalidateConnectionsCache()`).
+// ──────────────────────���─────────────�������──────────────────��───────────────────
+const __CONN_CACHE_TTL_MS = 1500
+let __connCache: { at: number; value: any[] } | null = null
+let __connInflight: Promise<any[]> | null = null
+
+export function invalidateConnectionsCache(): void {
+  __connCache = null
+  __connInflight = null
+}
+
+export async function getAllConnections(): Promise<any[]> {
+  const now = Date.now()
+  if (__connCache && now - __connCache.at < __CONN_CACHE_TTL_MS) {
+    return __connCache.value
+  }
+  if (__connInflight) return __connInflight
+
+  __connInflight = (async () => {
+    try {
+      await initRedis()
+      const client = getClient()
+      const keys = await client.keys("connection:*")
+
+      // Filter out special sibling keys up-front so we don't fan out HGETALLs
+      // for them (reduces Redis roundtrips in large deployments).
+      const realKeys = keys.filter(
+        (k) =>
+          !k.includes(":settings:") &&
+          !k.includes(":stats:") &&
+          !k.includes(":logs:")
+      )
+
+      // Parallelize HGETALL across all connection keys. Previously ran
+      // sequentially in a for-loop, which scaled linearly with connection count.
+      const hashes = await Promise.all(
+        realKeys.map(async (key) => {
+          try {
+            return await client.hgetall(key)
+          } catch (err) {
+            console.warn(
+              `[v0] [redis-db] getAllConnections: hgetall failed for ${key}`,
+              err instanceof Error ? err.message : err
+            )
+            return null
+          }
+        })
+      )
+
+      const connections = hashes
+        .filter((h): h is Record<string, any> => !!h && Object.keys(h).length > 0)
+        .map(parseHash)
+
+      __connCache = { at: Date.now(), value: connections }
+      return connections
+    } finally {
+      __connInflight = null
+    }
+  })()
+
+  return __connInflight
+}
+
+export async function saveConnection(connection: any): Promise<void> {
+  await initRedis()
+  const client = getClient()
+  const id = connection.id || connection.name
+  if (!id) {
+    throw new Error("Connection must have an id or name")
+  }
+
+  const data = flattenForHmset({
+    ...connection,
+    id,
+    updated_at: new Date().toISOString(),
+  })
+
+  await client.hset(`connection:${id}`, data)
+  invalidateConnectionsCache()
+}
+
+export async function deleteConnection(id: string): Promise<void> {
+  await initRedis()
+  const client = getClient()
+  await client.del(`connection:${id}`)
+  invalidateConnectionsCache()
+}
+
+// ========== Settings Operations ==========
+
+export async function getSettings(key: string): Promise<any | null> {
+  await initRedis()
+  const client = getClient()
+  const hash = await client.hgetall(`settings:${key}`)
+  const parsed = parseHash(hash)
+  // ARRAY ROUND-TRIP: setSettings(key, someArray) flattens the array into
+  // index-keyed hash fields ("0","1","2",...). Without this reconstruction
+  // the caller gets back an OBJECT {0:..,1:..} where it stored an array —
+  // every `getSettings("orders") || []` site then crashed on .filter/.slice.
+  // Detect the all-numeric-keys shape and rebuild the original array.
+  if (parsed && typeof parsed === "object") {
+    const keys = Object.keys(parsed)
+    if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
+      return keys
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((i) => (parsed as Record<string, any>)[String(i)])
+    }
+  }
+  return parsed
+}
+
+export async function setSettings(key: string, value: any): Promise<void> {
+  await initRedis()
+  const client = getClient()
+  const data = flattenForHmset(value)
+  await client.hset(`settings:${key}`, data)
+}
+
+export async function persistNow(): Promise<boolean> {
+  const client = getClient()
+  if (typeof (client as any).persistNow === "function") {
+    return (client as any).persistNow()
+  }
+  if (typeof (client as any).saveToDisk === "function") {
+    return (client as any).saveToDisk()
+  }
+  return false
+}
+
+export async function getAllSettings(): Promise<Record<string, any>> {
+  await initRedis()
+  const client = getClient()
+  const keys = await client.keys("settings:*")
+  if (keys.length === 0) return {}
+
+  // Fan out every hgetall in parallel — sequential awaits compounded
+  // latency linearly with the number of settings hashes, which showed
+  // up in export and admin-dashboard endpoints.
+  const hashes = await Promise.all(
+    keys.map((k) => client.hgetall(k).catch(() => null)),
+  )
+  const settings: Record<string, any> = {}
+  for (let i = 0; i < keys.length; i++) {
+    const hash = hashes[i]
+    if (!hash) continue
+    settings[keys[i].replace("settings:", "")] = parseHash(hash)
+  }
+  return settings
+}
+
+// ───────────────────────────────────────��─────────────────────────────
+// Canonical app-settings helpers
+//
+// The project historically drifted between two Redis hashes:
+//   - "app_settings" — written by /api/settings (GET/POST/PUT) from the UI
+//   - "all_settings" — read by several trade-engine modules
+// These helpers unify the view so any consumer gets the operator's saved
+// settings regardless of which key happens to hold them. The paired
+// `setAppSettings` writer mirrors to BOTH keys so legacy readers that
+// haven't been migrated yet (and any forks that expect one or the other)
+// continue to work.
+//
+// `getAppSettings()` returns a merged record with `app_settings` winning
+// on conflict (it's the canonical UI-facing key). Missing keys silently
+// fall back to an empty object so callers can use `?? default` patterns.
+// ─��───────────────────────────────────────────────────────────────────
+
+const APP_SETTINGS_KEY_CANONICAL = "app_settings" as const
+const APP_SETTINGS_KEY_LEGACY    = "all_settings" as const
+
+let appSettingsCache: { value: Record<string, any>; ts: number; version: number } | null = null
+// Hard-refresh deadline — picks up silent Redis writes that happened
+// without going through our mirror writer (e.g. an out-of-band SET from
+// a migration script or another Vercel region). The version-counter
+// check below handles the common case in single-digit milliseconds.
+const APP_SETTINGS_HARD_REFRESH_MS = 30_000
+
+export async function getAppSettings(
+  options: { bypassCache?: boolean } = {},
+): Promise<Record<string, any>> {
+  const now = Date.now()
+  const liveVersion = getSettingsVersionCachedSync()
+  if (
+    !options.bypassCache &&
+    appSettingsCache &&
+    appSettingsCache.version === liveVersion &&
+    now - appSettingsCache.ts < APP_SETTINGS_HARD_REFRESH_MS
+  ) {
+    return appSettingsCache.value
+  }
+  try {
+    const [canonical, legacy] = await Promise.all([
+      getSettings(APP_SETTINGS_KEY_CANONICAL),
+      getSettings(APP_SETTINGS_KEY_LEGACY),
+    ])
+    // Legacy provides fallback values — canonical overrides on conflict.
+    const merged = { ...(legacy || {}), ...(canonical || {}) }
+    appSettingsCache = { value: merged, ts: now, version: liveVersion }
+    return merged
+  } catch {
+    return appSettingsCache?.value ?? {}
+  }
+}
+
+/**
+ * Convenience scalar reader — falls back through:
+ *   1. Individual `settings:{field}` hash (legacy orphan-key path)
+ *   2. Canonical `app_settings.{field}`
+ *   3. Legacy `all_settings.{field}`
+ *   4. Caller-supplied default
+ */
+export async function getAppSetting<T = unknown>(
+  field: string,
+  fallback: T,
+): Promise<T> {
+  try {
+    // 1. Individual key (some historical code writes these as scalar hashes)
+    const individual = await getSettings(field)
+    if (individual !== null && individual !== undefined) {
+      const maybeScalar =
+        typeof individual === "object" && individual && "value" in individual
+          ? (individual as any).value
+          : individual
+      if (maybeScalar !== null && maybeScalar !== undefined) {
+        return maybeScalar as T
+      }
+    }
+  } catch {
+    /* non-critical */
+  }
+  const merged = await getAppSettings()
+  const value = merged[field]
+  if (value === undefined || value === null) return fallback
+  return value as T
+}
+
+/**
+ * Writer that keeps the canonical + legacy hashes in sync. Call this
+ * from the settings UI/API instead of `setSettings("app_settings", ...)`
+ * so trade-engine consumers that read `all_settings` also pick up the
+ * operator's latest values on the next cycle. Also bumps the global
+ * `settings_version` counter so long-running processors detect the
+ * change without waiting for their local TTL to expire.
+ */
+export async function setAppSettings(value: Record<string, any>): Promise<void> {
+  await Promise.all([
+    setSettings(APP_SETTINGS_KEY_CANONICAL, value),
+    setSettings(APP_SETTINGS_KEY_LEGACY,    value),
+  ])
+  // Bump first so the new version number is known before we stamp the
+  // cache; otherwise the same-process cache would look "stale" to the
+  // next reader and cause an unnecessary Redis re-read.
+  const newVersion = await bumpSettingsVersion()
+  appSettingsCache = { value, ts: Date.now(), version: newVersion }
+}
+
+/** Invalidates the in-process app-settings cache. Callable from any write path. */
+export function invalidateAppSettingsCache(): void {
+  appSettingsCache = null
+}
+
+// ──────────���────────────────────────���──────────────���─���────────────────
+// Live-settings version counter
+//
+// When an operator hits Save in the Settings UI, the server updates the
+// canonical + legacy Redis hashes. But the trade engine is a long-running
+// process on its own timers (possibly on another serverless instance),
+// so it needs a CHEAP signal that "something changed, bust your cache".
+//
+// Pattern: a monotonic integer counter at key `settings_version`.
+//   - Writers call `bumpSettingsVersion()` (INCR) after every save.
+//   - Consumers call `getSettingsVersion()` once per cycle (O(1) GET)
+//     and compare against their last-seen value. On mismatch they
+//     invalidate their cache of parsed settings fields.
+//
+// The counter read is itself cached in-process for 250 ms so a tight
+// inner loop doing many reads doesn't hammer Redis on every call.
+// ─────────────────────────────────────────────────────────────────────
+
+const SETTINGS_VERSION_KEY = "settings_version" as const
+let _settingsVersionCached: number = 0
+let _settingsVersionFetchedAt = 0
+let _settingsVersionRefreshing = false
+const SETTINGS_VERSION_READ_TTL_MS = 250
+
+/**
+ * Synchronous snapshot of the latest settings version. Used by hot-path
+ * cycle loops that can't await. Never hits Redis — returns the value
+ * maintained by the most recent call to `getSettingsVersion()` (or the
+ * background poll). Callers that see a stale value will simply get a
+ * belated refresh on the next cycle, which is acceptable because the
+ * soft-refresh deadline kicks in anyway.
+ */
+export function getSettingsVersionCachedSync(): number {
+  // Opportunistically fire a background refresh if the snapshot is
+  // older than the read TTL so cycle loops that never call the async
+  // variant still see updates within ~250 ms + one cycle.
+  const now = Date.now()
+  if (
+    !_settingsVersionRefreshing &&
+    now - _settingsVersionFetchedAt > SETTINGS_VERSION_READ_TTL_MS
+  ) {
+    _settingsVersionRefreshing = true
+    ;(async () => {
+      try {
+        await initRedis()
+        const client = getClient()
+        const raw = await client.get(SETTINGS_VERSION_KEY)
+        const parsed = Number(raw)
+        _settingsVersionCached = Number.isFinite(parsed) ? parsed : _settingsVersionCached
+        _settingsVersionFetchedAt = Date.now()
+      } catch {
+        _settingsVersionFetchedAt = Date.now()
+      } finally {
+        _settingsVersionRefreshing = false
+      }
+    })()
+  }
+  return _settingsVersionCached
+}
+
+/**
+ * Returns the latest settings version. Cheap — cached for 250 ms. Safe
+ * to call on every engine cycle. A strictly monotonic-increasing
+ * integer; any change means "something changed, refresh your cache".
+ */
+export async function getSettingsVersion(): Promise<number> {
+  const now = Date.now()
+  if (now - _settingsVersionFetchedAt < SETTINGS_VERSION_READ_TTL_MS) {
+    return _settingsVersionCached
+  }
+  if (_settingsVersionRefreshing) {
+    // Another in-flight refresh is already going to land shortly; skip
+    // the duplicate Redis call and return whatever we had.
+    return _settingsVersionCached
+  }
+  _settingsVersionRefreshing = true
+  try {
+    await initRedis()
+    const client = getClient()
+    const raw = await client.get(SETTINGS_VERSION_KEY)
+    const parsed = Number(raw)
+    _settingsVersionCached = Number.isFinite(parsed) ? parsed : 0
+    _settingsVersionFetchedAt = now
+  } catch {
+    // Keep the last-known value on a transient Redis error.
+    _settingsVersionFetchedAt = now
+  } finally {
+    _settingsVersionRefreshing = false
+  }
+  return _settingsVersionCached
+}
+
+/**
+ * Bumps the settings version counter. Call this from every write path
+ * that mutates settings (including system settings, per-connection
+ * settings, etc.) so cache holders know to refresh. Also invalidates
+ * the in-process `appSettingsCache` so the next read in this process
+ * is guaranteed fresh without waiting for the 2 s TTL.
+ */
+export async function bumpSettingsVersion(): Promise<number> {
+  try {
+    await initRedis()
+    const client = getClient()
+    const next = await client.incr(SETTINGS_VERSION_KEY)
+    const parsed = Number(next)
+    _settingsVersionCached = Number.isFinite(parsed) ? parsed : _settingsVersionCached + 1
+    _settingsVersionFetchedAt = Date.now()
+    // Flush the in-process caches immediately so the same process that
+    // wrote the value doesn't hand out stale merged data to readers
+    // that call `getAppSettings()` within the 2 s TTL window.
+    invalidateAppSettingsCache()
+    return _settingsVersionCached
+  } catch {
+    // If Redis is briefly unavailable, at least invalidate the local
+    // cache so the same process re-fetches on next read.
+    invalidateAppSettingsCache()
+    return _settingsVersionCached
+  }
+}
+
+// ========== Market Data Operations ==========
+
+export async function getMarketData(symbol: string, interval: string): Promise<any | null> {
+  // ── Spec §7 migration: 1s is the canonical timeframe ─────────────
+  //
+  // The market-data loader was migrated to write only the `:1s`
+  // envelope, but dozens of legacy callsites still pass `"1m"`
+  // (default in older code paths). Rather than churn every caller
+  // we transparently fall back to `:1s` whenever the requested
+  // interval is absent. The envelope shape is identical so consumers
+  // can't tell the difference; only the `timeframe` field reports
+  // "1s" instead of "1m", which all known readers ignore.
+  await initRedis()
+  const client = getClient()
+  const primary = await client.get(`market_data:${symbol}:${interval}`)
+  let data = primary
+  if (!data && interval !== "1s") {
+    data = await client.get(`market_data:${symbol}:1s`)
+  }
+  if (!data) return null
+  try {
+    return JSON.parse(data)
+  } catch {
+    return null
+  }
+}
+
+export async function setMarketData(symbol: string, interval: string, data: any, ttlSeconds: number = 300): Promise<void> {
+  await initRedis()
+  const client = getClient()
+  await client.set(`market_data:${symbol}:${interval}`, JSON.stringify(data), { EX: ttlSeconds })
+}
+
+// ========== Position Operations ==========
+
+export async function getPosition(id: string): Promise<any | null> {
+  await initRedis()
+  const client = getClient()
+  const hash = await client.hgetall(`position:${id}`)
+  return parseHash(hash)
+}
+
+export async function getAllPositions(): Promise<any[]> {
+  await initRedis()
+  const client = getClient()
+  const keys = await client.keys("position:*")
+  if (keys.length === 0) return []
+
+  const hashes = await Promise.all(
+    keys.map((k) => client.hgetall(k).catch(() => null)),
+  )
+  const positions: any[] = []
+  for (const hash of hashes) {
+    if (!hash) continue
+    positions.push(parseHash(hash))
+  }
+  return positions
+}
+
+export async function savePosition(position: any): Promise<void> {
+  await initRedis()
+  const client = getClient()
+  const id = position.id
+  if (!id) {
+    throw new Error("Position must have an id")
+  }
+
+  // Special-case live positions (keys prefixed with "live:") — the live
+  // pipeline uses JSON-string keys and open/closed indices under
+  // `live:position:${id}` and `live:positions:${connectionId}`. The
+  // legacy `position:${id}` hash form is preserved for non-live positions.
+  if (String(id).startsWith("live:")) {
+    const liveKey = `live:position:${id}`
+    try {
+      // Persist JSON snapshot (7 day TTL)
+      await client.set(liveKey, JSON.stringify(position), ({ ex: 7 * 24 * 60 * 60 } as any))
+    } catch {
+      // Some adapters don't support EX option — fall back to set only
+      await client.set(liveKey, JSON.stringify(position))
+    }
+
+	    const connId = position.connectionId || position.connection_id || "unknown"
+	    if (!connId || connId === "unknown") {
+	      return
+	    }
+
+	    // Maintain lightweight reverse indexes for exchange/client tracking IDs.
+	    // Live reconciliation and operator diagnostics can resolve a venue order
+	    // back to the exact system-owned LivePosition without relying only on
+	    // symbol+direction matching (which is ambiguous during restarts,
+	    // accumulation, or hedge-mode long+short coexistence).
+	    try {
+	      const exchangeData = position.exchangeData || {}
+	      const trackingIds = new Set<string>()
+	      for (const candidate of [
+	        position.trackingId,
+	        position.exchangeTrackingId,
+	        position.clientOrderId,
+	        exchangeData.trackingId,
+	        exchangeData.exchangeTrackingId,
+	        exchangeData.clientOrderId,
+	      ]) {
+	        if (candidate != null && String(candidate).length > 0) trackingIds.add(String(candidate))
+	      }
+	      if (Array.isArray(exchangeData.clientOrderIds)) {
+	        for (const entry of exchangeData.clientOrderIds) {
+	          const clientOrderId = entry?.clientOrderId ?? entry?.id
+	          if (clientOrderId != null && String(clientOrderId).length > 0) trackingIds.add(String(clientOrderId))
+	        }
+	      }
+	      for (const trackingId of trackingIds) {
+	        const key = `live:position:tracking:${connId}:${trackingId}`
+	        await client.set(key, id).catch(() => null)
+	        await client.expire(key, 7 * 24 * 60 * 60).catch(() => 0)
+	      }
+	    } catch {
+	      // best-effort diagnostics/reconciliation index
+	    }
+
+	    // Terminal => move from open index -> closed archive idempotently
+    if (position.status === "closed") {
+      try {
+        // Remove any existing entries from open list
+        await client.lrem(`live:positions:${connId}`, 0, id).catch(() => 0)
+        // Check if already in closed list to avoid duplicates
+        const alreadyClosed = await client.lpos(`live:positions:${connId}:closed`, id).catch(() => null)
+        if (!alreadyClosed) {
+          // Only add if not already present
+          await client.lpush(`live:positions:${connId}:closed`, id).catch(() => 0)
+        }
+        // Mark moved so closeLivePosition can detect duplicate increments
+        await client.set(`live:positions:${connId}:moved:${id}`, String(Date.now())).catch(() => null)
+        await client.expire(`live:positions:${connId}:moved:${id}`, 60 * 60).catch(() => 0)
+      } catch {
+        // best-effort
+      }
+    } else {
+      // Ensure id appears once in the open index (dedupe via lrem -> lpush)
+      try {
+        await client.lrem(`live:positions:${connId}`, 0, id).catch(() => 0)
+        await client.lpush(`live:positions:${connId}`, id).catch(() => 0)
+      } catch {
+        // best-effort
+      }
+    }
+
+    return
+  }
+
+  // Non-live positions: maintain as a hash (legacy behaviour)
+  const data = flattenForHmset({
+    ...position,
+    updated_at: new Date().toISOString(),
+  })
+
+  await client.hset(`position:${id}`, data)
+}
+
+export async function deletePosition(id: string): Promise<void> {
+  await initRedis()
+  const client = getClient()
+  await client.del(`position:${id}`)
+}
+
+// ========== Trade Operations ==========
+
+export async function getTrade(id: string): Promise<any | null> {
+  await initRedis()
+  const client = getClient()
+  const hash = await client.hgetall(`trade:${id}`)
+  return parseHash(hash)
+}
+
+export async function getAllTrades(): Promise<any[]> {
+  await initRedis()
+  const client = getClient()
+  const keys = await client.keys("trade:*")
+  if (keys.length === 0) return []
+
+  const hashes = await Promise.all(
+    keys.map((k) => client.hgetall(k).catch(() => null)),
+  )
+  const trades: any[] = []
+  for (const hash of hashes) {
+    if (!hash) continue
+    trades.push(parseHash(hash))
+  }
+  return trades
+}
+
+export async function saveTrade(trade: any): Promise<void> {
+  await initRedis()
+  const client = getClient()
+  const id = trade.id
+  if (!id) {
+    throw new Error("Trade must have an id")
+  }
+
+  const data = flattenForHmset({
+    ...trade,
+    updated_at: new Date().toISOString(),
+  })
+
+  await client.hset(`trade:${id}`, data)
+}
+
+// ========== Indication Operations ==========
+
+export async function getIndication(id: string): Promise<any | null> {
+  await initRedis()
+  const client = getClient()
+  const hash = await client.hgetall(`indication:${id}`)
+  return parseHash(hash)
+}
+
+export async function getAllIndications(): Promise<any[]> {
+  await initRedis()
+  const client = getClient()
+  const keys = await client.keys("indication:*")
+  if (keys.length === 0) return []
+
+  const hashes = await Promise.all(
+    keys.map((k) => client.hgetall(k).catch(() => null)),
+  )
+  const indications: any[] = []
+  for (const hash of hashes) {
+    if (!hash) continue
+    indications.push(parseHash(hash))
+  }
+  return indications
+}
+
+export async function saveIndication(indication: any): Promise<void> {
+  await initRedis()
+  const client = getClient()
+  const id = indication.id
+  if (!id) {
+    throw new Error("Indication must have an id")
+  }
+
+  const data = flattenForHmset({
+    ...indication,
+    updated_at: new Date().toISOString(),
+  })
+
+  const key = `indication:${id}`
+  await client.hset(key, data)
+  // Bound retention: prehistoric/realtime can mint hundreds of thousands
+  // of these. Without a TTL the in-process Redis snapshot grows
+  // unbounded (observed 295k keys / 39MB after a few quickstart runs)
+  // and dev memory blows past the 6GB heap. 24h is plenty for any
+  // dashboard/debug consumer; the `indications:{connId}:*` lists
+  // (lib/indication-evaluator.ts) are the durable view.
+  await client.expire(key, 86400).catch(() => 0)
+}
+
+// ========== Strategy Operations ==========
+
+export async function getStrategy(id: string): Promise<any | null> {
+  await initRedis()
+  const client = getClient()
+  const hash = await client.hgetall(`strategy:${id}`)
+  return parseHash(hash)
+}
+
+export async function getAllStrategies(): Promise<any[]> {
+  await initRedis()
+  const client = getClient()
+  const keys = await client.keys("strategy:*")
+  if (keys.length === 0) return []
+
+  const hashes = await Promise.all(
+    keys.map((k) => client.hgetall(k).catch(() => null)),
+  )
+  const strategies: any[] = []
+  for (const hash of hashes) {
+    if (!hash) continue
+    strategies.push(parseHash(hash))
+  }
+  return strategies
+}
+
+export async function saveStrategy(strategy: any): Promise<void> {
+  await initRedis()
+  const client = getClient()
+  const id = strategy.id
+  if (!id) {
+    throw new Error("Strategy must have an id")
+  }
+
+  const data = flattenForHmset({
+    ...strategy,
+    updated_at: new Date().toISOString(),
+  })
+
+  await client.hset(`strategy:${id}`, data)
+}
+
+// ========== Connection State Helpers ==========
+
+export function getConnectionStates(connection: any): {
+  base_enabled: boolean
+  base_inserted: boolean
+  main_enabled: boolean
+  main_assigned: boolean
+  is_active: boolean
+} {
+  return {
+    base_enabled: isEnabledFlag(connection.is_enabled),
+    base_inserted: isEnabledFlag(connection.is_inserted),
+    main_enabled: isEnabledFlag(connection.is_enabled_dashboard),
+    main_assigned: isEnabledFlag(connection.is_active_inserted),
+    is_active: isEnabledFlag(connection.is_active_inserted) && isEnabledFlag(connection.is_enabled_dashboard),
+  }
+}
+
+export function isConnectionAssignedToMain(connection: any): boolean {
+  return isEnabledFlag(connection.is_active_inserted)
+}
+
+export function isConnectionMainEnabled(connection: any): boolean {
+  return isEnabledFlag(connection.is_enabled_dashboard)
+}
+
+export function isConnectionBaseEnabled(connection: any): boolean {
+  return isEnabledFlag(connection.is_enabled)
+}
+
+export function buildMainConnectionEnableUpdate(connection: any): any {
+  return {
+    ...connection,
+    is_enabled_dashboard: "1",
+    is_dashboard_inserted: "1",
+    is_active_inserted: "1",
+    is_active: "1",
+    updated_at: new Date().toISOString(),
+  }
+}
+
+export function buildMainConnectionDisableUpdate(connection: any): any {
+  return {
+    ...connection,
+    is_enabled_dashboard: "0",
+    is_active: "0",
+    updated_at: new Date().toISOString(),
+  }
+}
+
+export function buildMainConnectionRemoveUpdate(connection: any): any {
+  return {
+    ...connection,
+    is_active_inserted: "0",
+    is_dashboard_inserted: "0",
+    is_enabled_dashboard: "0",
+    is_active: "0",
+    updated_at: new Date().toISOString(),
+  }
+}
+
+export function buildBaseConnectionEnableUpdate(connection: any): any {
+  return {
+    ...connection,
+    is_enabled: "1",
+    is_inserted: "1",
+    updated_at: new Date().toISOString(),
+  }
+}
+
+// ========== Stats Operations ==========
+
+export async function closeRedis(): Promise<void> {
+  isConnected = false
+  globalForRedis.__redis_fully_connected = false
+}
+
+export function getRedisRequestsPerSecond(): number {
+  const data = globalForRedis.__redis_data
+  if (!data || !data.requestStats) return 0
+  const stats = data.requestStats
+  // If still within the current second, return running count; otherwise return last completed second
+  const nowSec = Math.floor(Date.now() / 1000)
+  if (nowSec === stats.lastSecond) {
+    return stats.requestCount
+  }
+  return stats.operationsPerSecond
+}
+
+export function getConnectionState(id: string): { isRunning: boolean } {
+  // Simple state check based on global tracking
+  const globalEngineState = globalThis as unknown as { __engine_states?: Map<string, boolean> }
+  if (!globalEngineState.__engine_states) {
+    globalEngineState.__engine_states = new Map()
+  }
+  return { isRunning: globalEngineState.__engine_states.get(id) ?? false }
+}
+
+export function setConnectionRunningState(id: string, isRunning: boolean): void {
+  const globalEngineState = globalThis as unknown as { __engine_states?: Map<string, boolean> }
+  if (!globalEngineState.__engine_states) {
+    globalEngineState.__engine_states = new Map()
+  }
+  globalEngineState.__engine_states.set(id, isRunning)
+}
+
+// ========== Migration State Management ==========
+
+const globalMigrationState = globalThis as unknown as { __migrations_run?: boolean }
+
+/**
+ * Check if migrations have run — uses in-memory state. Returns true if we've
+ * already cached that migrations ran; false otherwise.
+ * The actual durability check (reading Redis) happens during runMigrations,
+ * which compares Redis schema_version against code's max. The in-memory state
+ * here just avoids re-running migrations multiple times in the same process.
+ */
+export function haveMigrationsRun(): boolean {
+  return globalMigrationState.__migrations_run ?? false
+}
+
+export function setMigrationsRun(value: boolean): void {
+  globalMigrationState.__migrations_run = value
+  // Also write to Redis for durability across process restart
+  try {
+    const client = getRedisClient()
+    if (client && value) {
+      // Non-blocking fire-and-forget Redis write
+      client.set("_migrations_run", "true").catch(() => {
+        // Ignore write failure — we have the in-memory state as fallback
+      })
+    }
+  } catch {
+    // Ignore Redis errors — in-memory state is sufficient fallback
+  }
+}
+
+/**
+ * Returns true when running in a production or Vercel preview environment.
+ * Used to decide whether to run expensive "complete coverage" repair passes
+ * on every cold start (required for correct migration state + non-zero counts).
+ */
+export function isProductionEnvironment(): boolean {
+  if (typeof process === "undefined") return false
+  const env = process.env.NODE_ENV
+  const vercelEnv = process.env.VERCEL_ENV || process.env.VERCEL
+  // Treat "production" and "preview" (Vercel PR previews) as "production mode" for migrations.
+  if (env === "production") return true
+  if (vercelEnv === "production" || vercelEnv === "preview") return true
+  // Fallback for common hosting hints
+  if (process.env.CI === "true" || process.env.VERCEL_GIT_COMMIT_SHA) return true
+  return false
+}
+
+/**
+ * Global Unique Site / Project / Page Instance
+ *
+ * The COMPLETE SITE (independent of any individual connection) must be one
+ * single unique continuous instance.
+ *
+ * - Created exactly once (first ever boot or after explicit full reset).
+ * - Every page refresh, new tab, independent open, cron, etc. reuses the
+ *   exact same site_session_id.
+ * - Prevents "starting new Overall Progression / Instances" on every visit.
+ * - "Just Unique" for the whole project.
+ */
+const GLOBAL_SITE_INSTANCE_KEY = "site:unique_instance"
+
+export interface SiteRuntimeIdentity {
+  siteSessionId: string
+  runtimeInstanceId: string
+  deploymentId: string
+  isNew: boolean
+}
+
+function runtimeInstanceId(): string {
+  if (!globalForRedis.__cts_runtime_instance_id) {
+    globalForRedis.__cts_runtime_instance_id = `runtime_${nanoid(32)}`
+  }
+  return globalForRedis.__cts_runtime_instance_id
+}
+
+function deploymentId(): string {
+  return (
+    process.env.CTS_DEPLOYMENT_ID ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    process.env.HOSTNAME ||
+    "local"
+  )
+}
+
+export async function ensureUniqueSiteInstance(): Promise<SiteRuntimeIdentity> {
+  // This helper is called from production migration coverage while initRedis()
+  // is already awaiting runMigrations(). Calling initRedis() again from that
+  // path deadlocks on the in-flight global init promise. During an init run the
+  // core client is already ready, so use ensureCoreRedis() and proceed; outside
+  // init we still run the full init path for normal callers.
+  if (globalForRedis.__redis_init_promise && !isConnected) {
+    await ensureCoreRedis()
+  } else {
+    await initRedis()
+  }
+  const client = getRedisClient()
+  const runtimeId = runtimeInstanceId()
+  const currentDeploymentId = deploymentId()
+  if (!client) {
+    throw new Error("Cannot establish site identity without the persistent store")
+  }
+
+  const existing = await client.hgetall(GLOBAL_SITE_INSTANCE_KEY).catch(() => null)
+
+  if (existing && existing.site_session_id) {
+    // Reuse the one and only unique site instance - just touch activity
+    const now = new Date().toISOString()
+    await client.hset(GLOBAL_SITE_INSTANCE_KEY, {
+      last_activity: new Date().toISOString(),
+      active_runtime_instance_id: runtimeId,
+      deployment_id: currentDeploymentId,
+    }).catch(() => {})
+
+    await client.hset(`site:runtime:${runtimeId}`, {
+      runtime_instance_id: runtimeId,
+      site_session_id: existing.site_session_id,
+      deployment_id: currentDeploymentId,
+      last_heartbeat: now,
+    }).catch(() => {})
+    await client.expire(`site:runtime:${runtimeId}`, 90).catch(() => {})
+
+    return {
+      siteSessionId: existing.site_session_id,
+      runtimeInstanceId: runtimeId,
+      deploymentId: currentDeploymentId,
+      isNew: false,
+    }
+  }
+
+  // First time ever (or after full reset) → create the single unique site instance
+  const newId = `site_${nanoid(32)}`
+  const now = new Date().toISOString()
+
+  await client.hset(GLOBAL_SITE_INSTANCE_KEY, {
+    site_session_id: newId,
+    created_at: now,
+    last_activity: now,
+    active_runtime_instance_id: runtimeId,
+    deployment_id: currentDeploymentId,
+    version: "2",
+  }).catch(() => {})
+
+  await client.hset(`site:runtime:${runtimeId}`, {
+    runtime_instance_id: runtimeId,
+    site_session_id: newId,
+    deployment_id: currentDeploymentId,
+    started_at: now,
+    last_heartbeat: now,
+  }).catch(() => {})
+  await client.expire(`site:runtime:${runtimeId}`, 90).catch(() => {})
+
+  // Mirror into trade_engine:global so all monitoring sees the unique site instance
+  await client.hset("trade_engine:global", {
+    site_session_id: newId,
+    site_instance_created: now,
+  }).catch(() => {})
+
+  console.log(`[v0] [SiteInstance] Created the one unique site/project instance: ${newId}`)
+
+  return {
+    siteSessionId: newId,
+    runtimeInstanceId: runtimeId,
+    deploymentId: currentDeploymentId,
+    isNew: true,
+  }
+}
+
+export async function getRuntimeIdentity(): Promise<SiteRuntimeIdentity> {
+  return ensureUniqueSiteInstance()
+}
+
+export async function getCurrentSiteInstanceId(): Promise<string | null> {
+  await initRedis()
+  const client = getRedisClient()
+  if (!client) return null
+  const data = await client.hgetall(GLOBAL_SITE_INSTANCE_KEY).catch(() => null)
+  return data?.site_session_id || null
+}
+
+// ========== Engine Connection Operations ==========
+
+export async function getActiveConnectionsForEngine(): Promise<any[]> {
+  const client = getRedisClient()
+  const keys = await client.keys("connection:*")
+  const connections: any[] = []
+
+  for (const key of keys) {
+    if (key.includes(":settings") || key.includes(":state")) continue
+    const data = await client.hgetall(key)
+    if (data && Object.keys(data).length > 0) {
+      // Check if connection is active for engine (is_active_inserted = 1)
+      if (isEnabledFlag(data.is_active_inserted) || isEnabledFlag(data.is_active)) {
+        connections.push({
+          id: key.replace("connection:", ""),
+          ...data,
+        })
+      }
+    }
+  }
+
+  return connections
+}
+
+export async function getAllConnectionsWithStatus(): Promise<any[]> {
+  const client = getRedisClient()
+  const keys = await client.keys("connection:*")
+  const connections: any[] = []
+
+  for (const key of keys) {
+    if (key.includes(":settings") || key.includes(":state")) continue
+    const data = await client.hgetall(key)
+    if (data && Object.keys(data).length > 0) {
+      connections.push({
+        id: key.replace("connection:", ""),
+        ...data,
+      })
+    }
+  }
+
+  return connections
+}
+
+// ========== Additional CRUD Operations ==========
+
+export async function createConnection(data: any): Promise<any> {
+  await initRedis()
+  const client = getRedisClient()
+  const id = data.id || `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+
+  // Check if connection already exists to prevent duplicates — if it
+  // does, update it in place rather than producing a conflicting
+  // second row. This is the behaviour the orphan block below was
+  // trying to express before it was accidentally left outside the
+  // function body (which broke the build with "Return statement is
+  // not allowed here" at the module top level).
+  const existingConnection = await client.hgetall(`connection:${id}`)
+  if (existingConnection && Object.keys(existingConnection).length > 0) {
+    console.log(`[v0] [Redis] Connection already exists with id ${id}, updating instead of creating duplicate`)
+    const merged = {
+      ...data,
+      id,
+      updated_at: new Date().toISOString(),
+    }
+    await client.hset(`connection:${id}`, merged)
+    invalidateConnectionsCache()
+    return merged
+  }
+
+  const connectionData = {
+    ...data,
+    id,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  await client.hset(`connection:${id}`, connectionData)
+  invalidateConnectionsCache()
+  return connectionData
+}
+
+export async function updateConnection(id: string, updates: any): Promise<any> {
+  const client = getRedisClient()
+  const existing = await client.hgetall(`connection:${id}`)
+  if (!existing || Object.keys(existing).length === 0) {
+    return null
+  }
+  const updated = {
+    ...existing,
+    ...updates,
+    updated_at: new Date().toISOString(),
+  }
+  await client.hset(`connection:${id}`, updated)
+  invalidateConnectionsCache()
+  return updated
+}
+
+export async function createPosition(data: any): Promise<any> {
+  const client = getRedisClient()
+  const id = data.id || `pos_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  const positionData = {
+    ...data,
+    id,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  // ── Memory safety: expire positions after 30 days ──────────────────
+  // Without TTL, positions accumulate indefinitely, consuming RAM.
+  // 30 days is a reasonable retention window for trade history.
+  const POSITION_TTL_SEC = 30 * 24 * 60 * 60
+  await Promise.all([
+    client.hset(`position:${id}`, positionData),
+    client.expire(`position:${id}`, POSITION_TTL_SEC),
+    client.sadd("positions:all", id),
+  ])
+  return positionData
+}
+
+export async function getIndications(connectionId?: string, symbol?: string): Promise<any[]> {
+  const client = getRedisClient()
+  const indications: any[] = []
+
+  try {
+    // Indications are stored as Redis lists at: indications:{connectionId}:{symbol}
+    // If symbol is provided, fetch directly from that list
+    if (connectionId && symbol) {
+      const listKey = `indications:${connectionId}:${symbol}`
+      const listData = await client.lrange(listKey, 0, 499) // Get last 500
+      if (listData && listData.length > 0) {
+        for (const item of listData) {
+          try {
+            const parsed = typeof item === "string" ? JSON.parse(item) : item
+            indications.push(parsed)
+          } catch (e) {
+            // Skip malformed entries
+          }
+        }
+        return indications
+      }
+    }
+
+    // If no symbol specified, collect from all symbol lists for this connection
+    if (connectionId) {
+      const pattern = `indications:${connectionId}:*`
+      const keys = await client.keys(pattern)
+
+      for (const key of keys) {
+        // Only process keys that are symbol-specific lists: indications:{connectionId}:{symbol}
+        // Skip auxiliary keys: indications:{connectionId}:{symbol}:type, :latest, etc.
+        // Pattern: key should end after symbol, no more colons
+        const keyPattern = /^indications:[^:]+:[^:]+$/
+        const isSymbolKey = keyPattern.test(key) && !key.includes(":type:") && !key.includes(":latest:")
+
+        if (isSymbolKey) {
+          // This is a symbol-specific list, fetch with LRANGE
+          const listData = await client.lrange(key, 0, 499)
+          if (listData && listData.length > 0) {
+            for (const item of listData) {
+              try {
+                const parsed = typeof item === "string" ? JSON.parse(item) : item
+                indications.push(parsed)
+              } catch (e) {
+                // Skip malformed entries
+              }
+            }
+          }
+        }
+      }
+
+      if (indications.length > 0) {
+        return indications
+      }
+    }
+
+    // Final fallback: no indications found
+    return []
+  } catch (e) {
+    console.warn(`[v0] Error reading indications for ${connectionId}/${symbol}:`, e)
+    return []
+  }
+}
+
+/**
+ * Store indications for a connection - HIGH FREQUENCY OPTIMIZED
+ * Maintains independent sets per configuration type for optimal performance
+ */
+export async function storeIndications(connectionId: string, symbol: string, indications: any[]): Promise<void> {
+  if (!indications || indications.length === 0) return
+
+  const client = getRedisClient()
+  const mainKey = `indications:${connectionId}`
+
+  try {
+    // Stamp new indications with metadata.
+    const ts = new Date().toISOString()
+    const newIndications = indications.map(ind => ({
+      ...ind,
+      symbol,
+      connectionId,
+      timestamp: ts,
+      configSet: getConfigurationSet(ind.type, ind.value),
+    }))
+
+    // ── Main key: read → append → trim → write ───────────────────────────
+    const existingRaw = await client.get(mainKey)
+    let existing: any[] = []
+    if (existingRaw) {
+      try {
+        existing = JSON.parse(typeof existingRaw === "string" ? existingRaw : JSON.stringify(existingRaw))
+        if (!Array.isArray(existing)) existing = []
+      } catch { existing = [] }
+    }
+    existing.push(...newIndications)
+    // Keep latest 2500 (250 per symbol × 10 symbols typical)
+    if (existing.length > 2500) existing = existing.slice(-2500)
+
+    // ── Per-type keys: group by type in ONE O(N) pass, NOT O(N²) ─────────
+    // The previous implementation called `indications.filter(i => i.type === ind.type)`
+    // inside a `for (const ind of indications)` loop — O(N²). For a batch of N
+    // indications that happens P times per second this is N × P string comparisons/s.
+    // Group once into a Map<type, indication[]> so each type key is written once.
+    const byType = new Map<string, any[]>()
+    for (const ind of newIndications) {
+      const t = ind.type as string
+      let bucket = byType.get(t)
+      if (!bucket) { bucket = []; byType.set(t, bucket) }
+      bucket.push(ind)
+    }
+
+    // Fan out all writes in parallel — single await instead of sequential loop.
+    await Promise.all([
+      client.set(mainKey, JSON.stringify(existing), { EX: 3600 } as any),
+      ...Array.from(byType.entries()).map(([type, typeInds]) =>
+        client.set(`indications:${connectionId}:${type}`, JSON.stringify(typeInds), { EX: 3600 } as any)
+      ),
+    ])
+  } catch (error) {
+    console.error(`[v0] Error storing indications for ${connectionId}:`, error)
+  }
+}
+
+/**
+ * Determine configuration set based on indication parameters
+ * Used for organizing independent sets per configuration combination
+ */
+function getConfigurationSet(type: string, value: any): string {
+  // Map indication characteristics to configuration sets for independent tracking
+  // This allows parallel processing of different configuration combinations
+  if (!value || typeof value !== "object") return "config:default"
+
+  const stepCount = value.stepCount || 10
+  const drawdown = value.drawdownRatio || 0.2
+  const activity = value.activityRatio || 0.05
+  const rangeRatio = value.rangeRatio || 0.2
+
+  // Create configuration hash to group similar configs together
+  const configHash = Math.abs(
+    ((stepCount * 7) ^ (Math.round(drawdown * 100) * 11) ^
+     (Math.round(activity * 1000) * 13) ^ (Math.round(rangeRatio * 100) * 17)) % 1000
+  )
+
+  return `config:${type}:${configHash}`
+}
+
+export async function verifyRedisHealth(): Promise<{ healthy: boolean; latency: number; error?: string }> {
+  const start = Date.now()
+  try {
+    const client = getRedisClient()
+    // Simple ping test
+    await client.set("health:check", Date.now().toString())
+    const result = await client.get("health:check")
+    const latency = Date.now() - start
+    return {
+      healthy: result !== null,
+      latency,
+    }
+  } catch (error) {
+    return {
+      healthy: false,
+      latency: Date.now() - start,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+// ========== Connection Position and Trade Operations ==========
+
+export async function getConnectionPositions(connectionId: string): Promise<any[]> {
+  const client = getRedisClient()
+  const keys = await client.keys(`position:${connectionId}:*`)
+  const positions: any[] = []
+
+  for (const key of keys) {
+    const data = await client.hgetall(key)
+    if (data && Object.keys(data).length > 0) {
+      positions.push({
+        id: key.replace(`position:${connectionId}:`, ""),
+        connection_id: connectionId,
+        ...data,
+      })
+    }
+  }
+
+  // Also check global positions that reference this connection
+  const globalKeys = await client.keys("position:*")
+  for (const key of globalKeys) {
+    if (key.startsWith(`position:${connectionId}:`)) continue // Already processed
+    const data = await client.hgetall(key)
+    if (data && data.connection_id === connectionId) {
+      positions.push({
+        id: key.replace("position:", ""),
+        ...data,
+      })
+    }
+  }
+
+  return positions
+}
+
+export async function getConnectionTrades(connectionId: string): Promise<any[]> {
+  const client = getRedisClient()
+  const keys = await client.keys(`trade:${connectionId}:*`)
+  const trades: any[] = []
+
+  for (const key of keys) {
+    const data = await client.hgetall(key)
+    if (data && Object.keys(data).length > 0) {
+      trades.push({
+        id: key.replace(`trade:${connectionId}:`, ""),
+        connection_id: connectionId,
+        ...data,
+      })
+    }
+  }
+
+  // Also check global trades that reference this connection
+  const globalKeys = await client.keys("trade:*")
+  for (const key of globalKeys) {
+    if (key.startsWith(`trade:${connectionId}:`)) continue // Already processed
+    const data = await client.hgetall(key)
+    if (data && data.connection_id === connectionId) {
+      trades.push({
+        id: key.replace("trade:", ""),
+        ...data,
+      })
+    }
+  }
+
+  return trades
+}
+
+export async function getProgressionLogs(connectionId: string, limit: number = 50): Promise<any[]> {
+  const client = getRedisClient()
+  // Get logs from sorted set or list
+  const logsKey = `progression:${connectionId}:logs`
+  const logsList = await client.lrange(logsKey, 0, limit - 1)
+
+  const logs: any[] = []
+  for (const logStr of logsList) {
+    try {
+      const log = typeof logStr === "string" ? JSON.parse(logStr) : logStr
+      logs.push(log)
+    } catch {
+      logs.push({ message: logStr, timestamp: new Date().toISOString() })
+    }
+  }
+
+  return logs
+}
+
+export async function logProgressionEvent(
+  connectionId: string,
+  phase: string,
+  level: "info" | "warning" | "error",
+  message: string,
+  metadata?: Record<string, any>
+): Promise<void> {
+  const client = getRedisClient()
+  const logsKey = `progression:${connectionId}:logs`
+
+  const logEntry = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    phase,
+    level,
+    message,
+    ...metadata,
+  })
+
+  // Add to list (prepend for newest first)
+  await client.lpush(logsKey, logEntry)
+  // Keep only last 100 logs
+  await client.ltrim(logsKey, 0, 99)
+  // Set TTL of 7 days
+  await client.expire(logsKey, 7 * 24 * 60 * 60)
+}
+
+// ========== Connection Filter Functions ==========
+
+export async function getEnabledConnections(): Promise<any[]> {
+  const allConnections = await getAllConnections()
+  return allConnections.filter(conn => isEnabledFlag(conn.is_enabled) || isEnabledFlag(conn.enabled))
+}
+
+export async function getAssignedAndEnabledConnections(): Promise<any[]> {
+  const allConnections = await getAllConnections()
+  return allConnections.filter(conn => {
+    // A connection is eligible for the engine when it is both:
+    // 1. Assigned/inserted into the active panel
+    // 2. Enabled — either the base is_enabled flag OR the dashboard toggle
+    //    (is_enabled_dashboard). The dashboard toggle is what migration 021
+    //    and the quickstart route write, so checking it here means the engine
+    //    starts as soon as the user enables a connection via the UI or runs
+    //    quickstart — no extra Redis flag writes needed.
+    const isAssigned =
+      isEnabledFlag(conn.is_active_inserted) ||
+      isEnabledFlag(conn.is_assigned) ||
+      isEnabledFlag(conn.is_dashboard_inserted)
+    const isEnabled =
+      isEnabledFlag(conn.is_enabled) ||
+      isEnabledFlag(conn.enabled) ||
+      isEnabledFlag(conn.is_enabled_dashboard)
+    return isAssigned && isEnabled
+  })
+}
+
+export async function getConnectionsByExchange(exchange: string): Promise<any[]> {
+  const allConnections = await getAllConnections()
+  return allConnections.filter(conn =>
+    conn.exchange?.toLowerCase() === exchange.toLowerCase() ||
+    conn.exchange_name?.toLowerCase() === exchange.toLowerCase()
+  )
+}
+
+// ========== Missing Exports for db.ts compatibility ==========
+
+export async function deleteSettings(key: string): Promise<void> {
+  const client = getRedisClient()
+  await client.del(`settings:${key}`)
+}
+
+export async function flushAll(): Promise<void> {
+  const client = getRedisClient()
+  await client.flushDb()
+}
+
+// Cache getRedisStats for 5 s. The underlying `client.keys("*")` is an
+// O(N) scan over the entire keyspace, so hammering it from a polling
+// monitoring dashboard would be a foot-gun. The cached value is plenty
+// fresh for a "connected + key count" display.
+let _redisStatsCache: {
+  value: { connected: boolean; memoryUsage: number; keyCount: number; uptime: number }
+  ts: number
+} | null = null
+const REDIS_STATS_CACHE_TTL_MS = 5000
+
+export async function getRedisStats(): Promise<{
+  connected: boolean
+  memoryUsage: number
+  keyCount: number
+  uptime: number
+}> {
+  const now = Date.now()
+  if (_redisStatsCache && now - _redisStatsCache.ts < REDIS_STATS_CACHE_TTL_MS) {
+    return _redisStatsCache.value
+  }
+  try {
+    const client = getRedisClient()
+    const keys = await client.keys("*")
+    const value = {
+      connected: true,
+      memoryUsage: 0, // In-memory implementation doesn't track this
+      keyCount: keys.length,
+      uptime: Date.now() - (globalThis as any).__redis_start_time || 0,
+    }
+    _redisStatsCache = { value, ts: now }
+    return value
+  } catch {
+    const value = {
+      connected: false,
+      memoryUsage: 0,
+      keyCount: 0,
+      uptime: 0,
+    }
+    // Cache failures briefly too so a broken Redis doesn't pin the CPU
+    // retrying connection on every polling request. Shorter TTL so
+    // recovery is still detected quickly.
+    _redisStatsCache = { value, ts: now - (REDIS_STATS_CACHE_TTL_MS - 1000) }
+    return value
+  }
+}
+
+export async function saveMarketData(symbol: string, timeframe: string, data: any): Promise<void> {
+  const client = getRedisClient()
+  const key = `market_data:${symbol}:${timeframe}`
+  await client.set(key, JSON.stringify(data))
+  // Set 24 hour TTL for market data
+  await client.expire(key, 86400)
+}
+
+// ===========================================================================
+// EXPLICIT PERSISTENCE FUNCTIONS
+// ===========================================================================
+
+export async function saveDatabaseSnapshot(): Promise<boolean> {
+  const client = getRedisClient()
+  await client.saveToDisk()
+  return true
+}
+
+export async function loadDatabaseSnapshot(): Promise<boolean> {
+  const client = getRedisClient()
+  await client.loadFromDisk()
+  return true
+}
+
+export function saveDatabaseSnapshotSync(): boolean {
+  const client = getRedisClient()
+  client.saveToDiskSync()
+  return true
+}
+
+/**
+ * Verify that a position was created by this system using system_tracking_id.
+ * Prevents modifications to manually-entered or foreign orders.
+ * @returns true if position has valid sys-* tracking ID, false otherwise
+ */
+export function isSystemCreatedPosition(position: Record<string, string> | null | undefined): boolean {
+  if (!position) return false
+  const trackingId = String(position.system_tracking_id || "").trim()
+  // System tracking IDs follow format: sys-{connId}-{timestamp}-{random}
+  return trackingId.startsWith("sys-") && trackingId.length > 10
+}
+
+/**
+ * Soft reset: Clear all runtime data while preserving coordination framework
+ *
+ * Coordination framework that is PRESERVED:
+ * - axis_pos_acc:* (axis position accumulation ledgers)
+ * - real_pi_acc:* (real PI accumulation structures)
+ * - progression:* (progression metadata)
+ * - strategy_count:* (strategy count tracking)
+ * - pi_history:* (position history framework - structure kept, data cleared)
+ *
+ * Allows new strategy progression runs to start fresh without rebuilding
+ * the infrastructure. All runtime strategy data and positions are cleared.
+ *
+ * @returns object with cleared key counts per bucket
+ */
+export async function softResetWithCoordinationPreserved(): Promise<{
+  deleted: number
+  protected: number
+  buckets: Record<string, number>
+}> {
+  const client = getRedisClient()
+
+  // Prefixes to preserve (coordination framework + credentials/settings)
+  const PRESERVED = [
+    "connection:",
+    "connections:tombstoned",
+    "settings:",
+    "app_settings",
+    "all_settings",
+    "migration:",
+    "_migration",
+    "_schema_version",
+    "predefinitions:",
+    "system:base_connections_seeded",
+    "auth:",
+    "session:",
+    "api_key:",
+    "axis_pos_acc:",      // COORDINATION FRAMEWORK
+    "real_pi_acc:",       // COORDINATION FRAMEWORK
+    "progression:",       // COORDINATION FRAMEWORK
+    "strategy_count:",    // COORDINATION FRAMEWORK
+  ]
+
+  // Get all keys
+  const allKeys = await client.keys("*").catch(() => [] as string[])
+
+  // Filter to keys to delete
+  const keysToDelete = allKeys.filter((k) => {
+    if (typeof k !== "string") return false
+    // Check if key should be preserved
+    for (const prefix of PRESERVED) {
+      if (k.startsWith(prefix)) return false
+    }
+    return true
+  })
+
+  // Build bucket summary before deletion
+  const buckets: Record<string, number> = {}
+  for (const k of keysToDelete) {
+    const idx = k.indexOf(":")
+    const bucket = idx > 0 ? k.slice(0, idx) + ":*" : k
+    buckets[bucket] = (buckets[bucket] || 0) + 1
+  }
+
+  // Delete in chunks
+  let deleted = 0
+  const CHUNK_SIZE = 500
+  for (let i = 0; i < keysToDelete.length; i += CHUNK_SIZE) {
+    const chunk = keysToDelete.slice(i, i + CHUNK_SIZE)
+    try {
+      const n = await client.del(...chunk)
+      deleted += typeof n === "number" ? n : chunk.length
+    } catch {
+      for (const k of chunk) {
+        try { await client.del(k); deleted++ } catch { /* skip */ }
+      }
+    }
+  }
+
+  // Persist to disk
+  try {
+    if (typeof (client as any).persistNow === "function") {
+      await (client as any).persistNow().catch(() => null)
+    } else if (typeof (client as any).saveToDisk === "function") {
+      await (client as any).saveToDisk().catch(() => null)
+    }
+  } catch { /* non-critical */ }
+
+  return {
+    deleted,
+    protected: allKeys.length - keysToDelete.length,
+    buckets,
+  }
+}

@@ -1,0 +1,39 @@
+name: Production gates
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cts-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run security:check
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test:standalone
+
+  container:
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag cts-c-dashboard:${{ github.sha }} .
