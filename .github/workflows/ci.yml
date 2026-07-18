@@ -29,6 +29,7 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm run test:standalone
+      - run: npm run test:routes
 
   container:
     needs: quality
