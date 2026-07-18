@@ -1,6 +1,6 @@
 {
   "name": "cts-c-dashboard",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "private": true,
   "scripts": {
     "build": "NODE_OPTIONS='--max-old-space-size=4096' next build",
@@ -16,10 +16,11 @@
     "test:integration": "node --import tsx --test __tests__/integration/*.test.ts __tests__/e2e/*.test.ts",
     "test:standalone": "node scripts/verify-standalone-continuity.mjs",
     "test:routes": "node scripts/smoke-routes-test.mjs",
+    "test:bingx:live": "node --import tsx scripts/verify-bingx-comprehensive-live.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "start": "NODE_OPTIONS='--max-old-space-size=4096' node .next/standalone/server.js",
-    "preflight": "npm run security:check && npm test && npm run typecheck && npm run lint && npm run build && npm run test:standalone",
+    "preflight": "npm run security:check && npm test && npm run typecheck && npm run lint && npm run build && npm run test:standalone && npm run test:routes",
     "security:check": "node scripts/security-check.mjs",
     "vercel-build": "NODE_OPTIONS='--max-old-space-size=4096' next build",
     "vercel-build-setup": "bash scripts/vercel-build-setup.sh",

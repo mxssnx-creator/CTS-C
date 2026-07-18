@@ -1,4 +1,4 @@
-# CTS-C Dashboard 4.0
+# CTS-C Dashboard 4.0.1
 
 CTS-C ist ein vollständiges Next.js-Dashboard für unabhängige Exchange-Verbindungen, historische und Echtzeit-Indikationen, Base/Main/Real-Progression, Live-Ausführung, Monitoring, Backups und Administration.
 
@@ -76,13 +76,36 @@ Ein Restore darf nur bei gestoppter Anwendung erfolgen. Nach Restore müssen `/a
 
 ```bash
 npm run security:check
+npm test
 npm run typecheck
 npm run lint
 npm run build
 npm run test:standalone
+npm run test:routes
 ```
 
-Ein Release ist nur zulässig, wenn alle fünf Befehle erfolgreich sind. Der Standalone-Test startet zwei aufeinanderfolgende Produktionsprozesse und prüft Authentifizierung, parallele Identitätszugriffe, SIGTERM-Flush und Snapshot-Wiederanlauf. Echte Ordertests müssen isoliert mit Minimalvolumen erfolgen: zuerst Kontomodus, bestehende Orders/Positionen und Symbolregeln lesen; dann ausschließlich die Testposition eröffnen, Fill prüfen und dieselbe Position wieder vollständig schließen. Vorbestehende Positionen oder Orders dürfen niemals verändert werden.
+Ein Release ist nur zulässig, wenn alle sieben Befehle erfolgreich sind. Der Standalone-Test startet zwei aufeinanderfolgende Produktionsprozesse und prüft Authentifizierung, parallele Identitätszugriffe, SIGTERM-Flush und Snapshot-Wiederanlauf. Der Route-Smoke prüft zusätzlich sieben authentifizierte Dashboard-Hauptrouten gegen den gebauten Standalone-Server.
+
+### BingX-Mainnet-Verifikation
+
+Der umfassende BingX-Test ist standardmäßig schreibgeschützt. Er prüft Zugang, Kontomodus, bestehende Positionen und Orders, aktuelle Kontraktregeln, Ticker und Kerzen für zwölf Märkte sowie fünf parallele Account-Lesezyklen:
+
+```bash
+export BINGX_API_KEY='<server-side-key>'
+export BINGX_API_SECRET='<server-side-secret>'
+npm run test:bingx:live
+```
+
+Nur mit ausdrücklicher Freigabe und einem isolierten, überwachten Konto darf der echte Minimalvolumen-Test aktiviert werden. `BINGX_TEST_MAX_NOTIONAL` ist eine harte Obergrenze je Testposition und darf das im Skript erzwungene Maximum von 5 USDT nicht überschreiten:
+
+```bash
+export BINGX_TEST_MAX_NOTIONAL='3'
+npm run test:bingx:live -- --execute
+```
+
+Der Schreibtest eröffnet nacheinander genau eine isolierte LONG- und SHORT-Position, verifiziert Fill und Orderhistorie, setzt native Stop-Loss-/Take-Profit-Orders, stellt Position und Schutz-IDs über eine frische Connector-Instanz wieder her, storniert nur die eindeutig markierten Testorders und schließt die Testposition. Abschließend müssen Testpositionen und Testorders jeweils null sein und das vorbestehende Konto-Inventar exakt dem Ausgangszustand entsprechen. Bei einem mehrdeutigen Transportfehler sucht die Bereinigung ausschließlich nach der eindeutigen `ctsc_`-Client-ID dieses Testlaufs. Vorbestehende Positionen oder Orders werden niemals verändert.
+
+Das nicht-sensitive Abnahmeprotokoll des Release-Laufs liegt unter `docs/BINGX-LIVE-VERIFICATION-2026-07-18.md`.
 
 ## Betriebskontrollen
 

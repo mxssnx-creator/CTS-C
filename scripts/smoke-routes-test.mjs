@@ -1,68 +1,114 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process'
-import { rmSync, openSync, closeSync, existsSync } from 'node:fs'
-import { setTimeout as sleep } from 'node:timers/promises'
+import assert from "node:assert/strict"
+import { spawn } from "node:child_process"
+import { once } from "node:events"
+import { mkdtemp, rm } from "node:fs/promises"
+import { createServer } from "node:net"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 
-const port = 3002
-const base = `http://localhost:${port}`
-const logPath = '/tmp/tmp3-test-dev.log'
+const root = resolve(import.meta.dirname, "..")
+const temporaryDirectory = await mkdtemp(join(tmpdir(), "cts-route-smoke-"))
+const snapshotPath = join(temporaryDirectory, "redis-snapshot.json")
+let child
 
-async function killExisting() {
-  await import('./kill-test-dev-port.mjs')
-  await sleep(300)
+const delay = (milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds))
+
+async function freePort() {
+  const server = createServer()
+  await new Promise((resolveListen, reject) => {
+    server.once("error", reject)
+    server.listen(0, "127.0.0.1", resolveListen)
+  })
+  const address = server.address()
+  const port = typeof address === "object" && address ? address.port : 0
+  await new Promise((resolveClose) => server.close(resolveClose))
+  assert.ok(port)
+  return port
 }
 
-async function waitForRoute(path, attempts = 30) {
-  let lastCode = '000'
-  for (let i = 0; i < attempts; i++) {
+async function waitUntilReady(origin) {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    if (child.exitCode !== null) {
+      throw new Error(`Standalone route server exited early\n${child.getOutput()}`)
+    }
     try {
-      const response = await fetch(`${base}${path}`, { cache: 'no-store' })
-      lastCode = String(response.status)
-      if (response.status === 200 || response.status === 307) return
-    } catch {
-      lastCode = '000'
-    }
-    await sleep(2000)
+      const response = await fetch(`${origin}/api/health/liveness`, {
+        signal: AbortSignal.timeout(1_000),
+      })
+      if (response.ok) return
+    } catch {}
+    await delay(250)
   }
-  throw new Error(`FAIL:${path}=${lastCode}`)
+  throw new Error(`Standalone route server did not become ready\n${child.getOutput()}`)
 }
 
-await killExisting()
-rmSync('.next', { recursive: true, force: true })
+async function stopServer() {
+  if (!child || child.exitCode !== null) return
+  child.kill("SIGTERM")
+  const result = await Promise.race([
+    once(child, "exit"),
+    delay(15_000).then(() => { throw new Error(`Standalone route server ignored SIGTERM\n${child.getOutput()}`) }),
+  ])
+  const [code, signal] = result
+  assert.equal(signal, null)
+  assert.equal(code, 0)
+}
 
-const out = openSync(logPath, 'w')
-const child = spawn('npm', ['run', 'dev'], {
-  detached: true,
-  stdio: ['ignore', out, out],
-  env: { ...process.env },
-})
-closeSync(out)
-
-let exitCode = 0
 try {
-  for (let i = 0; i < 90; i++) {
-    if (existsSync('.next/routes-manifest.json')) {
-      try {
-        const response = await fetch(base, { cache: 'no-store' })
-        if (response.ok || response.status === 307) break
-      } catch {
-        // dev server not ready yet
-      }
-    }
-    await sleep(1000)
+  const port = await freePort()
+  const origin = `http://127.0.0.1:${port}`
+  child = spawn(process.execPath, [".next/standalone/server.js"], {
+    cwd: root,
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      HOSTNAME: "127.0.0.1",
+      PORT: String(port),
+      JWT_SECRET: "cts-route-smoke-secret-2026-production",
+      CRON_SECRET: "cts-route-smoke-cron-secret-2026",
+      ADMIN_AUTOLOGIN_ENABLED: "true",
+      ALLOW_SELF_REGISTRATION: "false",
+      V0_REDIS_SNAPSHOT_PATH: snapshotPath,
+      NEXT_TELEMETRY_DISABLED: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  let output = ""
+  const collect = (chunk) => { output = `${output}${chunk}`.slice(-16_000) }
+  child.stdout.on("data", collect)
+  child.stderr.on("data", collect)
+  child.getOutput = () => output
+
+  await waitUntilReady(origin)
+  const login = await fetch(`${origin}/api/auth/auto-login`, {
+    method: "POST",
+    headers: {
+      Origin: origin,
+      "Sec-Fetch-Site": "same-origin",
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  })
+  assert.equal(login.status, 200)
+  const cookie = login.headers.get("set-cookie")?.split(";")[0] || ""
+  assert.match(cookie, /^cts_auth=/)
+
+  const routes = ["/", "/main", "/strategies", "/settings", "/monitoring", "/tracking", "/statistics"]
+  for (const route of routes) {
+    const response = await fetch(`${origin}${route}`, {
+      headers: { Cookie: cookie },
+      redirect: "manual",
+      signal: AbortSignal.timeout(10_000),
+    })
+    assert.equal(response.status, 200, `${route} returned ${response.status}`)
+    assert.match(response.headers.get("content-type") || "", /^text\/html/)
+    await response.arrayBuffer()
   }
 
-  for (const path of ['/', '/main', '/strategies', '/settings', '/monitoring']) {
-    await waitForRoute(path)
-  }
-} catch (error) {
-  exitCode = 1
-  console.error(error instanceof Error ? error.message : String(error))
+  await stopServer()
+  console.log(`Standalone route smoke passed (${routes.length} authenticated dashboard routes)`)
 } finally {
-  try { process.kill(-child.pid, 'SIGTERM') } catch {}
-  await sleep(500)
-  try { process.kill(-child.pid, 'SIGKILL') } catch {}
-  await killExisting()
+  if (child && child.exitCode === null) child.kill("SIGKILL")
+  await rm(temporaryDirectory, { recursive: true, force: true })
 }
-
-process.exit(exitCode)

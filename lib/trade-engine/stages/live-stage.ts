@@ -85,15 +85,15 @@ async function persistLiveOrderAudit(audit: LiveOrderAudit): Promise<void> {
 }
 
 // ── Exchange call timeouts ────────────────────────────────────────────────
-// Target: syncWithExchange completes in <1 s on the hot path.
-// These timeouts bound per-call worst case so the pool never hangs.
-// Each value is calibrated to a ~2×p99 RTT of a typical BingX API call
-// (BingX p99 ≈ 120–250 ms); the gap gives one retry margin without
-// stalling the full sync for multiple seconds on a flaky call.
-const EXCHANGE_TIMEOUT_CANCEL_ORDER_MS  =  4_000  // was 10 s
-const EXCHANGE_TIMEOUT_PLACE_STOP_MS    =  5_000  // was 15 s
-const EXCHANGE_TIMEOUT_GET_POSITIONS_MS =  4_000  // was 10 s
-const EXCHANGE_TIMEOUT_GET_ORDER_MS     =  3_000  // was 10 s
+// Healthy calls still resolve immediately; these are worst-case ceilings.
+// Production mainnet verification measured transient p95s of 14–15 s, so the
+// former 3–5 s bounds created false failures while requests could still be
+// accepted exchange-side. The larger ceilings preserve ID recovery and
+// fail-closed reconciliation on a slow but working venue.
+const EXCHANGE_TIMEOUT_CANCEL_ORDER_MS  = 25_000
+const EXCHANGE_TIMEOUT_PLACE_STOP_MS    = 25_000
+const EXCHANGE_TIMEOUT_GET_POSITIONS_MS = 25_000
+const EXCHANGE_TIMEOUT_GET_ORDER_MS     = 25_000
 
 /**
  * Live position as it flows through the live-stage pipeline and is
@@ -4393,7 +4393,7 @@ export async function reconcileLivePositions(
     // Single batch fetch of ALL exchange positions for the position-sync loop.
     let exchangePositions: any[] = []
     try {
-      exchangePositions = (await exchangeConnector.getPositions().catch(() => [])) || []
+      exchangePositions = (await exchangeConnector.getPositions()) || []
     } catch (err) {
       console.warn(`${LOG_PREFIX} getPositions failed:`, err instanceof Error ? err.message : String(err))
       await orphanCloseExpiredPositions(connectionId, exchangeConnector, summary)
@@ -5093,6 +5093,7 @@ export async function syncWithExchange(connectionId: string, exchangeConnector: 
     // getPositions is also deduplicated — it was previously called TWICE
     // (once for adoption, once for the exchange map).
     let exchangePositionsForAdoption: any[] = []
+    let exchangePositionsLoaded = false
     let liveOrderIdsSync: Set<string> | null = null
     let recentlyClosedForOrphanGuard: LivePosition[] = []
 
@@ -5101,13 +5102,19 @@ export async function syncWithExchange(connectionId: string, exchangeConnector: 
       (async () => {
         if (exchangeConnector && typeof exchangeConnector.getPositions === "function") {
           try {
-            exchangePositionsForAdoption =
-              (await withTimeout(
-                exchangeConnector.getPositions() as Promise<any[]>,
-                EXCHANGE_TIMEOUT_GET_POSITIONS_MS,
-                "getPositions(sync-prefetch)",
-              ).catch(() => [])) || []
-          } catch { /* best-effort */ }
+            const fetched = await withTimeout(
+              exchangeConnector.getPositions() as Promise<any[]>,
+              EXCHANGE_TIMEOUT_GET_POSITIONS_MS,
+              "getPositions(sync-prefetch)",
+            )
+            if (!Array.isArray(fetched)) throw new Error("getPositions returned a non-array inventory")
+            exchangePositionsForAdoption = fetched
+            exchangePositionsLoaded = true
+          } catch (error) {
+            console.warn(
+              `${LOG_PREFIX} getPositions(sync-prefetch) failed: ${error instanceof Error ? error.message : String(error)}`,
+            )
+          }
         }
       })(),
       // 2. Open orders snapshot for liveness verification.
@@ -5225,6 +5232,16 @@ export async function syncWithExchange(connectionId: string, exchangeConnector: 
           }
         }
       }
+    }
+
+    // A failed venue inventory read is not an empty inventory. Without this
+    // fail-closed gate an API timeout/rate-limit was converted into an empty
+    // map and every tracked live position could be finalized as "externally
+    // closed". Simulated positions above have already been processed; skip
+    // only the exchange-dependent reconciliation until the next tick.
+    if (!exchangePositionsLoaded) {
+      console.warn(`${LOG_PREFIX} [sync-skip] exchange position inventory unavailable; preserving tracked live state`)
+      return
     }
 
     // ── Exchange-orphan adoption ─────────────────────────────────────────
@@ -5425,24 +5442,18 @@ export async function syncWithExchange(connectionId: string, exchangeConnector: 
     const stuckPositions: Array<{ position: LivePosition; placedAgeMs: number; STUCK_PLACED_MAX_MS: number }> = []
 
     // ── Parallelised per-position sync (bounded concurrency) ────────────
-    // Target: all positions complete in <1 s total.
+    // Healthy calls still complete in roughly one RTT; the pool ensures slow
+    // symbols do not serialize the rest of the basket.
     //
-    // SYNC_CONCURRENCY=12: with tightened per-call timeouts (getOrder 3 s,
-    // placeStop 5 s) and typical ≤10 open positions, all positions start
+    // SYNC_CONCURRENCY=12: with typical ≤10 open positions, all positions start
     // concurrently (ceil(10/12)=1 pass). Every position's calls run in
     // parallel within updateProtectionOrders' own Promise.all(slLeg, tpLeg)
-    // — the outer pool just bounds the total fanout to prevent rate-limit
-    // spikes on venue buckets (BingX: 100 req/s sustained, 200 burst).
-    //
-    // SYNC_PER_POS_TIMEOUT_MS=4 s: the tightest single-call timeout is
-    // placeStop at 5 s, but within processOneSync the heaviest path is
-    // fill-detect (getOrder 3 s) + updateProtectionOrders (parallel cancel
-    // 4 s + place 5 s, but both legs run concurrently so ~5 s total).
-    // 6 s gives that path 1 s of slack. Any position that can't complete
-    // in 6 s on a working exchange has already timed out at the inner
-    // call level and logged a warning.
+    // — the outer pool only bounds total fanout; the connector limiter enforces
+    // BingX's five-request/s safety envelope. The 45 s per-position ceiling is
+    // above the connector transport timeout so it can resolve ambiguous POSTs
+    // by clientOrderId before the outer task ends.
     const SYNC_CONCURRENCY = 12
-    const SYNC_PER_POS_TIMEOUT_MS = 6_000
+    const SYNC_PER_POS_TIMEOUT_MS = 45_000
 
     const processOneSync = async (position: LivePosition): Promise<void> => {
       try {

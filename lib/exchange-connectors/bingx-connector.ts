@@ -93,6 +93,11 @@ export class BingXConnector extends BaseExchangeConnector {
 
   constructor(credentials: ExchangeCredentials, exchange: string = "bingx") {
     super(credentials, exchange)
+    // Current mainnet p95 from the production gate is materially above the
+    // base connector's 10 s ceiling. A timeout is only a maximum and does not
+    // slow healthy calls; 20 s prevents accepted order requests from being
+    // misclassified as failed merely because their response arrived late.
+    this.timeout = 20_000
     // Kick off the first time-sync immediately in the background so that
     // the offset is ready by the time the first signed request fires.
     // Errors are swallowed — the sync will be retried in syncServerTime().
@@ -292,6 +297,54 @@ export class BingXConnector extends BaseExchangeConnector {
       return true
     }
     return false
+  }
+
+  /**
+   * Decide whether a failed signed read deserves one safe retry. Inventory
+   * endpoints are safety-critical: a transient timestamp/rate-limit response
+   * must never be translated into an empty positions/orders array.
+   */
+  private async recoverTransientSignedRead(data: any): Promise<boolean> {
+    if (await this.resyncOnTimestampError(data)) return true
+    const code = String(data?.code ?? "")
+    const message = String(data?.msg ?? "").toLowerCase()
+    if (code === "100410" || code === "100429" || code === "429" || message.includes("rate limit")) {
+      await new Promise((resolve) => setTimeout(resolve, 550))
+      return true
+    }
+    return false
+  }
+
+  private isAmbiguousTransportFailure(error: unknown): boolean {
+    const message = (error instanceof Error ? error.message : String(error)).toLowerCase()
+    return message.includes("aborted") || message.includes("fetch failed") ||
+      message.includes("network") || message.includes("econnreset") ||
+      message.includes("etimedout") || message.includes("timeout")
+  }
+
+  private async signedReadWithTransportRetry<T>(request: () => Promise<T>): Promise<T> {
+    try {
+      return await request()
+    } catch (error) {
+      if (!this.isAmbiguousTransportFailure(error)) throw error
+      await new Promise((resolve) => setTimeout(resolve, 550))
+      return request()
+    }
+  }
+
+  /**
+   * A timed-out POST may already have reached BingX. Resolve that ambiguity by
+   * the unique clientOrderId before telling the engine placement failed; this
+   * prevents duplicate retries and untracked exchange-side orders.
+   */
+  private async recoverPlacedOrderByClientId(symbol: string, clientOrderId?: string): Promise<any | null> {
+    if (!clientOrderId) return null
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const result = await this.getOrderDetails(symbol, undefined, clientOrderId)
+    if (!result.success || !result.order) return null
+    const raw = result.order?.order || result.order
+    const id = raw?.orderId || raw?.orderID || raw?.id
+    return id ? raw : null
   }
 
 
@@ -842,20 +895,6 @@ export class BingXConnector extends BaseExchangeConnector {
             const id = info.orderId || info.id || data.data?.orderId
             return { success: true, orderId: id ? String(id) : undefined, filledPrice: Number(info.avgPrice ?? info.price ?? info.filledPrice ?? 0) || undefined, avgPrice: Number(info.avgPrice ?? 0) || undefined, price: Number(info.price ?? 0) || undefined, filledQty: Number(info.executedQty ?? info.filledQty ?? info.cumQty ?? 0) || undefined, executedQty: Number(info.executedQty ?? 0) || undefined, status: info.status }
           }
-	          if (this.isBingXSuccess(tsRetryData.code)) {
-	            const info = tsRetryData.data?.order || tsRetryData.data || {}
-	            const id = info.orderId || info.id || tsRetryData.data?.orderId
-	            this.log(`✓ Order placed on retry (timestamp resync): ${id}`)
-	            return { success: true, orderId: id ? String(id) : undefined, clientOrderId: params.clientOrderId } as any
-	          }
-          // Resync didn't fix it; fall through with the retry response
-          // so the operator sees the real underlying error.
-          Object.assign(data, tsRetryData)
-	          if (this.isBingXSuccess(data.code)) {
-	            const info = data.data?.order || data.data || {}
-	            const id = info.orderId || info.id || data.data?.orderId
-	            return { success: true, orderId: id ? String(id) : undefined, clientOrderId: params.clientOrderId } as any
-	          }
         }
 
         // Special-case: 109400 "In the Hedge mode, the 'ReduceOnly' field
@@ -876,12 +915,12 @@ export class BingXConnector extends BaseExchangeConnector {
             headers: { "X-BX-APIKEY": this.credentials.apiKey },
           })
           const roRetryData = await this.safeJson(roRetryResp)
-	          if (this.isBingXSuccess(roRetryData.code)) {
-	            const info = roRetryData.data?.order || roRetryData.data || {}
-	            const id = info.orderId || info.id || roRetryData.data?.orderId
-	            this.log(`✓ Order placed on retry (hedge, no reduceOnly): ${id}`)
-	            return { success: true, orderId: id ? String(id) : undefined, clientOrderId: params.clientOrderId } as any
-	          }
+          if (this.isBingXSuccess(roRetryData.code)) {
+            const info = roRetryData.data?.order || roRetryData.data || {}
+            const id = info.orderId || info.id || roRetryData.data?.orderId
+            this.log(`✓ Order placed on retry (hedge, no reduceOnly): ${id}`)
+            return { success: true, orderId: id ? String(id) : undefined }
+          }
           // Fall through with the retry's response so the operator sees
           // the real underlying error rather than the 109400 we already
           // worked around.
@@ -909,12 +948,12 @@ export class BingXConnector extends BaseExchangeConnector {
             headers: { "X-BX-APIKEY": this.credentials.apiKey },
           })
           const retryData = await this.safeJson(retryResp)
-	          if (this.isBingXSuccess(retryData.code)) {
-	            const info = retryData.data?.order || retryData.data || {}
-	            const id = info.orderId || info.id || retryData.data?.orderId
-	            this.log(`✓ Order placed on retry (one-way): ${id}`)
-	            return { success: true, orderId: id ? String(id) : undefined, clientOrderId: params.clientOrderId } as any
-	          }
+          if (this.isBingXSuccess(retryData.code)) {
+            const info = retryData.data?.order || retryData.data || {}
+            const id = info.orderId || info.id || retryData.data?.orderId
+            this.log(`✓ Order placed on retry (one-way): ${id}`)
+            return { success: true, orderId: id ? String(id) : undefined }
+          }
           throw new Error(`BingX API error (code=${retryData.code}): ${retryData.msg || "Unknown error"}`)
         }
         throw new Error(`BingX API error (code=${data.code}): ${data.msg || "Unknown error"}`)
@@ -928,6 +967,23 @@ export class BingXConnector extends BaseExchangeConnector {
 
       return { success: true, orderId: orderId ? String(orderId) : undefined, filledPrice: Number(orderInfo.avgPrice ?? orderInfo.price ?? orderInfo.filledPrice ?? 0) || undefined, avgPrice: Number(orderInfo.avgPrice ?? 0) || undefined, price: Number(orderInfo.price ?? 0) || undefined, filledQty: Number(orderInfo.executedQty ?? orderInfo.filledQty ?? orderInfo.cumQty ?? 0) || undefined, executedQty: Number(orderInfo.executedQty ?? 0) || undefined, status: orderInfo.status }
     } catch (error) {
+      if (options.clientOrderId && this.isAmbiguousTransportFailure(error)) {
+        const recovered = await this.recoverPlacedOrderByClientId(symbol, options.clientOrderId).catch(() => null)
+        if (recovered) {
+          const id = recovered.orderId || recovered.orderID || recovered.id
+          this.log(`✓ Order recovered by clientOrderId after ambiguous transport failure: ${id}`)
+          return {
+            success: true,
+            orderId: String(id),
+            filledPrice: Number(recovered.avgPrice ?? recovered.price ?? recovered.filledPrice ?? 0) || undefined,
+            avgPrice: Number(recovered.avgPrice ?? 0) || undefined,
+            price: Number(recovered.price ?? 0) || undefined,
+            filledQty: Number(recovered.executedQty ?? recovered.filledQty ?? recovered.cumQty ?? 0) || undefined,
+            executedQty: Number(recovered.executedQty ?? 0) || undefined,
+            status: recovered.status,
+          }
+        }
+      }
       const errorMsg = error instanceof Error ? error.message : String(error)
       this.logError(`✗ Failed to place order: ${errorMsg}`)
       return { success: false, error: errorMsg }
@@ -1057,10 +1113,6 @@ export class BingXConnector extends BaseExchangeConnector {
               this.log(`✓ ${orderType} placed on timestamp retry: ${id}`)
               return { success: true, orderId: String(id), orderPrice: stopRounded, stopPrice: stopRounded }
             }
-	            if (id) {
-	              this.log(`✓ ${orderType} placed on timestamp retry: ${id}`)
-	              return { success: true, orderId: String(id), clientOrderId: params.clientOrderId } as any
-	            }
             // Fall through to error handling if orderId was not found
           }
           Object.assign(data, tsData)
@@ -1089,10 +1141,6 @@ export class BingXConnector extends BaseExchangeConnector {
               this.log(`✓ ${orderType} placed on reduceOnly hedge retry: ${id2}`)
               return { success: true, orderId: String(id2), orderPrice: stopRounded, stopPrice: stopRounded }
             }
-	            if (id2) {
-	              this.log(`✓ ${orderType} placed on reduceOnly hedge retry: ${id2}`)
-	              return { success: true, orderId: String(id2), clientOrderId: params.clientOrderId } as any
-	            }
             // Fall through to error handling if orderId was not found
           }
           // Fall through to the normal error path with the retry's response.
@@ -1140,6 +1188,14 @@ export class BingXConnector extends BaseExchangeConnector {
       this.log(`✓ ${orderType} placed: ${orderId} @ ${stopStr}`)
       return { success: true, orderId: String(orderId), orderPrice: stopRounded, stopPrice: stopRounded }
     } catch (error) {
+      if (options.clientOrderId && this.isAmbiguousTransportFailure(error)) {
+        const recovered = await this.recoverPlacedOrderByClientId(symbol, options.clientOrderId).catch(() => null)
+        if (recovered) {
+          const id = recovered.orderId || recovered.orderID || recovered.id
+          this.log(`✓ Stop order recovered by clientOrderId after ambiguous transport failure: ${id}`)
+          return { success: true, orderId: String(id), orderPrice: triggerPrice, stopPrice: triggerPrice }
+        }
+      }
       const errorMsg = error instanceof Error ? error.message : String(error)
       this.logError(`✗ Failed to place stop order: ${errorMsg}`)
       return { success: false, error: errorMsg }
@@ -1219,6 +1275,7 @@ export class BingXConnector extends BaseExchangeConnector {
 
   async getOrder(symbol: string, orderId: string): Promise<any> {
     try {
+      await this.syncServerTime()
       this.log(`Fetching order ${orderId} for ${symbol}`)
 
       // Perp swap: GET /openApi/swap/v2/trade/order (same path as place/cancel, different method).
@@ -1250,7 +1307,7 @@ export class BingXConnector extends BaseExchangeConnector {
       // Normalize the raw BingX order object to the ExchangeOrder interface
       // so callers can rely on `filledQty`, `filledPrice`, and normalised
       // `status` regardless of the underlying API version.
-      const raw = data.data
+      const raw = data.data?.order || data.data
       if (!raw) return null
       const rawStatus = String(raw.status ?? raw.orderStatus ?? "").toUpperCase()
       const normalizedStatus =
@@ -1284,30 +1341,35 @@ export class BingXConnector extends BaseExchangeConnector {
 
   async getOpenOrders(symbol?: string): Promise<any[]> {
     try {
+      await this.syncServerTime()
       this.log(`Fetching open orders${symbol ? ` for ${symbol}` : ""}`)
 
       // Perp: /openApi/swap/v2/trade/openOrders (not v3).
       const endpoint = this.credentials.apiType === "spot" ? "/openApi/spot/v1/trade/openOrders" : "/openApi/swap/v2/trade/openOrders"
 
-      const params: Record<string, any> = {
-        timestamp: this.getTimestamp(),
-      }
+      const params: Record<string, any> = {}
 
       if (symbol) {
         params.symbol = this.toBingXSymbol(symbol)
       }
 
-      const { signature, queryString: signedQs } = this.signParams(params)
-      const url = `${this.getBaseUrl()}${endpoint}?${signedQs}&signature=${signature}`
+      const request = async () => {
+        params.timestamp = this.getTimestamp()
+        const { signature, queryString: signedQs } = this.signParams(params)
+        const url = `${this.getBaseUrl()}${endpoint}?${signedQs}&signature=${signature}`
+        const response = await this.rateLimitedFetch(url, {
+          headers: { "X-BX-APIKEY": this.credentials.apiKey },
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        return this.safeJson(response)
+      }
 
-      const response = await this.rateLimitedFetch(url, {
-        headers: { "X-BX-APIKEY": this.credentials.apiKey },
-      })
-
-      const data = await this.safeJson(response)
-
+      let data = await this.signedReadWithTransportRetry(request)
+      if (!this.isBingXSuccess(data.code) && await this.recoverTransientSignedRead(data)) {
+        data = await this.signedReadWithTransportRetry(request)
+      }
       if (!this.isBingXSuccess(data.code)) {
-        return []
+        throw new Error(`BingX API error (code=${data.code}): ${data.msg || "Unknown error"}`)
       }
 
       // Swap openOrders returns { orders: [...] }; spot returns an array directly.
@@ -1316,19 +1378,29 @@ export class BingXConnector extends BaseExchangeConnector {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       this.logError(`✗ Failed to fetch open orders: ${errorMsg}`)
-      return []
+      throw error
     }
   }
 
   async getOrderHistory(symbol?: string, limit: number = 50): Promise<any[]> {
     try {
+      await this.syncServerTime()
       this.log(`Fetching order history${symbol ? ` for ${symbol}` : ""} (limit: ${limit})`)
 
       // Perp: /openApi/swap/v2/trade/allOrders (not v3).
       const endpoint = this.credentials.apiType === "spot" ? "/openApi/spot/v1/trade/allOrders" : "/openApi/swap/v2/trade/allOrders"
 
+      // BingX does not reliably default to the newest page when no time range
+      // is supplied: live verification returned an arbitrary five-day-old
+      // page even though freshly filled orders existed. Request the newest
+      // supported seven-day window explicitly. Older records are persisted by
+      // the dashboard's own continuity store; this connector method is the
+      // exchange-side recent-history/reconciliation feed.
+      const exchangeNow = this.getTimestamp() + this.timestampLagMs
       const params: Record<string, any> = {
         limit,
+        startTime: exchangeNow - 7 * 24 * 60 * 60 * 1000,
+        endTime: exchangeNow,
         timestamp: this.getTimestamp(),
       }
 
@@ -1336,17 +1408,26 @@ export class BingXConnector extends BaseExchangeConnector {
         params.symbol = this.toBingXSymbol(symbol)
       }
 
-      const { signature, queryString: signedQs } = this.signParams(params)
-      const url = `${this.getBaseUrl()}${endpoint}?${signedQs}&signature=${signature}`
+      const request = async () => {
+        const { signature, queryString: signedQs } = this.signParams(params)
+        const url = `${this.getBaseUrl()}${endpoint}?${signedQs}&signature=${signature}`
+        const response = await this.rateLimitedFetch(url, {
+          headers: { "X-BX-APIKEY": this.credentials.apiKey },
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        return this.safeJson(response)
+      }
 
-      const response = await this.rateLimitedFetch(url, {
-        headers: { "X-BX-APIKEY": this.credentials.apiKey },
-      })
-
-      const data = await this.safeJson(response)
-
+      let data = await this.signedReadWithTransportRetry(request)
+      if (!this.isBingXSuccess(data.code) && await this.recoverTransientSignedRead(data)) {
+        const retryNow = this.getTimestamp() + this.timestampLagMs
+        params.startTime = retryNow - 7 * 24 * 60 * 60 * 1000
+        params.endTime = retryNow
+        params.timestamp = this.getTimestamp()
+        data = await this.signedReadWithTransportRetry(request)
+      }
       if (!this.isBingXSuccess(data.code)) {
-        return []
+        throw new Error(`BingX API error (code=${data.code}): ${data.msg || "Unknown error"}`)
       }
 
       const rows = data.data?.orders || data.data
@@ -1354,7 +1435,7 @@ export class BingXConnector extends BaseExchangeConnector {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       this.logError(`✗ Failed to fetch order history: ${errorMsg}`)
-      return []
+      throw error
     }
   }
 
@@ -1374,17 +1455,14 @@ export class BingXConnector extends BaseExchangeConnector {
     }
 
     try {
+      await this.syncServerTime()
       this.log(`Fetching positions${symbol ? ` for ${symbol}` : ""} (${effectiveContractType})`)
 
-      const params: Record<string, any> = {
-        timestamp: this.getTimestamp(),
-      }
+      const params: Record<string, any> = {}
 
       if (symbol) {
         params.symbol = this.toBingXSymbol(symbol)
       }
-
-      const { signature, queryString: signedQs } = this.signParams(params)
 
       // Use different endpoint based on contract type
       let endpoint = "/openApi/swap/v3/user/positions" // USDT Perpetual
@@ -1392,24 +1470,32 @@ export class BingXConnector extends BaseExchangeConnector {
         endpoint = "/openApi/cswap/v1/user/positions" // Coin-M Perpetual
       }
 
-      const url = `${this.getBaseUrl()}${endpoint}?${signedQs}&signature=${signature}`
       this.log(`Using endpoint: ${endpoint}`)
 
-      const response = await this.rateLimitedFetch(url, {
-        headers: { "X-BX-APIKEY": this.credentials.apiKey },
-      })
+      const request = async () => {
+        params.timestamp = this.getTimestamp()
+        const { signature, queryString: signedQs } = this.signParams(params)
+        const url = `${this.getBaseUrl()}${endpoint}?${signedQs}&signature=${signature}`
+        const response = await this.rateLimitedFetch(url, {
+          headers: { "X-BX-APIKEY": this.credentials.apiKey },
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        return this.safeJson(response)
+      }
 
-      const data = await this.safeJson(response)
-
+      let data = await this.signedReadWithTransportRetry(request)
+      if (!this.isBingXSuccess(data.code) && await this.recoverTransientSignedRead(data)) {
+        data = await this.signedReadWithTransportRetry(request)
+      }
       if (!this.isBingXSuccess(data.code)) {
-        return []
+        throw new Error(`BingX API error (code=${data.code}): ${data.msg || "Unknown error"}`)
       }
 
       return Array.isArray(data.data) ? data.data : []
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       this.logError(`✗ Failed to fetch positions: ${errorMsg}`)
-      return []
+      throw error
     }
   }
 
@@ -2700,6 +2786,7 @@ export class BingXConnector extends BaseExchangeConnector {
     clientOrderId?: string
   ): Promise<{ success: boolean; order?: any; error?: string }> {
     try {
+      await this.syncServerTime()
       const params: Record<string, any> = {
         symbol: this.toBingXSymbol(symbol),
         timestamp: this.getTimestamp(),
@@ -2708,15 +2795,18 @@ export class BingXConnector extends BaseExchangeConnector {
       if (orderId) params.orderId = orderId
       if (clientOrderId) params.clientOrderId = clientOrderId
       
-      const { signature, queryString: signedQs } = this.signParams(params)
-      const url = `${this.getBaseUrl()}/openApi/swap/v2/trade/order?${signedQs}&signature=${signature}`
-      
-      const response = await this.rateLimitedFetch(url, {
-        method: "GET",
-        headers: { "X-BX-APIKEY": this.credentials.apiKey },
-      })
-      
-      const data = await this.safeJson(response)
+      const request = async () => {
+        params.timestamp = this.getTimestamp()
+        const { signature, queryString: signedQs } = this.signParams(params)
+        const url = `${this.getBaseUrl()}/openApi/swap/v2/trade/order?${signedQs}&signature=${signature}`
+        const response = await this.rateLimitedFetch(url, {
+          method: "GET",
+          headers: { "X-BX-APIKEY": this.credentials.apiKey },
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        return this.safeJson(response)
+      }
+      const data = await this.signedReadWithTransportRetry(request)
       
       if (!this.isBingXSuccess(data.code)) {
         throw new Error(`BingX API error (code=${data.code}): ${data.msg || "Unknown error"}`)
@@ -2804,6 +2894,7 @@ export class BingXConnector extends BaseExchangeConnector {
     currency?: string
   ): Promise<{ success: boolean; trades?: any[]; error?: string }> {
     try {
+      await this.syncServerTime()
       const params: Record<string, any> = {
         tradingUnit,
         startTs,

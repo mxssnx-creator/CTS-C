@@ -34,7 +34,9 @@ export class RateLimiter {
     },
     bingx: {
       requestsPerSecond: 5,
-      requestsPerMinute: 100,
+      // 5/s sustained is 300/min. Keep a 20% safety reserve while avoiding
+      // the old 100/min cap that throttled healthy 12-symbol engine baskets.
+      requestsPerMinute: 240,
       maxConcurrent: 3,
     },
     binance: {
@@ -87,36 +89,47 @@ export class RateLimiter {
     if (this.processing || this.queue.length === 0) return
 
     this.processing = true
+    try {
+      while (this.queue.length > 0) {
+        let launched = false
 
-    while (this.queue.length > 0) {
-      // Check if we can make a request
-      if (!this.canMakeRequest()) {
-        await this.sleep(100) // Wait 100ms and check again
-        continue
+        // Fill every currently available concurrency slot. The previous
+        // implementation awaited each request inside this loop, which made
+        // maxConcurrent dead configuration and serialized even independent
+        // market-data calls. Requests resolve their own promises out-of-band;
+        // the scheduler only controls admission rate and concurrency.
+        while (this.queue.length > 0 && this.canMakeRequest()) {
+          const request = this.queue.shift()!
+          this.activeRequests++
+          launched = true
+
+          const now = Date.now()
+          this.requestTimestamps.push(now)
+          this.requestTimestamps = this.requestTimestamps.filter((ts) => now - ts < 60_000)
+
+          void Promise.resolve()
+            .then(() => request.execute())
+            .then(request.resolve, request.reject)
+            .finally(() => {
+              this.activeRequests--
+              // A request completion may have opened a concurrency slot after
+              // the scheduler loop became idle. Safely nudge it again.
+              if (this.queue.length > 0) void this.processQueue()
+            })
+        }
+
+        if (this.queue.length > 0) {
+          // Poll quickly enough to fill newly available slots without adding
+          // visible latency, while still respecting the one-second window.
+          await this.sleep(launched ? 10 : 25)
+        }
       }
-
-      const request = this.queue.shift()!
-      this.activeRequests++
-
-      // Track request timestamp
-      const now = Date.now()
-      this.requestTimestamps.push(now)
-
-      // Clean old timestamps (older than 1 minute)
-      this.requestTimestamps = this.requestTimestamps.filter((ts) => now - ts < 60000)
-
-      // Execute the request
-      try {
-        const result = await request.execute()
-        request.resolve(result)
-      } catch (error) {
-        request.reject(error)
-      } finally {
-        this.activeRequests--
-      }
+    } finally {
+      this.processing = false
+      // Cover the narrow race where a request was enqueued between the final
+      // queue check and clearing `processing`.
+      if (this.queue.length > 0) void this.processQueue()
     }
-
-    this.processing = false
   }
 
   canMakeRequest(): boolean {
