@@ -1,0 +1,17 @@
+{
+  "cyclePauseMs": 50,
+  "mainEngineIntervalMs": 700,
+  "presetEngineIntervalMs": 120000,
+  "strategyUpdateIntervalMs": 10000,
+  "realtimeIntervalMs": 300,
+  "mainEngineEnabled": true,
+  "presetEngineEnabled": true,
+  "default_leverage": 0,
+  "useMaximalLeverage": true,
+  "leveragePercentage": 100,
+  "max_open_positions": 0,
+  "max_drawdown_percent": 20,
+  "databaseLimitPerSecond": 10000,
+  "databaseLimitPerMinute": 500000,
+  "databaseLimitPerDay": 0
+}

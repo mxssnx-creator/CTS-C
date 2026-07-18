@@ -1,0 +1,284 @@
+/**
+ * lib/connection-recoordinator.ts
+ *
+ * Single source of truth for "the operator just saved connection
+ * settings — propagate the change to the engine RIGHT NOW so the next
+ * cycle reflects it, no 3 s watcher wait, no page reload."
+ *
+ * The full propagation has THREE steps and ALL of them must run in the
+ * settings API handlers. Before this helper existed the three step were
+ * duplicated (and partially missing) across four handlers in two route
+ * files, which is exactly why a save-while-stopped (or a save-that-
+ * should-stop) silently failed to take effect.
+ *
+ * Step 1 — `notifySettingsChanged`
+ *   Writes a `pending-changes:{id}` envelope to Redis with the diff and
+ *   a coarse change-type ("restart" / "reload" / "cosmetic"). Already
+ *   running engines pick this up on their 3 s watcher tick. This is the
+ *   correctness layer — it MUST run for every change.
+ *
+ * Step 2 — `applyPendingChangesNow`
+ *   Latency optimization: synchronously asks the in-process engine
+ *   manager (if any) to consume the pending envelope NOW instead of
+ *   waiting for its next watcher tick. No-op if the engine isn't
+ *   running in this process.
+ *
+ * Step 3 — recoordinate (start / stop)
+ *   The piece operators kept missing. The engine watcher only runs
+ *   for ALREADY-RUNNING engines, so a save while the engine is stopped
+ *   (or a save that toggles `is_enabled` off) needed a separate path:
+ *     • If the updated connection should now run → `startMissingEngines`.
+ *     • If the updated connection should no longer run but IS running
+ *       → `stopEngine`.
+ *   Both calls are idempotent and safe to invoke even when no action
+ *   is needed.
+ *
+ * Pass the connection BEFORE and AFTER the update so we can detect the
+ * field diff correctly. The "after" snapshot is what gets persisted; the
+ * "before" snapshot is what was loaded from Redis at the top of the
+ * handler.
+ */
+
+import { notifySettingsChanged, detectChangedFields } from "@/lib/settings-coordinator"
+
+interface RecoordinateOptions {
+  /**
+   * When the caller already knows the changed-fields list (e.g. PATCH
+   * /settings only receives a partial payload, so `detectChangedFields`
+   * may miss settings nested under `connection_settings`), they can
+   * pass an explicit override. The diff is still recomputed for the
+   * notify envelope, but this list takes precedence when deciding
+   * whether to short-circuit.
+   */
+  changedFieldsOverride?: string[]
+  /**
+   * Tag for log lines so it's clear which handler initiated the
+   * recoordination. e.g. "PATCH /settings", "PUT /connections/[id]".
+   */
+  logTag: string
+}
+
+/**
+ * Run the full propagation chain. Designed to never throw — every step
+ * is wrapped, so a failure in (say) coordinator import won't cause the
+ * settings save itself to return 500. Failures are logged with the
+ * provided `logTag` so they surface in the dev console.
+ */
+export async function recoordinateAfterSettingsChange(
+  id: string,
+  before: Record<string, any>,
+  after: Record<string, any>,
+  opts: RecoordinateOptions,
+): Promise<void> {
+  const detected = detectChangedFields(before, after)
+  const changedFields =
+    opts.changedFieldsOverride && opts.changedFieldsOverride.length > 0
+      ? opts.changedFieldsOverride
+      : detected
+
+  if (changedFields.length === 0) {
+    return
+  }
+
+  // Step 1 — durable notify (Redis envelope read by all running engines).
+  try {
+    await notifySettingsChanged(id, changedFields, before, after)
+  } catch (notifyErr) {
+    console.warn(
+      `[v0] [${opts.logTag}] notifySettingsChanged failed for ${id}:`,
+      notifyErr instanceof Error ? notifyErr.message : String(notifyErr),
+    )
+    // Continue — the recoordinate step below can still start/stop the
+    // engine even if the notify envelope didn't land.
+  }
+
+  // ── SETTINGS CHANGES THAT AFFECT PROGRESS VISIBILITY ──────────────────
+  // Detect which types of setting changes require progress cache invalidation:
+  // 1. Symbol changes (symbol_count, force_symbols) → new progression
+  // 2. Strategy/coordination changes → prehistoric recalc needed
+  // 3. Eval threshold changes → realtime progress affected
+  const significantChanges = [
+    // Symbols — prehistoric must restart with new symbol list
+    "symbol_count", "force_symbols", "symbols",
+    // Strategy coordination — variants, block/dca, axis settings
+    "coordination_settings", "variantTrailingEnabled", "variantBlockEnabled",
+    "variantDcaEnabled", "variantPauseEnabled",
+    "axisPrevEnabled", "axisLastEnabled", "axisContEnabled", "axisPauseEnabled",
+    "axisPrevMaxWindow", "axisLastMaxWindow", "axisContMaxWindow", "axisPauseMaxWindow",
+    "blockVolumeRatio", "blockMaxStack",
+    // Minimal step count affects pseudo position placement
+    "minimal_step_count", "minimalStepCount", "minStep",
+    // Eval thresholds affect strategy/set progression
+    "profitFactorMin", "baseProfitFactor", "mainProfitFactor", "realProfitFactor", "liveProfitFactor",
+    "stageMinPosCountBase", "stageMinPosCountMain", "stageMinPosCountReal",
+    "maxDrawdownTimeMainHours", "maxDrawdownTimeRealHours", "maxDrawdownTimeLiveHours",
+    // Volume/leverage affects position sizing and entry counts
+    "volume_factor", "leveragePercentage", "useMaximalLeverage",
+    // Position window/count settings affect prehistoric calculations
+    "prevPosWindow", "prevPosMinCount", "mainEvalPosCount", "realEvalPosCount",
+  ]
+  const progressAffectingChange = changedFields.some(f => significantChanges.includes(f))
+
+  // ── SYMBOL COUNT OR FORCE_SYMBOLS CHANGED: Archive and invalidate cache ──
+  // If the operator changed the symbol list or forced symbols, the current
+  // progression becomes semantically invalid. Trigger a full archive + new
+  // progression so the UI shows progress against the CORRECT new symbol count.
+  // ALSO invalidate the engine's symbol cache so it re-reads from Redis immediately.
+  const symbolsChanged = changedFields.includes("symbol_count") || changedFields.includes("force_symbols")
+  if (symbolsChanged) {
+    try {
+      const { ProgressionStateManager } = await import("@/lib/progression-state-manager")
+      const newEpoch = Date.now()
+      const newSessionNum = await ProgressionStateManager.archiveAndStartNewProgression(id, newEpoch)
+      console.log(
+        `[v0] [${opts.logTag}] ${changedFields.includes("force_symbols") ? "Force symbols" : "Symbol count"} changed for ${id} → archived old progression, started new session ${newSessionNum}`,
+      )
+    } catch (archiveErr) {
+      console.warn(
+        `[v0] [${opts.logTag}] Failed to archive progression after symbol change for ${id}:`,
+        archiveErr instanceof Error ? archiveErr.message : String(archiveErr),
+      )
+      // Continue — progression will still update under the old schema,
+      // but won't have the new symbol count snapshot yet. Engine start will
+      // fill it in on the next boot.
+    }
+  }
+
+  // ── PROGRESS INVALIDATION FOR SIGNIFICANT SETTINGS ──────────────────────
+  // When progress-affecting settings change, we need to clear cached progress
+  // data so the UI shows fresh prehistoric/realtime stats on next fetch.
+  // This ensures the stats endpoint returns up-to-date progress reflecting
+  // the new settings (not stale cached values from before the change).
+  if (progressAffectingChange && !symbolsChanged) {
+    // For non-symbol changes, we don't archive (symbol changes do that above).
+    // But we DO want to clear any cached progress data so the UI refreshes.
+    // The progression data is persisted in Redis but won't auto-recalculate
+    // for parameter changes (e.g., PF threshold), so we can't archive it.
+    // Instead, we rely on the UI's settings-change listener to force-refresh
+    // the stats endpoint, which will re-read Redis and compute new breakdowns.
+    try {
+      // If we need to invalidate progress cache in Redis for parameter changes,
+      // we can clear specific keys that should be recomputed. For now, the
+      // UI-side event listener (connection-settings-updated) is the main
+      // refresh trigger, and the stats endpoint always computes fresh.
+      console.log(
+        `[v0] [${opts.logTag}] Progress-affecting settings changed for ${id} (${changedFields.join(", ")}) — UI will refresh stats`
+      )
+    } catch (progressErr) {
+      console.warn(
+        `[v0] [${opts.logTag}] Failed to handle progress invalidation for ${id}:`,
+        progressErr instanceof Error ? progressErr.message : String(progressErr),
+      )
+      // Non-fatal — UI refresh will still happen via event listener
+    }
+  }
+
+  // Steps 2 & 3 — coordinator-level actions. Bundled in one try block
+  // because they all need the same `coordinator` reference, and a
+  // failure to load the coordinator module fails both equivalently.
+  try {
+    const { getGlobalTradeEngineCoordinator } = await import("@/lib/trade-engine")
+    const coordinator = getGlobalTradeEngineCoordinator()
+    
+    // Guard against null coordinator (can happen if engine is being reset)
+    if (!coordinator) {
+      console.warn(
+        `[v0] [${opts.logTag}] Global coordinator is null/undefined for ${id} — skipping recoordination`
+      )
+      return
+    }
+
+    // ── Invalidate symbol cache if symbols changed ──────────────────────
+    // When force_symbols or active_symbols are updated, the engine's cached
+    // symbol list must be invalidated so getSymbols() re-reads from Redis
+    // immediately instead of using the 5s TTL cache.
+    if (symbolsChanged && (coordinator as any).getEngineManager) {
+      try {
+        const manager = (coordinator as any).getEngineManager(id)
+        if (manager && typeof (manager as any).invalidateSymbolCache === "function") {
+          (manager as any).invalidateSymbolCache()
+          console.log(`[v0] [${opts.logTag}] Symbol cache invalidated for ${id}`)
+        }
+      } catch (cacheErr) {
+        console.warn(
+          `[v0] [${opts.logTag}] Failed to invalidate symbol cache for ${id}:`,
+          cacheErr instanceof Error ? cacheErr.message : String(cacheErr),
+        )
+        // Non-fatal — engine will pick up the new symbols on the next 5s cache refresh
+      }
+    }
+
+    // Step 2 — in-process fast-path (no-op when engine isn't running here).
+    // Isolated try-catch to prevent coordinator crash from affecting other operations
+    try {
+      await coordinator.applyPendingChangesNow(id)
+    } catch (applyErr) {
+      console.warn(
+        `[v0] [${opts.logTag}] applyPendingChangesNow failed for ${id}:`,
+        applyErr instanceof Error ? applyErr.message : String(applyErr),
+      )
+      // Continue to recoordination — the change can still be applied
+    }
+
+    // Step 3 — recoordinate. Decide "should this connection be running
+    // right now" using the SAME predicate the boot-time reconciliation
+    // sweep uses, so behavior is consistent between (a) page-load
+    // sweep, (b) settings save, and (c) toggle endpoints.
+    const { isConnectionMainProcessing, hasConnectionCredentials, isTruthyFlag } = await import(
+      "@/lib/connection-state-utils"
+    )
+    const shouldRun =
+      isConnectionMainProcessing(after) &&
+      (hasConnectionCredentials(after, 5, true) ||
+        isTruthyFlag((after as any).is_predefined) ||
+        isTruthyFlag((after as any).is_testnet) ||
+        isTruthyFlag((after as any).demo_mode))
+
+    const isRunning = coordinator.isEngineRunning(id)
+
+    if (shouldRun && !isRunning) {
+      // Should run, doesn't — START, but ONLY if the operator has the
+      // global engine running. AUTO-START GUARD: without this gate,
+      // saving ANY setting while the operator had explicitly stopped the
+      // engine (connection flags still enabled) would silently resurrect
+      // it. Settings saved while stopped are picked up on the next
+      // explicit operator Start via the durable notify envelope (Step 1).
+      let globalRunning = false
+      try {
+        const { getRedisClient } = await import("@/lib/redis-db")
+        const globalState = await getRedisClient().hgetall("trade_engine:global")
+        globalRunning = (globalState as any)?.status === "running"
+      } catch {
+        globalRunning = false
+      }
+      if (globalRunning) {
+        console.log(
+          `[v0] [${opts.logTag}] Recoordinate: starting engine for ${id} (was stopped, now should run, global=running)`,
+        )
+        await coordinator.startMissingEngines([after])
+      } else {
+        console.log(
+          `[v0] [${opts.logTag}] Recoordinate: NOT starting ${id} — global engine not running (operator stop honored); settings apply on next Start`,
+        )
+      }
+    } else if (!shouldRun && isRunning) {
+      // Should NOT run, but is — STOP. This handles `is_enabled: false`
+      // toggles, dashboard-disable, credential clear, etc.
+      console.log(
+        `[v0] [${opts.logTag}] Recoordinate: stopping engine for ${id} (was running, no longer should)`,
+      )
+      await coordinator.stopEngine(id)
+    } else if (shouldRun && isRunning) {
+      // Should run and is — the hot-reload path inside
+      // `applyPendingChangesNow` already handled the change. Nothing
+      // to do here. Logged at debug verbosity only.
+      // console.log(`[v0] [${opts.logTag}] Engine ${id} hot-reloaded in place`)
+    }
+    // else: !shouldRun && !isRunning — nothing to do.
+  } catch (coordErr) {
+    console.warn(
+      `[v0] [${opts.logTag}] coordinator recoordination failed for ${id}:`,
+      coordErr instanceof Error ? coordErr.message : String(coordErr),
+    )
+  }
+}

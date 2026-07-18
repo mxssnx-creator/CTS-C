@@ -1,0 +1,147 @@
+import { NextResponse } from "next/server"
+import { getGlobalTradeEngineCoordinator } from "@/lib/trade-engine"
+import { getActiveConnectionsForEngine, getRedisClient, initRedis } from "@/lib/redis-db"
+import { SystemLogger } from "@/lib/system-logger"
+
+function isEnabledFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === "1" || value === "true"
+}
+
+function parseSymbols(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.length > 0)
+  }
+  if (typeof value === "string" && value.length > 0) {
+    try {
+      const parsed = JSON.parse(value)
+      if (Array.isArray(parsed)) return parseSymbols(parsed)
+    } catch {
+      return value.split(",").map((item) => item.trim()).filter(Boolean)
+    }
+  }
+  return []
+}
+
+export const dynamic = "force-dynamic"
+export async function GET() {
+  try {
+    console.log("[v0] Fetching all trade engine statuses")
+    await initRedis()
+    const client = getRedisClient()
+    const globalState = await client.hgetall("trade_engine:global").catch(() => ({} as Record<string, string>))
+    const globallyRunning = globalState.status === "running"
+    const globallyPaused = globalState.status === "paused"
+
+    const coordinator = getGlobalTradeEngineCoordinator()
+    
+    // Null check on coordinator
+    if (!coordinator) {
+      console.warn("[v0] Coordinator is null - engines may not be initialized yet")
+      return NextResponse.json({
+        success: false,
+        error: "Trade engine coordinator not initialized",
+        engines: [],
+        summary: { total: 0, running: 0, stopped: 0 },
+        timestamp: new Date().toISOString(),
+      }, { status: 503 })
+    }
+
+    const connections = await getActiveConnectionsForEngine()
+    
+    // Ensure connections is an array
+    if (!Array.isArray(connections)) {
+      console.error("[v0] Connections is not an array:", typeof connections)
+      return NextResponse.json({
+        success: false,
+        error: "Invalid connections data",
+        engines: [],
+        summary: { total: 0, running: 0, stopped: 0 },
+        timestamp: new Date().toISOString(),
+      }, { status: 500 })
+    }
+
+    const activeConnections = connections.filter(
+      (c) =>
+        (isEnabledFlag(c.is_active_inserted) || isEnabledFlag(c.is_active)) &&
+        (isEnabledFlag(c.is_enabled_dashboard) || isEnabledFlag(c.is_enabled))
+    )
+
+    const engineStatuses = await Promise.all(
+      activeConnections.map(async (conn) => {
+        try {
+          const status = await coordinator.getEngineStatus(conn.id)
+          const isRunning = globallyRunning && !globallyPaused
+          const configuredSymbols = parseSymbols(conn.active_symbols || conn.symbols)
+          const statusSymbols = parseSymbols(status?.symbols || status?.active_symbols)
+          const effectiveSymbols = configuredSymbols.length > 0 ? configuredSymbols : statusSymbols
+          const engineStatus = {
+            ...(status ?? {
+              status: globallyPaused ? "paused" : (isRunning ? "running" : "stopped"),
+              source: "trade_engine:global",
+            }),
+            ...(effectiveSymbols.length > 0
+              ? {
+                  symbols: effectiveSymbols,
+                  active_symbols: effectiveSymbols,
+                  symbol_count: effectiveSymbols.length,
+                }
+              : {}),
+          }
+
+          return {
+            connectionId: conn.id,
+            connectionName: conn.name,
+            exchange: conn.exchange,
+            isEnabled: isEnabledFlag(conn.is_enabled_dashboard) || isEnabledFlag(conn.is_enabled),
+            isActive: isEnabledFlag(conn.is_active_inserted) || isEnabledFlag(conn.is_active),
+            isLiveTrading: isEnabledFlag(conn.is_live_trade),
+            isEngineRunning: isRunning,
+            engineStatus,
+          }
+        } catch (error) {
+          console.error(`[v0] Failed to get status for ${conn.id}:`, error)
+          return {
+            connectionId: conn.id,
+            connectionName: conn.name,
+            exchange: conn.exchange,
+            isEnabled: isEnabledFlag(conn.is_enabled_dashboard) || isEnabledFlag(conn.is_enabled),
+            isActive: isEnabledFlag(conn.is_active_inserted) || isEnabledFlag(conn.is_active),
+            isLiveTrading: isEnabledFlag(conn.is_live_trade),
+            isEngineRunning: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+          }
+        }
+      })
+    )
+
+    const runningCount = engineStatuses.filter((s) => s.isEngineRunning).length
+    const totalCount = engineStatuses.length
+
+    console.log(`[v0] Engine status: ${runningCount}/${totalCount} running`)
+
+    return NextResponse.json({
+      success: true,
+      engines: engineStatuses,
+      summary: {
+        total: totalCount,
+        running: runningCount,
+        stopped: totalCount - runningCount,
+      },
+      timestamp: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.error("[v0] Failed to fetch engine statuses:", error)
+    await SystemLogger.logError(error, "trade-engine", "GET /api/trade-engine/status-all")
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Failed to fetch engine statuses",
+        details: error instanceof Error ? error.message : String(error),
+        engines: [],
+        summary: { total: 0, running: 0, stopped: 0 },
+      },
+      { status: 500 }
+    )
+  }
+}

@@ -1,0 +1,50 @@
+services:
+  cts-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cts-c-dashboard:4.0.0
+    container_name: cts-c-dashboard
+    init: true
+    ports:
+      - "${CTS_BIND_ADDRESS:-127.0.0.1}:${CTS_PORT:-3001}:3001"
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      HOSTNAME: "0.0.0.0"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must contain at least 32 random characters}"
+      CRON_SECRET: "${CRON_SECRET:?CRON_SECRET must contain a random value}"
+      ADMIN_AUTOLOGIN_ENABLED: "${ADMIN_AUTOLOGIN_ENABLED:-true}"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-Administrator}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@localhost}"
+      ALLOW_SELF_REGISTRATION: "false"
+      AUTH_SESSION_SECONDS: "${AUTH_SESSION_SECONDS:-28800}"
+      CTS_TRUSTED_ORIGINS: "${CTS_TRUSTED_ORIGINS:-localhost:3001}"
+      CTS_DEPLOYMENT_ID: "${CTS_DEPLOYMENT_ID:-compose-production}"
+      V0_REDIS_SNAPSHOT_PATH: "/app/state/redis-snapshot.json"
+      REDIS_SNAPSHOT_INTERVAL_MS: "${REDIS_SNAPSHOT_INTERVAL_MS:-30000}"
+      BINGX_API_KEY: "${BINGX_API_KEY:-}"
+      BINGX_API_SECRET: "${BINGX_API_SECRET:-}"
+    volumes:
+      - cts_state:/app/state
+      - cts_data:/app/data
+    restart: unless-stopped
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3001/api/health/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 5G
+
+volumes:
+  cts_state:
+  cts_data:

@@ -1,0 +1,184 @@
+import { NextRequest, NextResponse } from "next/server"
+import { getRedisClient, initRedis } from "@/lib/redis-db"
+import { createExchangeConnector } from "@/lib/exchange-connectors/factory"
+import type { ExchangeConnection } from "@/lib/types"
+
+export const dynamic = "force-dynamic"
+export async function POST(req: NextRequest) {
+  try {
+    await initRedis()
+    const body = await req.json()
+    const { connectionId, symbol, side, quantity, leverage } = body
+
+    if (!connectionId || !symbol || !side || !quantity || leverage === undefined) {
+      return NextResponse.json(
+        { error: "Missing required fields: connectionId, symbol, side, quantity, leverage" },
+        { status: 400 }
+      )
+    }
+
+    const client = getRedisClient()
+    
+    // Get connection details
+    const connData = await client.hgetall(`connection:${connectionId}`)
+    if (!connData || Object.keys(connData).length === 0) {
+      return NextResponse.json(
+        { error: `Connection ${connectionId} not found` },
+        { status: 404 }
+      )
+    }
+
+    const connection = {
+      id: connectionId,
+      name: connData.name || connectionId,
+      exchange: connData.exchange || "unknown",
+      api_key: connData.api_key || "",
+      api_secret: connData.api_secret || "",
+      api_passphrase: connData.api_passphrase || "",
+      api_type: connData.api_type || "",
+      contract_type: connData.contract_type || "",
+    } as any as ExchangeConnection
+
+    console.log(`[PlaceOrder] Placing ${side} order for ${symbol} x${leverage} with ${quantity} coins`)
+
+    // Choose connector: prefer simulated when FORCE_SIMULATED=1 or missing API keys
+    let connector: any = null
+    const forceSim = process.env.FORCE_SIMULATED === "1"
+    if (forceSim || !connection.api_key || !connection.api_secret) {
+      try {
+        const { SimulatedConnector } = await import("@/lib/exchange-connectors/simulated-connector")
+        connector = new SimulatedConnector({ apiKey: connection.api_key, apiSecret: connection.api_secret, isTestnet: false }, "simulated")
+        console.log(`[PlaceOrder] Using SimulatedConnector for ${connectionId} (forceSim=${forceSim})`)
+      } catch (simErr) {
+        console.warn(`[PlaceOrder] Failed to create SimulatedConnector fallback:`, simErr)
+      }
+    }
+
+    if (!connector) {
+      connector = await createExchangeConnector(connection.exchange, {
+        apiKey: connection.api_key,
+        apiSecret: connection.api_secret,
+        apiPassphrase: connection.api_passphrase || "",
+        isTestnet: false,
+        apiType: connection.api_type,
+        contractType: connection.contract_type,
+      })
+    }
+
+    // Set leverage if applicable (for swap/perpetual markets)
+    if (leverage && leverage > 1 && typeof connector?.setLeverage === "function") {
+      console.log(`[PlaceOrder] Setting leverage to ${leverage}x`)
+      try {
+        const leverageResult = await connector.setLeverage(symbol, leverage)
+        console.log(`[PlaceOrder] Leverage set: ${JSON.stringify(leverageResult)}`)
+      } catch (err) {
+        console.log(`[PlaceOrder] Could not set leverage (may not be a perpetual market):`, err instanceof Error ? err.message : String(err))
+      }
+    }
+
+    // Place market order with minimal volume
+    console.log(`[PlaceOrder] Placing market order: ${side} ${quantity} ${symbol} with leverage ${leverage}x`)
+    const result = await connector.placeOrder(symbol, side, quantity, 0, "market")
+
+    console.log(`[PlaceOrder] Order result:`, result)
+
+    if (!result || !result.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: result?.error || "Failed to place order",
+        },
+        { status: 400 }
+      )
+    }
+
+    // Persist a live position record and update progression counters so
+    // the dashboard reflects this test order immediately. Treat the
+    // order as filled for testing purposes if no explicit fill info exists.
+    try {
+      const { getRedisClient, saveMarketData, savePosition, getMarketData } = await import("@/lib/redis-db")
+      const client = getRedisClient()
+      // Determine fill price: prefer exchange-provided, else market data
+      let fillPrice = (result as any)?.filledPrice || (result as any)?.avgPrice || 0
+      if (!fillPrice || fillPrice <= 0) {
+        const md = await getMarketData(symbol, "1m").catch(() => null)
+        const latest = md && (md.latest || (Array.isArray(md) ? md[md.length - 1] : null))
+        fillPrice = latest ? parseFloat(String(((latest.close ?? latest[4] ?? latest.price) || 0))) || 0 : fillPrice
+      }
+
+      const execQty = Number(quantity) || Number((result as any)?.filledQty) || 0
+      const liveId = `live:${connectionId}:${symbol}:${side}:${Date.now()}:${Math.random().toString(36).slice(2,8)}`
+      const livePos: any = {
+        id: liveId,
+        connectionId,
+        symbol,
+        side: side === "buy" ? "long" : "short",
+        direction: side === "buy" ? "long" : "short",
+        entryPrice: fillPrice || 0,
+        executedQuantity: execQty,
+        remainingQuantity: 0,
+        averageExecutionPrice: fillPrice || 0,
+        quantity: execQty,
+        volumeUsd: (execQty || 0) * (fillPrice || 0),
+        leverage: leverage || 1,
+        marginType: "cross",
+        stopLoss: 0,
+        takeProfit: 0,
+        assignedStopLoss: 0,
+        assignedTakeProfit: 0,
+        status: execQty > 0 ? "open" : "placed",
+        fills: execQty > 0 ? [{ timestamp: Date.now(), quantity: execQty, price: fillPrice || 0, fee: 0, feeAsset: "" }] : [],
+        progression: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+
+      await savePosition(livePos as any)
+
+      // Update progression counters atomically
+      try {
+        await (client as any).hincrby(`progression:${connectionId}`, "live_orders_placed_count", 1)
+        if (execQty > 0) {
+          await (client as any).hincrby(`progression:${connectionId}`, "live_orders_filled_count", 1)
+          await (client as any).hincrby(`progression:${connectionId}`, "live_positions_created_count", 1)
+          // volume USD total as float (use hincrbyfloat when available)
+          if (typeof (client as any).hincrbyfloat === "function") {
+            await (client as any).hincrbyfloat(`progression:${connectionId}`, "live_volume_usd_total", (livePos.volumeUsd || 0))
+          } else {
+            await (client as any).hincrby(`progression:${connectionId}`, "live_volume_usd_total", Math.round(livePos.volumeUsd || 0))
+          }
+        }
+        // Update per-symbol orders map
+        const ordersBySymbolKey = `live_orders_by_symbol:${connectionId}`
+        const existingRaw = await client.hget(ordersBySymbolKey, symbol).catch(() => null)
+        let existing = existingRaw ? JSON.parse(String(existingRaw)) : { symbol, side, count: 0 }
+        existing.count = (existing.count || 0) + 1
+        await client.hset(ordersBySymbolKey, symbol, JSON.stringify(existing))
+      } catch (cErr) {
+        console.warn("[PlaceOrder] Failed to update progression counters:", cErr)
+      }
+    } catch (persistErr) {
+      console.warn("[PlaceOrder] Failed to persist live position:", persistErr)
+    }
+
+    return NextResponse.json({
+      success: true,
+      orderId: (result as any)?.orderId || (result as any)?.order_id || "N/A",
+      symbol,
+      side,
+      quantity,
+      leverage,
+      timestamp: Date.now(),
+      details: (result as any)?.details || result,
+    })
+  } catch (error) {
+    console.error("[PlaceOrder] Error:", error)
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    )
+  }
+}
