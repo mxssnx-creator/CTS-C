@@ -7,6 +7,8 @@ import { Activity, ArrowDownRight, ArrowUpRight, BarChart3, Check, ChevronRight,
 import { ThemeSwitcher, StyleSwitcher } from "./appearance"
 import { useTerminalSession } from "./session"
 import { formatProfitFactor, type ProfitFactorState } from "./profit-factor"
+import {CONNECTIONS,connectionInfo,type ConnectionId} from "@/core/connections"
+import type {CoordinationRow} from "./strategy-lab"
 import type { ExecutionSnapshot } from "./execution-ledger"
 import { ProgressionDetails, PaperEquity, type StageTelemetry } from "./progression-panel"
 const ExecutionLedger = dynamic(() => import("./execution-ledger").then(module => module.ExecutionLedger))
@@ -18,7 +20,7 @@ type Stage = StageTelemetry
 interface Connection { id: string; name: string; exchange: string; demo: boolean; configured: boolean; enabled: boolean; liveEnabled: boolean }
 interface Position { id: string; connectionId: string; symbol: string; direction: string; entryPrice: number; quantity: number; status: string; unrealizedPnl: number | null; realizedPnl: number; fee: number; createdAt: string | number | null; closedAt: string | number | null; source?: string }
 interface EventItem { timestamp: string; level: string; phase: string; message: string; connectionId: string }
-interface Snapshot { updatedAt: number; connections: Connection[]; equity: number | null; paperEquity?: number; positionCount?: number; positionDisplayLimit?: number; realizedPnl: number; fees: number|null;paperTotals?:{closed:number;wins:number;winRate:number|null;longOpen:number;shortOpen:number};engine?:{equityHistory:{equity:number}[]}; openPositions: Position[]; closedPositions: Position[]; stages: Record<string, Stage>; events: EventItem[]; settings: Record<string, string>; readiness: { x02Configured: boolean; status: string; engineStatus: string }; metricScope?: string; execution?: ExecutionSnapshot }
+interface Snapshot { connectionId?:ConnectionId;coordinationStats?:CoordinationRow[];updatedAt: number; connections: Connection[]; equity: number | null; paperEquity?: number; positionCount?: number; positionDisplayLimit?: number; realizedPnl: number; fees: number|null;paperTotals?:{closed:number;wins:number;winRate:number|null;longOpen:number;shortOpen:number};engine?:{symbolFees?:Record<string,{makerFeePct:number;takerFeePct:number}>;equityHistory:{equity:number}[]}; openPositions: Position[]; closedPositions: Position[]; stages: Record<string, Stage>; events: EventItem[]; settings: Record<string, string>; readiness: { configured?:boolean;environment?:string;x02Configured: boolean; status: string; engineStatus: string }; metricScope?: string; execution?: ExecutionSnapshot }
 type View = "terminal" | "strategies" | "positions" | "activity" | "connections" | "integrations"
 const NAV = [
   { id: "terminal", label: "Command center", icon: LayoutDashboard }, { id: "strategies", label: "Strategy lab", icon: SlidersHorizontal },
@@ -40,7 +42,7 @@ function SampleGauge({ value }: { value: number | null }) {
     <div><strong>{value === null ? "—" : `${pct.toFixed(0)}%`}</strong><span>sample readiness</span></div>
   </div>
 }
-function MarketTape() {
+function MarketTape({demo}:{demo:boolean}) {
   const [quotes, setQuotes] = useState<Record<string, { price: number }>>({})
   const [error, setError] = useState(false)
   const symbols = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "BCH-USDT"]
@@ -50,7 +52,7 @@ function MarketTape() {
     async function update() {
       try {
         if (document.hidden) return
-        const response = await fetch("/api/market-data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: ["BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "BCH-USDT"], exchange: "bingx", demo: true }), signal: abort.signal })
+        const response = await fetch("/api/market-data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbols: ["BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "BCH-USDT"], exchange: "bingx", demo }), signal: abort.signal })
         const body = await response.json()
         if (!response.ok || !body.success) throw new Error("No feed")
         setQuotes(body.data); setError(false)
@@ -59,8 +61,8 @@ function MarketTape() {
     }
     void update()
     return () => { abort.abort(); clearTimeout(timer) }
-  }, [])
-  return <div className="terminal-tape" aria-label="Public market quotes"><div className="terminal-tape-label"><Radio size={14} /><span>MARKET TAPE<small>{error ? "feed unavailable · last quotes" : "BingX VST · public prices"}</small></span></div>{symbols.map(symbol => <div className="terminal-ticker" key={symbol}><span>{symbol.replace("-USDT", "")}<small>/ USDT</small></span><strong>{quotes[symbol] ? money(quotes[symbol].price) : "—"}</strong></div>)}</div>
+  }, [demo])
+  return <div className="terminal-tape" aria-label="Public market quotes"><div className="terminal-tape-label"><Radio size={14} /><span>MARKET TAPE<small>{error ? "feed unavailable · last quotes" : `${demo?"BingX VST":"BingX mainnet"} · public prices`}</small></span></div>{symbols.map(symbol => <div className="terminal-ticker" key={symbol}><span>{symbol.replace("-USDT", "")}<small>/ USDT</small></span><strong>{quotes[symbol] ? money(quotes[symbol].price) : "—"}</strong></div>)}</div>
 }
 
 function Positions({ open, closed, compact = false, openTotal = open.length }: { open: Position[]; closed: Position[]; compact?: boolean; openTotal?: number }) {
@@ -89,6 +91,8 @@ function EventLog({ events, full = false }: { events: EventItem[]; full?: boolea
 
 export function TradingTerminal() {
   const { logout } = useTerminalSession()
+  const [connectionId,setConnectionId]=useState<ConnectionId>("bingx-x02")
+  const selectedConnection=connectionInfo(connectionId),connectionName=selectedConnection.name.toLowerCase()
   const [view, setView] = useState<View>("terminal")
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [error, setError] = useState("")
@@ -105,15 +109,16 @@ export function TradingTerminal() {
     inFlight.current = true
     const abort=new AbortController();controller.current=abort
     try {
-      const response = await fetch("/api/terminal", { cache: "no-store", signal: abort.signal })
+      const response = await fetch(`/api/terminal?connection=${connectionId}`, { cache: "no-store", signal: abort.signal })
       const body = await response.json()
       if (response.status === 401) window.dispatchEvent(new Event("cts-session-expired"))
       if (!response.ok) throw new Error(body.error || "Terminal snapshot unavailable")
       if (mounted.current&&sequence===requestSequence.current) { setSnapshot(body); setError("") }
     } catch (reason) { if (mounted.current&&!abort.signal.aborted&&sequence===requestSequence.current) setError(reason instanceof Error ? reason.message : "Connection unavailable") }
     finally { if(sequence===requestSequence.current)inFlight.current = false }
-  }, [])
+  }, [connectionId])
   useEffect(() => {
+    setSnapshot(null);setNotice("");setError("");inFlight.current=false
     mounted.current = true
     void refresh()
     const timer = setInterval(() => { if (!document.hidden) void refresh() }, 5000)
@@ -125,7 +130,7 @@ export function TradingTerminal() {
     setBusy(true); setNotice("")
     controller.current?.abort();requestSequence.current++;inFlight.current=false
     try {
-      const response = await fetch("/api/terminal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, settings }) })
+      const response = await fetch("/api/terminal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, settings,connectionId }) })
       const body = await response.json()
       if (response.status === 401) window.dispatchEvent(new Event("cts-session-expired"))
       if (!response.ok || !body.success) throw new Error(body.error || "Action failed")
@@ -140,9 +145,9 @@ export function TradingTerminal() {
   const closed = snapshot?.closedPositions ?? []
   const events = snapshot?.events ?? []
   const running = snapshot?.readiness.engineStatus === "running"
-  const x02 = snapshot?.connections.find(c => c.id === "bingx-x02")
-  const x02Live = x02?.liveEnabled === true
-  const ready = snapshot?.readiness.x02Configured === true
+  const activeConnection = snapshot?.connections.find(c => c.id === connectionId)
+  const liveEnabled = activeConnection?.liveEnabled === true
+  const ready = snapshot?.readiness.configured === true
   const settings = snapshot?.settings ?? {}
   const winCount = closed.filter(p => p.realizedPnl > 0).length
   const modules = [
@@ -150,45 +155,45 @@ export function TradingTerminal() {
     { title: "FILTER", sub: "Independent stage gates", icon: Filter, color: "rose", metric: snapshot ? `${count(base.eligible)} Base eligible` : "Awaiting snapshot", view: "strategies" as View },
     { title: "ANALYST", sub: "Sample & PF validation", icon: BarChart3, color: "violet", metric: `Cumulative PF ${formatProfitFactor(base.pf, base.pfState)}`, view: "strategies" as View },
     { title: "EXECUTOR", sub: "Exchange order lifecycle", icon: Zap, color: "green", metric: snapshot?.execution ? `${snapshot.execution.summary.ownedLots} owned exchange lots` : "Awaiting exchange ledger", view: "positions" as View },
-    { title: "RISK", sub: "Stops, costs & ownership", icon: ShieldCheck, color: "amber", metric: x02Live ? "X02 entries enabled" : "X02 entries paused", view: "connections" as View },
+    { title: "RISK", sub: "Stops, costs & ownership", icon: ShieldCheck, color: "amber", metric: `${selectedConnection.name} entries ${liveEnabled?"enabled":"paused"}`, view: "connections" as View },
     { title: "LOGGER", sub: "Persistent activity trail", icon: ClipboardList, color: "blue", metric: `${events.length} recorded events`, view: "activity" as View },
   ]
   const rules = [
-    ["Demo connection configured", ready ? "Ready" : "Missing credentials", ready],
-    ["Execution environment", "X02 / BingX VST", true],
+    ["Selected connection configured", ready ? "Ready" : "Missing credentials", ready],
+    ["Execution environment", `${selectedConnection.name} / ${selectedConnection.environment}`, true],
     ["Base PF threshold", settings.baseProfitFactor || "1.1 default", null],
     ["Main validation samples", settings.mainEvalPosCount || "8 default", null],
     ["Real validation samples", settings.realEvalPosCount || "8 default", null],
-    ["Live entries", x02Live ? "Enabled" : "Paused", x02Live],
+    ["Live entries", liveEnabled ? "Enabled" : "Paused", liveEnabled],
   ] as const
   const selectedNav = NAV.find(n => n.id === view)!
 
   return <div className="terminal-workspace">
     <a className="terminal-skip" href="#terminal-main">Skip to terminal</a>
-    <header className="terminal-topbar"><Link className="terminal-brand" href="/"><span>C</span><strong>CTS-C</strong><small>TRADING SYSTEM</small></Link><div className="terminal-topbar-right"><span className="terminal-scope"><CircleDot size={12} /> PAPER / X02 VST</span><StyleSwitcher /><ThemeSwitcher /><button onClick={() => setView("strategies")} className="terminal-icon-button" aria-label="Strategy settings"><Settings2 size={17} /></button><button className="terminal-button subtle" onClick={() => void logout()}>Sign out</button></div></header>
+    <header className="terminal-topbar"><Link className="terminal-brand" href="/"><span>C</span><strong>CTS-C</strong><small>TRADING SYSTEM</small></Link><div className="terminal-topbar-right"><span className="terminal-scope"><CircleDot size={12} /> PAPER / {selectedConnection.name} {selectedConnection.demo?"VST":"MAINNET"}</span><select className="terminal-input" aria-label="Trading connection" value={connectionId} disabled={busy} onChange={e=>setConnectionId(e.target.value as ConnectionId)}>{CONNECTIONS.map(c=><option key={c.id} value={c.id}>{c.name} · {c.demo?"VST demo":"Mainnet"}</option>)}</select><StyleSwitcher /><ThemeSwitcher /><button onClick={() => setView("strategies")} className="terminal-icon-button" aria-label="Strategy settings"><Settings2 size={17} /></button><button className="terminal-button subtle" onClick={() => void logout()}>Sign out</button></div></header>
     <div className="terminal-app-nav"><nav aria-label="Terminal views">{NAV.map(item => <button key={item.id} onClick={() => setView(item.id)} className={view === item.id ? "active" : ""} aria-current={view === item.id ? "page" : undefined}><item.icon size={16} /><span>{item.label}</span></button>)}</nav><button className="terminal-button subtle" onClick={() => void refresh()} aria-label="Refresh terminal"><RefreshCw size={14} /><span>Refresh</span></button></div>
     <main id="terminal-main" className="terminal-main">
       <div className="terminal-hero"><div className="terminal-hero-left"><div className={`terminal-orb ${running ? "running" : ""}`}><Workflow size={28} /></div><div><p className="terminal-kicker">AUTONOMOUS WORKSPACE / {selectedNav.label.toUpperCase()}</p><h1>CTS-C <span>Terminal</span></h1><p className="terminal-hero-state"><i className={running ? "online" : ""} />{snapshot ? snapshot.readiness.engineStatus : "Connecting"}<span>•</span>{snapshot ? `Snapshot ${new Date(snapshot.updatedAt).toLocaleTimeString()}` : "Waiting for engine data"}</p></div></div><div className="terminal-hero-balance"><p className="terminal-kicker">EXCHANGE EQUITY</p><strong>{money(snapshot?.equity)}</strong><small>{snapshot?.equity == null ? "Awaiting verified account snapshot" : "Reported exchange equity"}</small></div></div>
       {error && <div className="terminal-notice error" role="alert"><Radio size={16} /><span>{error}{snapshot && " · Showing last received snapshot"}</span><button onClick={() => void refresh()}>Retry</button></div>}
       {notice && <div className="terminal-notice" role="status"><span>{notice}</span><button onClick={() => setNotice("")} aria-label="Dismiss message"><X size={15} /></button></div>}
-      <MarketTape />
+      <MarketTape key={connectionId} demo={selectedConnection.demo} />
       {snapshot?.metricScope && <p className="terminal-metric-scope"><span className="terminal-tag">SOURCE</span> {snapshot.metricScope}{snapshot.paperEquity != null && <span> · Paper equity {money(snapshot.paperEquity)}</span>}</p>}
       <div className="terminal-summary"><div><span>Lifetime paper realized P&L</span><strong className={snapshot && snapshot.realizedPnl < 0 ? "terminal-negative" : "terminal-positive"}>{money(snapshot?.realizedPnl)}</strong><small>See ledger source labels</small></div><div><span>Paper open positions</span><strong>{snapshot ? count(snapshot.positionCount ?? open.length) : "—"}</strong><small>{snapshot ? `${(snapshot.positionCount ?? open.length) > open.length ? "Shown: " : ""}${snapshot.paperTotals?.longOpen ?? open.filter(p => p.direction.toLowerCase() === "long").length} long / ${snapshot.paperTotals?.shortOpen ?? open.filter(p => p.direction.toLowerCase() === "short").length} short` : "Awaiting snapshot"}</small></div><div><span>Paper closed win rate</span><strong>{snapshot?.paperTotals?.winRate != null ? `${snapshot.paperTotals.winRate.toFixed(1)}%` : closed.length ? `${(winCount / closed.length * 100).toFixed(1)}%` : "—"}</strong><small>{count(snapshot?.paperTotals?.closed ?? closed.length)} lifetime closes</small></div><div><span>Lifetime paper costs</span><strong>{money(snapshot?.fees)}</strong><small>Modeled fees and slippage</small></div></div>
 
-      {view === "terminal" && <div className="terminal-command-grid"><aside className="terminal-module-rail" aria-label="Processing modules"><div className="terminal-rail-label">PROCESSING MODULES <span>06</span></div>{modules.map(module => <button key={module.title} className={`terminal-module ${module.color}`} onClick={() => setView(module.view)}><div><module.icon size={17} /><strong>{module.title}</strong><ChevronRight size={13} /></div><p>{module.sub}</p><small>{module.metric}</small></button>)}<div className="terminal-operator"><ShieldCheck size={18} /><p>Connection isolation<span>All actions in this terminal target x02 demo.</span></p></div></aside>
+      {view === "terminal" && <div className="terminal-command-grid"><aside className="terminal-module-rail" aria-label="Processing modules"><div className="terminal-rail-label">PROCESSING MODULES <span>06</span></div>{modules.map(module => <button key={module.title} className={`terminal-module ${module.color}`} onClick={() => setView(module.view)}><div><module.icon size={17} /><strong>{module.title}</strong><ChevronRight size={13} /></div><p>{module.sub}</p><small>{module.metric}</small></button>)}<div className="terminal-operator"><ShieldCheck size={18} /><p>Connection isolation<span>Actions and settings target {selectedConnection.name} {selectedConnection.demo?"demo":"mainnet"}.</span></p></div></aside>
         <div className="terminal-command-content">
-          <Panel title="Strategy progression" kicker="PAPER VALIDATION / INDEPENDENT SETS" action={<span className="terminal-tag"><Workflow size={12} /> Base → Live</span>}><div className="terminal-stage-row">{["base", "main", "real", "live"].map((stage, index) => { const data = snapshot?.stages[stage] ?? EMPTY_STAGE; return <div className={`terminal-stage stage-${index}`} key={stage}><div className="terminal-stage-node"><span>{String(index + 1).padStart(2, "0")}</span>{index === 3 ? <Zap size={20} /> : <Layers size={20} />}</div><h3>{stage}</h3><strong>{snapshot ? count(data.sets) : "—"}<small>sets</small></strong><p>{count(data.eligible)} eligible</p><div className="terminal-stage-foot">Window PF {formatProfitFactor(data.windowPF, data.windowPfState)}<br />Lifetime {formatProfitFactor(data.pf, data.pfState)}</div></div> })}</div><p className="terminal-ledger-note">Active set counts exclude retired configurations. Window PF uses current last-N evidence; lifetime PF retains all recorded losses.</p></Panel>
+          <Panel title="Strategy progression" kicker="PAPER VALIDATION / INDEPENDENT SETS" action={<span className="terminal-tag"><Workflow size={12} /> Base → Live</span>}><div className="terminal-stage-row">{["base", "main", "real", "live"].map((stage, index) => { const data = snapshot?.stages[stage] ?? EMPTY_STAGE; return <div className={`terminal-stage stage-${index}`} key={stage}><div className="terminal-stage-node"><span>{String(index + 1).padStart(2, "0")}</span>{index === 3 ? <Zap size={20} /> : <Layers size={20} />}</div><h3>{stage}</h3><strong>{snapshot ? count(data.sets) : "—"}<small>sets</small></strong><p>{count(data.eligible)} eligible</p><div className="terminal-stage-foot">Validated PF {formatProfitFactor(data.validatedWindow?.profitFactor, data.validatedWindow?.pfState)}<br />Forward PF {formatProfitFactor(data.admittedForward?.profitFactor, data.admittedForward?.pfState)}<br />Lifetime {formatProfitFactor(data.pf, data.pfState)}</div></div> })}</div><p className="terminal-ledger-note">Active set counts exclude retired configurations. Window PF uses current last-N evidence; lifetime PF retains all recorded losses.</p></Panel>
           {snapshot && <ProgressionDetails stages={snapshot.stages} />}{snapshot?.engine?.equityHistory && <PaperEquity history={snapshot.engine.equityHistory} />}<div className="terminal-analysis-grid"><Panel title="Validation rules" kicker="FILTER / CURRENT CONFIGURATION" action={<button className="terminal-link" onClick={() => setView("strategies")}>Configure <ArrowUpRight size={13} /></button>}><div className="terminal-rule-list">{rules.map(([label, value, okay]) => <div key={label}><span className={`terminal-rule-dot ${okay === true ? "pass" : okay === false ? "hold" : ""}`} /> <span>{label}</span><strong>{value}</strong></div>)}</div></Panel><Panel title="Sample readiness" kicker="ANALYST / BASE LAST-N"><div className="terminal-readiness"><SampleGauge value={base.samplesPercent} /><div><strong>{base.enoughSamples == null ? "Not reported" : `${count(base.enoughSamples)} / ${count(base.sets)} sets`}</strong><p>Enough closed samples for independent validation.</p><span className="terminal-tag">PF neutral = 1.0</span></div></div></Panel></div>
-          <MarketTerminal />
+          <MarketTerminal key={connectionId} demo={selectedConnection.demo} />
           <div className="terminal-analysis-grid"><Panel title="Qualification funnel" kicker="EVALUATION / CURRENT SNAPSHOT"><div className="terminal-funnel">{["base", "main", "real", "live"].map(stage => { const data = snapshot?.stages[stage] ?? EMPTY_STAGE; const fraction = data.sets ? Math.min(100, data.eligible / data.sets * 100) : 0; return <div key={stage}><div><span>{stage}</span><strong>{data.eligible} / {data.sets}</strong></div><div className="terminal-bar"><span style={{ width: `${fraction}%` }} /></div><small>{data.samplesPercent == null ? "Sample sufficiency not reported" : `${data.samplesPercent.toFixed(1)}% have enough samples`}</small></div> })}</div></Panel><EventLog events={events} /></div>
           <Positions open={open} closed={closed} openTotal={snapshot?.positionCount} compact />
         </div>
       </div>}
-      {view === "strategies" && <StrategyLab settings={settings} busy={busy} onSave={value => execute("save-settings", value)} />}
+      {view === "strategies" && <StrategyLab key={connectionId} connectionName={connectionName} coordinationStats={snapshot?.coordinationStats} symbolFees={snapshot?.engine?.symbolFees} settings={settings} busy={busy} onSave={value => execute("save-settings", value)} />}
       {view === "integrations" && <IntegrationsPanel />}
       {view === "positions" && <div className="terminal-execution-ledger"><ExecutionLedger execution={snapshot?.execution} /><Positions open={open} closed={closed} openTotal={snapshot?.positionCount} /></div>}
       {view === "activity" && <EventLog events={events} full />}
-      {view === "connections" && <div className="terminal-connections-grid"><Panel title="X02 execution control" kicker="BINGX / VST DEMO"><div className="terminal-connection-controls"><div className="terminal-connection-status"><Plug size={28} /><div><strong>{snapshot?.readiness.status ?? "Reading connection state"}</strong><p>Import the dedicated server credentials, then verify and start the demo engine.</p></div></div><div className="flex flex-wrap gap-3"><button className="terminal-button" disabled={busy} onClick={() => action("configure-x02")}><Plug size={15} />Import x02 environment</button><button className="terminal-button primary" disabled={busy || !ready} onClick={() => action("start-x02")}><Play size={15} />Verify & start x02</button><button className="terminal-button" disabled={busy || !x02} onClick={() => action("pause-x02")}><Pause size={15} />Pause new entries</button></div><p className="terminal-muted text-xs">Pausing entries keeps position monitoring active. Exchange credentials stay on the server.</p><button className="terminal-link" onClick={() => setView("strategies")}>Configure strategy and execution parameters <ArrowUpRight size={14} /></button></div></Panel><Panel title="Connection inventory" kicker="ISOLATED ACCOUNTS"><div className="terminal-connection-list">{(snapshot?.connections ?? []).map(connection => <div key={connection.id}><span className="terminal-connection-icon"><Plug size={19} /></span><div><strong>{connection.name}</strong><p>{connection.exchange} · {connection.id}</p></div><span className="terminal-tag">{connection.demo ? "DEMO" : "MAINNET"}</span><span className={connection.configured ? "terminal-positive" : "terminal-muted"}>{connection.configured ? "Configured" : "Unconfigured"}</span></div>)}</div></Panel></div>}
+      {view === "connections" && <div className="terminal-connections-grid"><Panel title={`${selectedConnection.name} execution control`} kicker={`BINGX / ${selectedConnection.demo?"VST DEMO":"FUNDED MAINNET"}`}><div className="terminal-connection-controls"><div className="terminal-connection-status"><Plug size={28} /><div><strong>{snapshot?.readiness.status ?? "Reading connection state"}</strong><p>Verify the dedicated {selectedConnection.name} server credentials to start this account’s engine.</p></div></div><div className="flex flex-wrap gap-3"><button className="terminal-button" disabled={busy} onClick={() => action("configure-connection")}><Plug size={15} />Verify {connectionName} environment</button><button className="terminal-button primary" disabled={busy || !ready} onClick={() => action("start-connection")}><Play size={15} />Verify & start {connectionName}{selectedConnection.demo?"":" mainnet"}</button><button className="terminal-button" disabled={busy || !activeConnection} onClick={() => action("pause-connection")}><Pause size={15} />Pause new entries</button></div><p className="terminal-muted text-xs">Pausing entries keeps position monitoring active. Exchange credentials stay on the server.</p><button className="terminal-link" onClick={() => setView("strategies")}>Configure strategy and execution parameters <ArrowUpRight size={14} /></button></div></Panel><Panel title="Connection inventory" kicker="ISOLATED ACCOUNTS"><div className="terminal-connection-list">{(snapshot?.connections ?? []).map(connection => <div key={connection.id}><span className="terminal-connection-icon"><Plug size={19} /></span><div><strong>{connection.name}</strong><p>{connection.exchange} · {connection.id}</p></div><span className="terminal-tag">{connection.demo ? "DEMO" : "MAINNET"}</span><span className={connection.configured ? "terminal-positive" : "terminal-muted"}>{connection.configured ? "Configured" : "Unconfigured"}</span></div>)}</div></Panel></div>}
       <footer className="terminal-footer"><span><CircleDot size={12} /> CTS-C · Persistent engine telemetry</span><span>{snapshot?.metricScope || "Source labels distinguish paper calculations from exchange results."}</span></footer>
     </main>
   </div>

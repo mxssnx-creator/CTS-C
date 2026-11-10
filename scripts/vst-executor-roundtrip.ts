@@ -21,6 +21,8 @@ async function main() {
   const store = new StateStore(database), executor = new DemoExecutor(store, venue)
   const intents: ExecutionIntent[] = [], results: Record<string, unknown>[] = []
   const triggerMode=process.argv.includes("--trigger")
+  const ratioIndex=process.argv.indexOf('--block-ratio'),blockRatio=ratioIndex<0?undefined:Number(process.argv[ratioIndex+1])
+  if(blockRatio!==undefined&&(!Number.isFinite(blockRatio)||blockRatio<.01||blockRatio>10))throw new Error('Block ratio must be .01..10')
   async function sameInventory() { const [p, o] = await Promise.all([venue.positions(), venue.openOrders()]); return inventory(p, o) === baseline }
   async function drive(intent: ExecutionIntent) {
     let lastReason = ""
@@ -41,7 +43,7 @@ async function main() {
       const quantity = Math.ceil(Math.max(contract.minQuantity, contract.minNotional / price) * scale - 1e-9) / scale
       const entry: ExecutionIntent = { id: `${runId}-${direction}-entry`, kind: "entry", connectionId: "x02", laneId: runId, configId: "diagnostic",
         positionId: `${runId}-${direction}`, symbol: contract.symbol, direction, requestedQuantity: quantity, timestamp: Date.now(), price,
-        notional: quantity * price, takeProfitPct: triggerMode ? 0.05 : 3, stopLossPct: triggerMode ? 0.05 : 2, exitMode: "fixed", source: "real-qualified", status: "pending" }
+        notional: quantity * price, takeProfitPct: triggerMode ? 0.05 : 3, stopLossPct: triggerMode ? 0.05 : 2, exitMode: "fixed",minimumAddRatio:blockRatio,maxOrderNotional:50, source: "real-qualified", status: "pending" }
       intents.push(entry)
       await drive(entry)
       let lot = executor.lots().find((row) => row.direction === direction)!
@@ -53,7 +55,7 @@ async function main() {
         const deadline=Date.now()+120_000
         while(Date.now()<deadline){await executor.process([]);lot=executor.lots().find(row=>row.direction===direction)!;if(lot.quantity<=1e-10){nativeTriggerObserved=true;break}await pause(Math.min(1000,Math.max(0,deadline-Date.now())))}
       } else {
-        const add = { ...entry, id: `${runId}-${direction}-add`, kind: "add" as const, timestamp: Date.now(), price: (await venue.quotes()).find((row) => row.symbol === contract.symbol)!.price }
+        const add = { ...entry, id: `${runId}-${direction}-add`, kind: "add" as const,requestedQuantity:quantity*(blockRatio??1), timestamp: Date.now(), price: (await venue.quotes()).find((row) => row.symbol === contract.symbol)!.price }
         await drive(add)
         lot = executor.lots().find((row) => row.direction === direction)!
         if (lot.protection !== "active" || lot.quantity <= entryQuantity) throw new Error("DCA add did not produce a larger actual protected lot")
@@ -69,7 +71,7 @@ async function main() {
       }
       if (lot.quantity > 1e-10 || lot.protection !== "closed") throw new Error("Owned residual position or bracket remains")
       if (lot.fees === null) throw new Error("Exchange fill/fee ledger did not fully reconcile")
-      results.push({ direction, symbol: contract.symbol, entryQuantity, addedQuantity, nativeTriggerObserved:triggerMode?nativeTriggerObserved:undefined, closedQuantity: lot.closedQuantity, realizedGrossPnl: lot.realizedGrossPnl,
+      results.push({ direction, symbol: contract.symbol, entryQuantity, addedQuantity,requestedAddRatio:blockRatio,actualAddRatio:addedQuantity/entryQuantity, nativeTriggerObserved:triggerMode?nativeTriggerObserved:undefined, closedQuantity: lot.closedQuantity, realizedGrossPnl: lot.realizedGrossPnl,
         fees: lot.fees, realizedNetPnl: lot.realizedNetPnl, exchangeRealizedPnl: lot.exchangeRealizedPnl, protection: lot.protection })
     }
     if (!await sameInventory()) throw new Error("Final inventory differs from the initial inventory")

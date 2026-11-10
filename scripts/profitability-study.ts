@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 import { mkdir,readFile,writeFile } from "node:fs/promises"
 import path from "node:path"
 import { getResearchCandles,type MarketCandle } from "../core/market"
-import { CORE_INDICATIONS, INDICATIONS } from "../core/indications"
+import { CORE_INDICATIONS, INDICATIONS,TECHNICAL_INDICATIONS } from "../core/indications"
 import { runTerminalReplayAsync } from "../core/terminal-replay"
 import { describeProfitFactor } from "../core/metrics"
 import { replayStrategy } from "../core/replay"
@@ -39,10 +39,11 @@ async function main(){
     for(const symbol of symbols){const fee=await client.commission(symbol);fees[symbol]={makerFeePct:Math.max(0,fee.maker*100),takerFeePct:fee.taker*100}}
   }
   const variants=[]
-  for(const [name,types] of [["core",CORE_INDICATIONS],["expanded",INDICATIONS]] as const){
+  const catalogs:readonly (readonly [string,readonly string[]])[]=process.argv.includes('--additions-only')?[["trend-break-additions",TECHNICAL_INDICATIONS]]:[["core",CORE_INDICATIONS],["expanded",INDICATIONS]]
+  for(const [name,types] of catalogs){
     const studies=[], outcomes:number[]=[],forward=[]
     for(const symbol of symbols){
-      const symbolSettings={...settings,...fees[symbol],strategyIndicationTypes:[...types]}
+      const symbolSettings={...settings,...fees[symbol],strategyIndicationTypes:[...types],...(process.argv.includes('--additions-only')?{strategySignalPeriods:[10,20],strategySignalTimeframes:[1,5]}:{})}
       const candles=feeds[symbol], study=await runTerminalReplayAsync(symbol,candles,symbolSettings)
       const split=study.trainingCandles, train=candles.slice(0,split).map(c=>({...c,timestamp:(c.time+60)*1000})),test=candles.slice(split).map(c=>({...c,timestamp:(c.time+60)*1000}))
       const configs=new Map(generateStrategyCatalog("study",symbolSettings).map(c=>[c.id,c]))
@@ -50,7 +51,7 @@ async function main(){
       for(const row of selected){
         const config=configs.get(row.id)!
         outcomes.push(...replayStrategy(symbol,test,config,test.length*2,train).filter(p=>p.status==="closed").map(p=>p.result!))
-        const catalog={...symbolSettings,strategyTpSteps:[config.tpStep!],strategySlRatios:[config.slRatio!],strategyExitModes:[config.exitMode!],strategyIndicationTypes:[config.type]}
+        const catalog={...symbolSettings,strategyTpSteps:[config.tpStep!],strategySlRatios:[config.slRatio!],strategyExitModes:[config.exitMode!],strategyIndicationTypes:[config.type],strategySignalPeriods:[config.position_cost_step],strategySignalTimeframes:[config.signalTimeframeMinutes??1]}
         const warm=new TradingEngine({symbols:[symbol],catalog})
         const toBar=(c:MarketCandle)=>({timestamp:(c.time+60)*1000,open:c.open,high:c.high,low:c.low,close:c.close,volume:c.volume})
         warm.processCandles(symbol,candles.slice(0,split).map(toBar))

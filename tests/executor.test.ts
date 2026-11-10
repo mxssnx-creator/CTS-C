@@ -93,6 +93,69 @@ class Venue implements ExecutorVenue {
   }
 }
 
+test('notional cap includes exchange minimums and rejects additions before canceling protection',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close())
+ const venue=new Venue(),executor=new DemoExecutor(store,venue)
+ const tooSmall=intent({id:'min-cap',requestedQuantity:.0001,maxOrderNotional:.5})
+ assert.equal(status(await executor.process([tooSmall]),tooSmall.id),'rejected');assert.equal(venue.submitted.length,0)
+ assert.equal(status(await executor.process([intent()]),'entry-1'),'acknowledged')
+ const added=intent({id:'capped-add',kind:'add',maxOrderNotional:100})
+ assert.equal(status(await executor.process([added]),added.id),'rejected')
+ assert.equal(venue.canceled.length,0);assert.equal(executor.lots()[0].protection,'active')
+ const close=intent({id:'cap-close',kind:'close',maxOrderNotional:.1})
+ assert.equal(status(await executor.process([close]),close.id),'acknowledged');assert.equal(executor.lots()[0].quantity,0)
+})
+
+test('an account-scoped executor rejects intents from another connection before market access',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close())
+ const venue=new Venue(),executor=new DemoExecutor(store,venue,{connectionId:'bingx-x01'})
+ assert.equal(status(await executor.process([intent({connectionId:'bingx-x02'})]),'entry-1'),'rejected')
+ assert.equal(venue.submitted.length,0);assert.equal(executor.lots().length,0)
+})
+
+test('execution PF uses actual net returns of closed lots and keeps losing qualified executions',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close())
+ const venue=new Venue(),executor=new DemoExecutor(store,venue)
+ let price=100;venue.submit=async input=>({status:'accepted',clientOrderId:input.clientOrderId,order:makeOrder(input,{averagePrice:price}),recovered:false})
+ for(const [direction,quantity] of [['long',1],['short',10]] as const){
+  price=100
+  const entry=intent({id:direction+'-entry',positionId:direction,connectionId:'bingx-x02',direction,requestedQuantity:quantity,qualificationId:'qualified-'+direction})
+  assert.equal(status(await executor.process([entry]),entry.id),'acknowledged')
+  price=103
+  const close={...entry,id:direction+'-close',kind:'close' as const}
+  assert.equal(status(await executor.process([close]),close.id),'acknowledged')
+ }
+ const s=executor.summary()
+ assert.equal(s.validatedExecutionPF.closed,2);assert.equal(s.executionPF.closed,2);assert.equal(s.executionPF.incomplete,0)
+ assert.ok(Math.abs(s.validatedExecutionPF.profitFactor-2.797/3.203)<1e-9,'return PF must not be distorted by the losing lot having 10 times the notional')
+ const lots=executor.lots();assert.ok(lots.some(l=>l.realizedNetPnl!<0));assert.deepEqual(s.validatedExecutionPF,s.executionPF)
+})
+
+test('exchange minimum normalization preserves Block entry/add proportions using one captured scale',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close())
+ const venue=new Venue(),executor=new DemoExecutor(store,venue)
+ const entry=intent({requestedQuantity:.001,minimumAddRatio:.2,maxOrderNotional:10})
+ assert.equal(status(await executor.process([entry]),entry.id),'acknowledged')
+ assert.equal(executor.lots()[0].quantity,.05)
+ const add={...entry,id:'proportional-add',kind:'add' as const,requestedQuantity:.0002}
+ assert.equal(status(await executor.process([add]),add.id),'acknowledged')
+ assert.ok(Math.abs(executor.lots()[0].quantity-.06)<1e-12)
+ assert.ok(Math.abs(Number(venue.markets()[1].quantity)/Number(venue.markets()[0].quantity)-.2)<1e-12)
+ assert.equal(executor.lots()[0].entryQuantityScale,50)
+ const close={...entry,id:'proportional-close',kind:'close' as const}
+ assert.equal(status(await executor.process([close]),close.id),'acknowledged');assert.equal(executor.lots()[0].quantity,0)
+})
+
+test('a final partial entry uses its actual scale and refuses an impossible small add without unprotecting it',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close())
+ const venue=new Venue(),executor=new DemoExecutor(store,venue)
+ venue.submit=async input=>({status:'accepted',clientOrderId:input.clientOrderId,order:makeOrder(input,{status:'CANCELED',filledQuantity:.025}),recovered:false})
+ const entry=intent({requestedQuantity:.001,minimumAddRatio:.2,maxOrderNotional:10})
+ assert.equal(status(await executor.process([entry]),entry.id),'acknowledged');assert.equal(executor.lots()[0].entryQuantityScale,25)
+ const add={...entry,id:'partial-small-add',kind:'add' as const,requestedQuantity:.0002}
+ assert.equal(status(await executor.process([add]),add.id),'rejected');assert.equal(venue.canceled.length,0);assert.equal(executor.lots()[0].protection,'active')
+})
+
 test("actual fills create owned lots and native brackets exactly once", async (t) => {
   const store = new StateStore(":memory:"); t.after(() => store.close())
   const venue = new Venue(), executor = new DemoExecutor(store, venue)

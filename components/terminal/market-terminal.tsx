@@ -5,12 +5,12 @@ import { createChart, CandlestickSeries, HistogramSeries, ColorType, type UTCTim
 import { RefreshCw, Radio } from "lucide-react"
 interface MarketCandle { time: number; open: number; high: number; low: number; close: number; volume: number }
 
-export function MarketTerminal() {
+export function MarketTerminal({demo=true}:{demo?:boolean}) {
   const element = useRef<HTMLDivElement>(null)
   const [symbol, setSymbol] = useState("BTC-USDT")
   const [interval, setIntervalValue] = useState("5m")
   const [venue, setVenue] = useState("bingx")
-  const [environment, setEnvironment] = useState("demo")
+  const [environment, setEnvironment] = useState(demo?"demo":"public")
   const [reload, setReload] = useState(0)
   const [status, setStatus] = useState("Waiting for market data")
   const [lastClose, setLastClose] = useState<number | null>(null)

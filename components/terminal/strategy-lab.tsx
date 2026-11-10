@@ -3,118 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, Download, Layers3, RotateCcw, Save, SlidersHorizontal, Upload } from "lucide-react"
 import { ReplayStudy } from "./replay-study"
-import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS } from "@/core/indications"
+import { CORE_INDICATIONS } from "@/core/indications"
+import {formatProfitFactor} from './profit-factor'
+import type {ProfitFactorState,Stage,Coordination} from '@/core/types'
 
-const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide"]
-const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
-const STEPS = Array.from({ length: 28 }, (_, index) => index + 3)
-const RATIOS = Array.from({ length: 11 }, (_, index) => Number(((index + 1) * 0.2).toFixed(1)))
-const BALANCED_STEPS = [3, 5, 8, 12, 18, 24, 30]
-const BALANCED_RATIOS = [0.6, 1, 1.4]
-const MODES = ["fixed", "trailing", "trailing-only"]
-const INDICATIONS = [...ALL_INDICATIONS]
-const DEFAULTS: Record<string, unknown> = {
-  baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
-  mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
-  variantBlockEnabled: true, variantDcaEnabled: true, axisPrevEnabled: true,
-  axisPrevious: 8, axisLast: 3, axisOutcome: "any",
-  blockSteps: 3, blockMode: "shared", dcaSteps: 2, dcaDistancePct: 1, dcaMultiplier: 2,
-  blockVolumeRatio: 0.2, makerFeePct: 0.05, takerFeePct: 0.08, slippagePctOfFees: 10,
-  symbolCount: 100, historyCandles: 1440, volumeFactor: 0.01, baseNotional: 100,
-  strategyEnabledRanges: RANGES, strategyTpSteps: BALANCED_STEPS, strategySlRatios: BALANCED_RATIOS,
-  strategyExitModes: MODES, strategyIndicationTypes: [...CORE_INDICATIONS],
-}
-const NUMERIC_FIELDS = [
-  { key: "baseProfitFactor", label: "Base → Main minimum PF", min: 0, max: 999, step: 0.01 },
-  { key: "mainProfitFactor", label: "Main → Real minimum PF", min: 0, max: 999, step: 0.01 },
-  { key: "realProfitFactor", label: "Real → Live minimum PF", min: 0, max: 999, step: 0.01 },
-  { key: "prevPosWindow", label: "Base completed samples", min: 1, max: 250, step: 1 },
-  { key: "mainEvalPosCount", label: "Main completed samples", min: 1, max: 250, step: 1 },
-  { key: "realEvalPosCount", label: "Real completed samples", min: 1, max: 250, step: 1 },
-]
-const COST_FIELDS = [
-  { key: "makerFeePct", label: "Maker fee (%)", min: 0.001, max: 20, step: 0.001 },
-  { key: "takerFeePct", label: "Taker fee (%)", min: 0.001, max: 20, step: 0.001 },
-  { key: "slippagePctOfFees", label: "Slippage (% of fees)", min: 0.1, max: 100, step: 0.1 },
-]
-const COORDINATION_FIELDS = [
-  { key: "axisPrevious", label: "Axis previous samples", min: 1, max: 250, step: 1 },
-  { key: "axisLast", label: "Axis recent samples", min: 1, max: 250, step: 1 },
-  { key: "blockSteps", label: "Block additions", min: 1, max: 20, step: 1 },
-  { key: "blockVolumeRatio", label: "Block volume ratio", min: 0.01, max: 10, step: 0.01 },
-  { key: "dcaSteps", label: "DCA additions", min: 1, max: 20, step: 1 },
-  { key: "dcaDistancePct", label: "DCA adverse distance (%)", min: 0.001, max: 100, step: 0.001 },
-  { key: "dcaMultiplier", label: "DCA addition multiplier", min: 0.01, max: 10, step: 0.01 },
-]
-const ENUM_FIELDS: Record<string, readonly string[]> = { axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
-const EXECUTION_FIELDS = [
-  { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
-  { key: "historyCandles", label: "Warm-up candles per symbol", min: 100, max: 1440, step: 1 },
-  { key: "baseNotional", label: "Base notional (USDT)", min: 0.000001, max: 1_000_000_000, step: 0.000001 },
-  { key: "volumeFactor", label: "Volume factor", min: 0.000001, max: 100, step: 0.000001 },
-]
-const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
-  strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
-  strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
-}
-const ALL_NUMERIC_FIELDS = [...NUMERIC_FIELDS, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS]
-
-function configurationCount(values: Record<string, unknown>) {
-  const ranges = values.strategyEnabledRanges as string[]
-  const steps = (values.strategyTpSteps as number[]).filter(step => ranges.includes(RANGES[RANGE_BOUNDS.findIndex(bound => step <= bound)]))
-  return steps.length * (values.strategySlRatios as number[]).length * (values.strategyExitModes as string[]).length * (values.strategyIndicationTypes as string[]).length
-}
-
-function validateConfiguration(input: unknown, { partial = false, formNumbers = false } = {}): Record<string, unknown> {
-  if (!input || typeof input !== "object" || Array.isArray(input) || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) throw new Error("Configuration must be a plain JSON object containing editable settings.")
-  const values = input as Record<string, unknown>
-  const keys = Object.keys(values)
-  if (!keys.length) throw new Error("Configuration does not contain any settings.")
-  if (keys.some(key => !Object.prototype.hasOwnProperty.call(DEFAULTS, key))) throw new Error("Configuration contains unsupported fields. Only editable strategy settings are allowed; credentials and authentication fields cannot be imported.")
-  const output: Record<string, unknown> = {}
-  for (const key of Object.keys(DEFAULTS)) {
-    if (!Object.prototype.hasOwnProperty.call(values, key)) {
-      if (partial) continue
-      throw new Error(`Configuration is missing ${key}.`)
-    }
-    const value = values[key]
-    const arrayOptions = ARRAY_FIELDS[key]
-    const enumOptions = ENUM_FIELDS[key]
-    const field = ALL_NUMERIC_FIELDS.find(item => item.key === key)
-    if (arrayOptions) {
-      if (!Array.isArray(value) || !value.length || value.some(item => !arrayOptions.includes(item)) || new Set(value).size !== value.length) throw new Error(`Choose valid, unique values for ${key}.`)
-      output[key] = [...value]
-    } else if (enumOptions) {
-      if (typeof value !== "string" || !enumOptions.includes(value)) throw new Error(`Choose a valid ${key === "axisOutcome" ? "Axis outcome" : "Block allocation mode"}.`)
-      output[key] = value
-    } else if (field) {
-      const number = formNumbers && typeof value === "string" && value.trim() !== "" ? Number(value) : value
-      if (typeof number !== "number" || !Number.isFinite(number) || number < field.min || number > field.max || (field.step === 1 && !Number.isInteger(number))) throw new Error(`Enter a valid ${field.label.toLowerCase()}.`)
-      output[key] = number
-    } else {
-      if (typeof value !== "boolean") throw new Error(`${key} must be true or false.`)
-      output[key] = value
-    }
-  }
-  if (!partial) {
-    if (Number(output.axisPrevious) + Number(output.axisLast) > 250) throw new Error("Axis previous and recent windows must total 250 samples or fewer.")
-    if (configurationCount(output) === 0) throw new Error("Choose at least one TP step within your selected ranges.")
-  }
-  return output
-}
-
-function hydrate(settings: Record<string, string>): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...DEFAULTS }
-  for (const [key, fallback] of Object.entries(DEFAULTS)) {
-    if (settings[key] === undefined) continue
-    if (Array.isArray(fallback)) {
-      try { const parsed: unknown = JSON.parse(settings[key]); if (Array.isArray(parsed) && parsed.length) result[key] = parsed } catch { /* Keep a visible default for an invalid saved value. */ }
-    } else if (typeof fallback === "boolean") result[key] = settings[key] === "true" || settings[key] === "1"
-    else if (typeof fallback === "string") { if (ENUM_FIELDS[key]?.includes(settings[key])) result[key] = settings[key] }
-    else { const number = Number(settings[key]); if (Number.isFinite(number)) result[key] = number }
-  }
-  return result
-}
+import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
 
 function MultiChoice({ title, description, values, selected, onChange, format }: {
   title: string; description: string; values: (string | number)[]; selected: (string | number)[];
@@ -143,7 +36,13 @@ function MultiChoice({ title, description, values, selected, onChange, format }:
   )
 }
 
-export function StrategyLab({ settings, onSave, busy }: { settings: Record<string, string>; onSave: (settings: Record<string, unknown>) => Promise<void>; busy: boolean }) {
+export interface CoordinationRow {stage:Stage;coordination:Coordination;lanes:number;closed:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;samplesPercent:number|null;normalPF:number;normalPfState:ProfitFactorState;normalCloses:number;pfRatio:number|null;notionalFactor:number}
+function CoordinationComparison({rows}:{rows:CoordinationRow[]}){
+  const [stage,setStage]=useState<Stage>('base')
+  return <section className="terminal-panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold">Coordination versus Normal</h3><select className="terminal-input" aria-label="Coordination comparison stage" value={stage} onChange={e=>setStage(e.target.value as Stage)}>{['base','main','real','live'].map(s=><option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div><p className="terminal-muted my-4 text-xs leading-relaxed">Current configuration cohorts, net of modeled costs. These lanes have independent entries and gates. Ratios compare cohorts; the research report uses matched entries and equal reserved budgets. Live here is paper execution.</p><div className="overflow-x-auto"><table className="w-full whitespace-nowrap text-left text-xs"><thead className="terminal-muted"><tr>{['Lane','Closes','PF','Normal PF / closes','PF ratio','Enough samples','Budget ratio'].map(c=><th key={c} className="px-3 py-3">{c}</th>)}</tr></thead><tbody>{rows.filter(r=>r.stage===stage).map(r=><tr key={r.coordination} className="border-t border-[var(--terminal-border)]"><th className="px-3 py-3 capitalize">{r.coordination}</th><td className="px-3 py-3">{r.closed}</td><td className="px-3 py-3">{formatProfitFactor(r.profitFactor,r.pfState)}</td><td className="px-3 py-3">{formatProfitFactor(r.normalPF,r.normalPfState)} / {r.normalCloses}</td><td className="px-3 py-3">{r.pfRatio===null?'—':r.pfRatio.toFixed(2)+'×'}</td><td className="px-3 py-3">{r.samplesPercent===null?'—':r.samplesPercent.toFixed(1)+'%'}</td><td className="px-3 py-3">{r.notionalFactor}×</td></tr>)}</tbody></table></div>{!rows.length&&<p className="terminal-muted py-4 text-xs">No coordination evidence has been recorded.</p>}</section>
+}
+
+export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordinationStats=[],symbolFees={} }: { settings: Record<string, string>; onSave: (settings: Record<string, unknown>) => Promise<void>; busy: boolean;connectionName?:string;coordinationStats?:CoordinationRow[];symbolFees?:Record<string,{makerFeePct:number;takerFeePct:number}> }) {
   const [draft, setDraft] = useState<Record<string, unknown>>(() => hydrate(settings))
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -167,7 +66,7 @@ export function StrategyLab({ settings, onSave, busy }: { settings: Record<strin
   }
   const preset = (kind: "micro" | "balanced" | "full") => {
     const name = kind === "micro" ? "Micro + Minimal" : kind === "balanced" ? "Balanced" : "Full catalog"
-    dirtyRef.current = true; setDirty(true); setError(null); setMessage(`${name} preset prepared. Save to apply it to x02.`)
+    dirtyRef.current = true; setDirty(true); setError(null); setMessage(`${name} preset prepared. Save to apply it to ${connectionName}.`)
     setDraft(current => ({ ...current, strategyEnabledRanges: kind === "micro" ? ["Micro", "Minimal"] : [...RANGES],
       strategyTpSteps: kind === "micro" ? [3, 4, 5, 6, 7, 8] : kind === "balanced" ? [...BALANCED_STEPS] : [...STEPS],
       strategySlRatios: kind === "balanced" ? [...BALANCED_RATIOS] : [...RATIOS], strategyExitModes: [...MODES], strategyIndicationTypes: kind==="full"?[...INDICATIONS]:[...CORE_INDICATIONS],
@@ -180,7 +79,7 @@ export function StrategyLab({ settings, onSave, busy }: { settings: Record<strin
     try { output = validateConfiguration(draft, { formNumbers: true }) }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Invalid configuration."); return }
     setSaving(true)
-    try { await onSave(output); dirtyRef.current = false; setDirty(false); setMessage("Strategy configuration saved to x02.") }
+    try { await onSave(output); dirtyRef.current = false; setDirty(false); setMessage(`Strategy configuration saved to ${connectionName}.`) }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save strategy configuration.") }
     finally { setSaving(false) }
   }
@@ -228,11 +127,11 @@ export function StrategyLab({ settings, onSave, busy }: { settings: Record<strin
     <form onSubmit={save} className="space-y-5">
       <fieldset disabled={busy || saving || importing} className="min-w-0 space-y-5">
       <div className="terminal-panel flex flex-wrap items-center justify-between gap-4 p-5">
-        <div><p className="terminal-muted text-[10px] uppercase tracking-[.2em]">X02 / Configuration studio</p><h2 className="mt-1 text-xl font-semibold">Independent strategy combinations</h2><p className="terminal-muted mt-2 max-w-2xl text-xs leading-relaxed">Ranges, distances, exit modes, and indications generate separate core configurations. Axis, Block, and DCA coordinate their progression.</p></div>
+        <div><p className="terminal-muted text-[10px] uppercase tracking-[.2em]">{connectionName.toUpperCase()} / Configuration studio</p><h2 className="mt-1 text-xl font-semibold">Independent strategy combinations</h2><p className="terminal-muted mt-2 max-w-2xl text-xs leading-relaxed">Ranges, distances, exit modes, and indications generate separate core configurations. Axis, Block, and DCA coordinate their progression.</p></div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => preset("balanced")} className="terminal-button" disabled={busy || saving}>Balanced · 252</button>
           <button type="button" onClick={() => preset("micro")} className="terminal-button" disabled={busy || saving}><Layers3 className="mr-2 inline h-4 w-4" />Micro + Minimal</button>
-          <button type="button" onClick={() => preset("full")} className="terminal-button" disabled={busy || saving}>Full · 7,392</button>
+          <button type="button" onClick={() => preset("full")} className="terminal-button" disabled={busy || saving}>Full catalog</button>
           <button type="button" onClick={exportConfiguration} className="terminal-button"><Download className="h-4 w-4" />Export JSON</button>
           <button type="button" onClick={() => importInput.current?.click()} className="terminal-button"><Upload className="h-4 w-4" />{importing ? "Importing…" : "Import JSON"}</button>
           <input ref={importInput} type="file" accept="application/json,.json" onChange={importConfiguration} className="hidden" aria-label="Import strategy configuration JSON" />
@@ -249,6 +148,8 @@ export function StrategyLab({ settings, onSave, busy }: { settings: Record<strin
             <MultiChoice title="Stop-loss / take-profit ratio" description="Each ratio creates an independent configuration. SL distance = TP distance × ratio." values={RATIOS} selected={selected("strategySlRatios")} onChange={value => change("strategySlRatios", value)} format={value => Number(value).toFixed(1) + "×"} />
             <MultiChoice title="Exit modes" description="Fixed targets, trailing exits, and trailing-only each have their own configuration identity." values={MODES} selected={selected("strategyExitModes")} onChange={value => change("strategyExitModes", value)} />
             <MultiChoice title="Indications" description="Each selected indication evaluates its own configuration history." values={INDICATIONS} selected={selected("strategyIndicationTypes")} onChange={value => change("strategyIndicationTypes", value)} format={value => String(value).replaceAll("_", " ")} />
+            <MultiChoice title="Trend & Break lookbacks" description="Separate indicator periods for the new Trend and Break families. Existing indications retain their original calculations." values={[10,14,20,40,60]} selected={selected('strategySignalPeriods')} onChange={value=>change('strategySignalPeriods',value)} />
+            <MultiChoice title="Trend & Break timeframes" description="Independent lanes use complete, contiguous UTC candles. Exits remain managed on observed quotes and one-minute closes." values={[1,5,15,30]} selected={selected('strategySignalTimeframes')} onChange={value=>change('strategySignalTimeframes',value)} format={value=>value+'m'} />
           </section>
           <section className="terminal-panel p-5">
             <div className="mb-5 flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-[var(--terminal-accent)]" /><h3 className="text-sm font-semibold">Stage gates & completed evidence</h3></div>
@@ -268,17 +169,19 @@ export function StrategyLab({ settings, onSave, busy }: { settings: Record<strin
               ["variantBlockEnabled", "Block", "Block-based volume coordination"],
               ["variantDcaEnabled", "DCA", "Independent accumulation variant"],
             ].map(([key, label, description]) => <label key={key} className="flex cursor-pointer items-center justify-between gap-4 border-b border-[var(--terminal-border)] pb-3 last:border-0 last:pb-0"><span><span className="block text-xs font-medium">{label}</span><span className="terminal-muted mt-1 block text-[11px]">{description}{settings[key] === undefined ? " · default" : ""}</span></span><input type="checkbox" className="h-4 w-4 accent-cyan-400" checked={draft[key] === true} onChange={event => change(key, event.target.checked)} /></label>)}
-            <div className="space-y-4 border-t border-[var(--terminal-border)] pt-5"><h4 className="text-xs font-semibold">Axis windows</h4><p className="terminal-muted text-xs leading-relaxed">Previous samples must meet the stage PF gate. The separate recent window must match the selected outcome. Both windows use the matching normal lane.</p><div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("axis")).map(numberField)}</div>{enumField("axisOutcome", "Recent net outcome", [{ value: "any", label: "Any outcome" }, { value: "positive", label: "Positive net result" }, { value: "negative", label: "Negative net result" }])}</div>
+            <div className="space-y-4 border-t border-[var(--terminal-border)] pt-5"><h4 className="text-xs font-semibold">Axis windows</h4><p className="terminal-muted text-xs leading-relaxed">Previous samples must meet the stage PF gate. The separate recent window must match the selected outcome. Both windows use the same configuration and direction of the selected Normal reference. Axis still needs its own completed evidence at every stage.</p><div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("axis")).map(numberField)}</div>{enumField("axisReferenceStage","Normal reference stage",[{value:'same-stage',label:'Matching stage'},{value:'base',label:'Continuous Base history'}])}{enumField("axisOutcome", "Recent net outcome", [{ value: "any", label: "Any outcome" }, { value: "positive", label: "Positive net result" }, { value: "negative", label: "Negative net result" }])}</div>
             <div className="space-y-4 border-t border-[var(--terminal-border)] pt-5"><h4 className="text-xs font-semibold">Block allocation</h4><p className="terminal-muted text-xs leading-relaxed">Adds after favorable moves. Shared mode divides one sizing budget across entry and additions; additive mode increases total exposure with each addition.</p><div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("block")).map(numberField)}</div>{enumField("blockMode", "Allocation mode", [{ value: "shared", label: "Shared budget" }, { value: "additive", label: "Additive exposure" }])}</div>
             <div className="space-y-4 border-t border-[var(--terminal-border)] pt-5"><h4 className="text-xs font-semibold">DCA allocation</h4><p className="terminal-muted text-xs leading-relaxed">Adds after the configured adverse move from the last fill. Each addition uses the base sizing budget × multiplier, up to the selected count.</p><div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("dca")).map(numberField)}</div></div>
           </section>
           <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Market universe & position sizing</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Scan up to this many available contracts. Base notional × volume factor sets the initial sizing budget before coordination adjustments and exchange rules.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{EXECUTION_FIELDS.map(numberField)}</div><p className="terminal-muted mt-5 border-t border-[var(--terminal-border)] pt-4 text-xs">Initial sizing budget: <span className="font-mono text-[var(--terminal-fg)]">{Number.isFinite(Number(draft.baseNotional) * Number(draft.volumeFactor)) ? (Number(draft.baseNotional) * Number(draft.volumeFactor)).toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—"} USDT</span></p></section>
-          <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Fee & slippage estimate</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Percent units: 0.08 means 0.08%. Fee inputs define the strategy cost estimate.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{COST_FIELDS.map(numberField)}</div></section>
+          <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Fee & slippage estimate</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Percent units: 0.08 means 0.08%. Each symbol’s exchange commissions take precedence. Fee fields below are fallbacks when a commission read is unavailable. Slippage applies to the fee sum. Open positions retain their entry cost model.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{COST_FIELDS.map(numberField)}</div><details className="mt-5 text-xs"><summary className="cursor-pointer">Exchange fee coverage · {Object.keys(symbolFees).length} symbols</summary><div className="mt-3 max-h-60 overflow-auto"><table className="w-full text-left"><thead><tr><th>Symbol</th><th>Maker %</th><th>Taker %</th></tr></thead><tbody>{Object.entries(symbolFees).map(([symbol,fee])=><tr key={symbol}><th className="py-1 font-normal">{symbol}</th><td>{fee.makerFeePct}</td><td>{fee.takerFeePct}</td></tr>)}</tbody></table></div></details></section>
+          <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Ratios & distance factors</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Each lane budget = base notional × volume factor × lane ratio. TP = cost × step × TP factor. SL = TP × selected SL ratio × SL factor; trail = SL × trail ratio. Existing positions retain their captured settings. The order cap rejects exchange-rounded entries and adds above its value.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{FACTOR_FIELDS.map(numberField)}</div></section>
         </div>
       </div>
       </fieldset>
     </form>
-    <ReplayStudy />
+    <CoordinationComparison rows={coordinationStats}/>
+    <ReplayStudy key={connectionName} connectionId={connectionName==='x01'?'bingx-x01':'bingx-x02'} />
     </>
   )
 }

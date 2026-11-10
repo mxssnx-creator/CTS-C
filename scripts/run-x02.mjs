@@ -158,11 +158,14 @@ export async function runX02() {
     if (!canContinue()) return
     await authenticate({ timeoutMs: STARTUP_REQUEST_TIMEOUT })
     if (!canContinue()) return
-    await saveInitialSettings(request, { symbolCount: 100, historyCandles: 1440, volumeFactor: .01 }, { sleep, canContinue })
+    const symbolsIndex=process.argv.indexOf('--symbols'),symbolCount=symbolsIndex<0?50:Number(process.argv[symbolsIndex+1])
+    if(!Number.isInteger(symbolCount)||symbolCount<1||symbolCount>500)throw new Error('--symbols must be 1..500')
+    // Keep all other saved configuration and ownership state. A fresh database uses engine defaults.
+    await saveInitialSettings(request, { symbolCount, historyCandles: 1440, volumeFactor: .01,maxOrderNotional:10 }, { sleep, canContinue })
     if (!canContinue()) return
     await request('/api/terminal', { action: 'start-x02' }, { timeoutMs: STARTUP_REQUEST_TIMEOUT })
     await observeRuntime({ request, isRunning: () => childIsRunning(child), isStopping: () => stopping, sleep, warn: message => console.error(message), publish: s => {
-      const status = { checkedAt: new Date().toISOString(), environment: 'BingX VST', runtime: s.readiness, connection: s.connections[0], symbols: s.engine.symbolCount, configurations: s.engine.catalogCount, processedCandles: s.engine.processedCandles, stages: s.stages, execution: s.execution.summary }
+      const status = { checkedAt: new Date().toISOString(), environment: 'BingX VST', runtime: s.readiness, connection: s.connections.find(c=>c.id==='bingx-x02'), symbols: s.engine.symbolCount, configurations: s.engine.catalogCount, processedCandles: s.engine.processedCandles, stages: s.stages,coordinationStats:s.coordinationStats, execution: s.execution.summary }
       writeObservation(dataDir, status)
       const key = JSON.stringify([s.readiness.status, Math.floor(s.engine.processedCandles / 10000), s.execution.summary.ownedLots])
       if (key !== lastReported) {

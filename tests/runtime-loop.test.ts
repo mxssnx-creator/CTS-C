@@ -207,3 +207,17 @@ test("history catch-up does not mark a symbol warm before reaching the current c
     assert.equal(runtime.control.warmed.includes(symbol),true)
   })
 })
+
+test('fresh signal updates use exchange OHLCV and volume while warm-up remains non-executable',async()=>{
+ await isolated(async runtime=>{
+  const internal=runtime as any,symbol=runtime.engine.settings.symbols[0],now=Math.floor(Date.now()/60000)*60000
+  internal.prefetchHistory=()=>{};internal.executor={process:async()=>[]}
+  runtime.engine.processCandles(symbol,[{timestamp:now-60000,open:100,high:100,low:100,close:100,volume:5}])
+  const native={timestamp:now,open:100,high:102,low:99,close:101,volume:1234}
+  internal.warmJobs.set(symbol,{data:[native],plan:{cursor:now-60000,cutoff:now,count:100},live:true})
+  const seen:any[]=[],original=runtime.engine.processCandles.bind(runtime.engine)
+  runtime.engine.processCandles=(symbol,candles,options)=>{seen.push({symbol,candles,options});return original(symbol,candles,options)}
+  await internal.tick();if(internal.executionTask)await internal.executionTask
+  assert.deepEqual(seen,[{symbol,candles:[native],options:{allowExecution:true}}]);assert.equal(runtime.engine.lastProcessedAt(symbol),now)
+ })
+})

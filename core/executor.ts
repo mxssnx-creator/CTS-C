@@ -1,6 +1,7 @@
 import { BingxVstClient, normalizeSymbol, protectionOrders, stableClientOrderId, type Contract, type OrderInput, type OrderOutcome, type VenueFill, type VenueOrder, type VenuePosition } from "./bingx"
 import { getStore, StateStore, type Intent as JournalIntent } from "./store"
 import type { ExecutionIntent } from "./types"
+import {describeProfitFactor} from './metrics'
 
 export interface ExecutionUpdate { id: string; status: "acknowledged" | "rejected" | "unknown"; exchangeOrderId?: string; error?: string }
 export interface OwnedLot {
@@ -9,9 +10,12 @@ export interface OwnedLot {
   realizedGrossPnl: number; fees: number | null; realizedNetPnl: number | null; exchangeRealizedPnl: number | null; updatedAt: number
   protection: "pending" | "active" | "unknown" | "error" | "closed"; protectionError?: string
   executionIntent: ExecutionIntent; protectionGeneration?: number
+  openedNotional?:number
+  entryQuantityScale?:number
 }
 export interface ExecutorVenue {
   readonly configured: boolean
+  readonly environment?:string
   contracts(): Promise<Contract[]>
   positionMode(): Promise<"hedge" | "one-way">
   positions(symbol?: string): Promise<VenuePosition[]>
@@ -50,7 +54,7 @@ export class DemoExecutor {
   private cycleRows: Map<string, JournalIntent> | null = null
   private cycleLots: Record<string, OwnedLot> | null = null
   private cycleIndex = new Map<string, Map<string, JournalIntent>>()
-  constructor(readonly store: StateStore = getStore(), readonly venue: ExecutorVenue = new BingxVstClient(), readonly options: { beforeSubmit?: () => void; validateIntent?: (intent: ExecutionIntent) => void; now?: () => number; maxIntentAgeMs?: number } = {}) {
+  constructor(readonly store: StateStore = getStore(), readonly venue: ExecutorVenue = new BingxVstClient(), readonly options: { beforeSubmit?: () => void; validateIntent?: (intent: ExecutionIntent) => void; now?: () => number; maxIntentAgeMs?: number;connectionId?:string } = {}) {
     store.database.exec("CREATE TABLE IF NOT EXISTS execution_fill_ledger(order_id TEXT NOT NULL,trade_id TEXT NOT NULL,lot_id TEXT NOT NULL,quantity REAL NOT NULL,fee REAL NOT NULL,realized_pnl REAL,data TEXT NOT NULL,PRIMARY KEY(order_id,trade_id)); CREATE INDEX IF NOT EXISTS execution_fill_ledger_lot ON execution_fill_ledger(lot_id);")
   }
   private now() { return this.options.now?.() ?? Date.now() }
@@ -100,7 +104,22 @@ export class DemoExecutor {
   summary() {
     const counts = this.store.database.prepare("SELECT status,COUNT(*) AS count FROM intents GROUP BY status").all() as { status: string; count: number }[]
     const lots = this.lots(), complete = lots.every((lot) => lot.fees !== null), exchangeComplete = lots.every((lot) => lot.exchangeRealizedPnl !== null)
-    return { configured: this.venue.configured, environment: "BingX VST" as const, intents: Object.fromEntries(counts.map((row) => [row.status, Number(row.count)])),
+    const resultPF=(qualifiedOnly:boolean)=>{
+      let profit=0,loss=0,closed=0,incomplete=0
+      for(const lot of lots){
+        if(lot.quantity>EPSILON||lot.openedQuantity<=0||(qualifiedOnly&&!lot.executionIntent.qualificationId))continue
+        let notional=lot.openedNotional
+        if(notional===undefined){
+          const row=this.store.database.prepare("SELECT SUM(quantity) AS quantity,SUM(quantity*json_extract(data,'$.price')) AS notional FROM execution_fill_ledger WHERE lot_id=? AND upper(json_extract(data,'$.side'))=?").get(lot.id,lot.direction==='long'?'BUY':'SELL') as {quantity:number|null;notional:number|null}
+          if(row.quantity!==null&&Math.abs(row.quantity-lot.openedQuantity)<EPSILON)notional=row.notional??undefined
+        }
+        if(lot.realizedNetPnl===null||lot.fees===null||!notional||!Number.isFinite(notional)){incomplete++;continue}
+        const value=100*lot.realizedNetPnl/notional;profit+=Math.max(0,value);loss+=Math.max(0,-value);closed++
+      }
+      return {closed,incomplete,...describeProfitFactor(profit,loss,closed)}
+    }
+    return { configured: this.venue.configured, environment: this.venue.environment??'BingX VST', intents: Object.fromEntries(counts.map((row) => [row.status, Number(row.count)])),
+      executionPF:resultPF(false),validatedExecutionPF:resultPF(true),
       ownedLots: lots.filter((lot) => lot.quantity > EPSILON).length, realizedGrossPnl: lots.reduce((sum, lot) => sum + lot.realizedGrossPnl, 0),
       fees: complete ? lots.reduce((sum, lot) => sum + (lot.fees ?? 0), 0) : null,
       realizedNetPnl: complete ? lots.reduce((sum, lot) => sum + (lot.realizedNetPnl ?? 0), 0) : null,
@@ -136,6 +155,7 @@ export class DemoExecutor {
     return [...byId.values()]
   }
   private async send(data: Payload): Promise<void> {
+    if(this.options.connectionId&&data.intent.connectionId!==this.options.connectionId)throw new Error('Execution journal belongs to another connection')
     const id = data.order.clientOrderId
     if (this.findRow(id)) return
     this.guard()
@@ -223,10 +243,12 @@ export class DemoExecutor {
     if (external) throw new ExecutionDeferred("An unrelated open order shares this symbol and direction; no position-changing write was sent")
   }
   private async prepare(intent: ExecutionIntent, clientId: string): Promise<OrderInput> {
+    if(this.options.connectionId&&intent.connectionId!==this.options.connectionId)throw new Error('Intent belongs to another connection')
     if (intent.source !== "real-qualified" || !intent.positionId || !intent.laneId || !intent.connectionId) throw new Error("A qualified, lane-owned execution intent is required")
     const now = this.now()
     if (intent.kind !== "close" && (now - intent.timestamp > (this.options.maxIntentAgeMs ?? 180_000) || intent.timestamp > now + 10_000)) throw new Error("Entry/add intent is stale or future-dated; no order submitted")
     if (!(intent.price > 0) || !Number.isFinite(intent.price)) throw new Error("Intent has no valid price")
+    if(intent.maxOrderNotional!==undefined&&(!Number.isFinite(intent.maxOrderNotional)||intent.maxOrderNotional<0))throw new Error('Invalid order notional cap')
     if (intent.kind !== "close") {
       if (!(intent.requestedQuantity > 0) || !Number.isFinite(intent.requestedQuantity) || !(intent.stopLossPct > 0) || !Number.isFinite(intent.stopLossPct)) throw new Error("Positive finite quantity and stop-loss distance are required")
       const existingGap = this.lots().some((lot) => lot.connectionId === intent.connectionId && lot.symbol === normalizeSymbol(intent.symbol) && lot.direction === intent.direction && lot.quantity > EPSILON && (lot.protection === "error" || lot.protection === "unknown"))
@@ -237,6 +259,13 @@ export class DemoExecutor {
     if (mode !== "hedge") throw new Error("Independent long/short execution requires hedge mode")
     const symbol = normalizeSymbol(intent.symbol), contract = await this.contract(symbol)
     let owned = this.lot(intent)
+    if(intent.minimumAddRatio!==undefined&&(!Number.isFinite(intent.minimumAddRatio)||intent.minimumAddRatio<=0))throw new Error('Invalid relative addition size')
+    const minimumRatio=intent.kind==='entry'?Math.min(1,intent.minimumAddRatio??1):1
+    const requested=intent.requestedQuantity*(intent.kind==='add'?(owned?.entryQuantityScale??1):1)
+    const openingQuantity=intent.kind==='close'?0:quantityAtPrecision(intent.kind==='add'?requested:Math.max(requested,contract.minQuantity/minimumRatio,contract.minNotional/intent.price/minimumRatio),contract.quantityPrecision,'up')
+    if(intent.kind==='add'&&(openingQuantity+EPSILON<contract.minQuantity||openingQuantity*intent.price+EPSILON<contract.minNotional))throw new Error('Scaled addition is below the exchange minimum; its intended ratio cannot be placed')
+    // Reject excessive new risk before touching an existing lot's protective orders.
+    if(intent.kind!=='close'&&intent.maxOrderNotional&&openingQuantity*intent.price>intent.maxOrderNotional+EPSILON)throw new Error('Exchange-normalized size exceeds the configured order notional cap')
     if (owned && (owned.laneId !== intent.laneId || owned.symbol !== symbol || owned.direction !== intent.direction)) throw new Error("Execution intent does not own this lot")
     if (owned && intent.kind === "entry") throw new Error("This position already owns a lot; use a qualified add intent")
     if (this.related(intent).some((row) => payload(row).role !== "protection" && this.active(row))) throw new ExecutionDeferred("Earlier order for this lot still awaits a final fill")
@@ -252,7 +281,7 @@ export class DemoExecutor {
     const closing = intent.kind === "close"
     if (!closing && (!(intent.requestedQuantity > 0) || !Number.isFinite(intent.requestedQuantity) || !(intent.stopLossPct > 0))) throw new Error("Positive quantity and stop-loss distance are required")
     const quantity = closing ? quantityAtPrecision(owned!.quantity, contract.quantityPrecision, "down")
-      : quantityAtPrecision(Math.max(intent.requestedQuantity, contract.minQuantity, contract.minNotional / intent.price), contract.quantityPrecision, "up")
+      : openingQuantity
     if (!(quantity > 0)) throw new Error("Owned/requested quantity is below exchange precision")
     const direction = intent.direction === "long" ? "LONG" as const : "SHORT" as const
     return { symbol, side: closing ? direction === "LONG" ? "SELL" : "BUY" : direction === "LONG" ? "BUY" : "SELL", positionSide: direction,
@@ -350,17 +379,19 @@ export class DemoExecutor {
           if (!lot) {
             if (intent.kind !== "entry") throw new Error("Cannot apply a fill to an unowned lot")
             lot = { id: key, connectionId: intent.connectionId, laneId: intent.laneId, symbol: normalizeSymbol(intent.symbol), direction: intent.direction,
-              quantity: 0, averageEntry: 0, openedQuantity: 0, closedQuantity: 0, realizedGrossPnl: 0, fees: null, realizedNetPnl: null, exchangeRealizedPnl: null,
+              quantity: 0, averageEntry: 0, openedQuantity: 0, closedQuantity: 0,openedNotional:0, realizedGrossPnl: 0, fees: null, realizedNetPnl: null, exchangeRealizedPnl: null,
               updatedAt: this.now(), protection: "pending", executionIntent: intent }
           }
           if (lot.laneId !== intent.laneId || lot.symbol !== normalizeSymbol(intent.symbol) || lot.direction !== intent.direction) throw new Error("Cross-lane fill assignment rejected")
           if (intent.kind === "close") {
             if (delta > lot.quantity + EPSILON) throw new Error("Confirmed close exceeds the owned lot")
             lot.realizedGrossPnl += (deltaNotional - delta * lot.averageEntry) * (lot.direction === "long" ? 1 : -1)
-            lot.quantity = Math.max(0, lot.quantity - delta); lot.closedQuantity += delta
+            const remaining=lot.quantity-delta;lot.quantity=remaining<=EPSILON?0:remaining;lot.closedQuantity += delta
           } else {
             lot.averageEntry = (lot.averageEntry * lot.quantity + deltaNotional) / (lot.quantity + delta)
             lot.quantity += delta; lot.openedQuantity += delta; lot.executionIntent = intent
+            if(intent.kind==='entry')lot.entryQuantityScale=filled/intent.requestedQuantity
+            if(lot.openedNotional!==undefined)lot.openedNotional+=deltaNotional
           }
           lot.fees = null; lot.realizedNetPnl = null; lot.exchangeRealizedPnl = null
           lot.updatedAt = this.now(); all[key] = lot; this.saveLots(all)
