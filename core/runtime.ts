@@ -129,12 +129,15 @@ export class TerminalRuntime {
         })).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Executor unavailable'}).finally(()=>{this.executionTask=undefined})
       }
       this.prefetchHistory()
-      const warmed=[...this.warmJobs.entries()].find(([,job])=>job.data||job.error)
-      if(warmed){
-        const [symbol,job]=warmed;this.warmJobs.delete(symbol)
-        if(job.error){this.control.lastError=`${symbol}: ${job.error}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
-        else if(job.data){this.ensureLease();events.push(...this.engine.processCandles(symbol,job.data,{allowExecution:false}));this.control.warmed.push(symbol);this.persist(events.splice(0),false)}
+      const warmed=[...this.warmJobs.entries()].filter(([,job])=>job.data||job.error).slice(0,3)
+      for(const [symbol,job] of warmed){
+        this.ensureLease();this.warmJobs.delete(symbol)
+        try {
+          if(job.error)throw new Error(job.error)
+          if(job.data){events.push(...this.engine.processCandles(symbol,job.data,{allowExecution:false}));if(!this.control.warmed.includes(symbol))this.control.warmed.push(symbol)}
+        } catch(error) {this.control.lastError=`${symbol}: ${error instanceof Error?error.message:'History unavailable'}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
       }
+      if(warmed.length)this.persist(events.splice(0),false)
       if(now-(getStore().get<{updatedAt:number}>('account')?.updatedAt??0)>30_000){ const balance=await this.client.balance();getStore().set('account',{...balance,updatedAt:Date.now(),source:'BingX VST'}) }
     } catch(error) {this.control.lastError=error instanceof Error?error.message:'Exchange processing unavailable';if(this.leased&&!this.leaseLost&&getStore().ownsLease(this.owner))getStore().set('control',this.control)}
   }

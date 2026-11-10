@@ -117,3 +117,54 @@ test("shutdown prevents a delayed executor callback from reacquiring ownership o
     } finally { replacement.shutdown() }
   })
 })
+
+for (const readyCount of [2, 3]) test(`one tick consumes ${readyCount} ready history jobs once with execution disabled and one batch checkpoint`, async () => {
+  await isolated(async (runtime) => {
+    const internal = runtime as any
+    runtime.control.warmed = []
+    internal.prefetchHistory = () => {}
+    internal.executor = { process: async () => [] }
+    const symbols = runtime.engine.settings.symbols.slice(0, readyCount)
+    const timestamp = Math.floor(Date.now() / 60_000) * 60_000 - 60_000
+    for (const symbol of symbols) internal.warmJobs.set(symbol, { data: [{ timestamp, open: 100, high: 100, low: 100, close: 100, volume: 1 }] })
+    const calls: { symbol: string; allowExecution: boolean | undefined }[] = []
+    const processCandles = runtime.engine.processCandles.bind(runtime.engine)
+    runtime.engine.processCandles = (symbol, candles, options) => { calls.push({ symbol, allowExecution: options?.allowExecution }); return processCandles(symbol, candles, options) }
+    const checkpoints: string[][] = [], persist = internal.persist.bind(runtime)
+    internal.persist = (...args: unknown[]) => { checkpoints.push([...runtime.control.warmed]); return persist(...args) }
+    await within(internal.tick())
+    if (internal.executionTask) await internal.executionTask
+    assert.deepEqual(calls, symbols.map(symbol => ({ symbol, allowExecution: false })))
+    assert.deepEqual(runtime.control.warmed, symbols)
+    assert.equal(internal.warmJobs.size, 0)
+    assert.deepEqual(checkpoints, [[], symbols], "initial quote checkpoint plus exactly one history-batch checkpoint")
+    assert.equal(runtime.engine.pendingIntents().length, 0)
+    await within(internal.tick())
+    if (internal.executionTask) await internal.executionTask
+    assert.equal(calls.length, readyCount, "consumed history jobs must not be processed twice")
+  })
+})
+
+test("history batch keeps failed-symbol retry separate and leaves unfinished jobs untouched", async () => {
+  await isolated(async (runtime) => {
+    const internal = runtime as any
+    runtime.control.warmed = []
+    internal.prefetchHistory = () => {}
+    internal.executor = { process: async () => [] }
+    const [failed, ready, pending] = runtime.engine.settings.symbols
+    const timestamp = Math.floor(Date.now() / 60_000) * 60_000 - 60_000
+    internal.warmJobs.set(failed, { error: "Historical data unavailable" })
+    internal.warmJobs.set(ready, { data: [{ timestamp, open: 100, high: 100, low: 100, close: 100, volume: 1 }] })
+    internal.warmJobs.set(pending, {})
+    const before = Date.now()
+    await within(internal.tick())
+    if (internal.executionTask) await internal.executionTask
+    assert.deepEqual(runtime.control.warmed, [ready])
+    assert.ok(internal.warmRetryAt.get(failed) >= before + 30_000)
+    assert.equal(internal.warmJobs.has(pending), true)
+    assert.equal(internal.warmJobs.has(failed), false)
+    assert.equal(internal.warmJobs.has(ready), false)
+    assert.match(runtime.control.lastError || "", /Historical data unavailable/)
+    assert.equal(runtime.engine.pendingIntents().length, 0)
+  })
+})
