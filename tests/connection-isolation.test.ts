@@ -55,3 +55,18 @@ test('50-symbol startup bounds concurrent commission reads and retains fallback 
  try{runtime.control.symbolCount=50;await runtime.start();assert.equal(reads,50);assert.equal(maximum,5);assert.equal(runtime.engine.settings.symbols.length,50);assert.equal(Object.keys(runtime.engine.settings.symbolFees!).length,49);assert.equal(store.intents().length,0)}
  finally{runtime.shutdown();store.close();if(priorKey===undefined)delete process.env.BINGX_X02_KEY;else process.env.BINGX_X02_KEY=priorKey;if(priorSecret===undefined)delete process.env.BINGX_X02_SECRET;else process.env.BINGX_X02_SECRET=priorSecret}
 })
+
+
+test('a temporary commission failure retains the last verified economics and reports its source',async()=>{
+ const store=new StateStore(':memory:'),oldKey=process.env.BINGX_X02_KEY,oldSecret=process.env.BINGX_X02_SECRET
+ process.env.BINGX_X02_KEY='test';process.env.BINGX_X02_SECRET='test'
+ const client={configured:true,balance:async()=>({equity:1000}),contracts:async()=>[{symbol:'BTC-USDT'}],quotes:async()=>[{symbol:'BTC-USDT',price:100,timestamp:Date.now()}],commission:async()=>{throw Error('Temporary read failure')}}
+ const runtime=new TerminalRuntime('bingx-x02',store,()=>client as any)
+ try{
+  runtime.saveFlatSettings({symbolCount:1});runtime.engine.updateSettings({symbolFees:{'BTC-USDT':{makerFeePct:.02,takerFeePct:.05}},catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}})
+  const bars=Array.from({length:100},(_,i)=>{const close=100+9*Math.sin(i/11);return {timestamp:1700000040000+i*60000,open:close,high:close,low:close,close,volume:1}})
+  runtime.engine.processCandles('BTC-USDT',bars);const before=runtime.engine.snapshot().stages[0].currentLanes;assert.ok(before>0)
+  await runtime.start();assert.deepEqual(runtime.engine.settings.symbolFees!['BTC-USDT'],{makerFeePct:.02,takerFeePct:.05});assert.equal(runtime.engine.snapshot().stages[0].currentLanes,before)
+  assert.deepEqual(runtime.snapshot().engine.feeReadFailures,['BTC-USDT']);assert.equal(runtime.snapshot().engine.feeFallbackSymbols.length,0)
+ }finally{runtime.shutdown();store.close();if(oldKey===undefined)delete process.env.BINGX_X02_KEY;else process.env.BINGX_X02_KEY=oldKey;if(oldSecret===undefined)delete process.env.BINGX_X02_SECRET;else process.env.BINGX_X02_SECRET=oldSecret}
+})

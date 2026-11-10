@@ -180,6 +180,7 @@ export class BingxClient {
   private schedule: Promise<void> = Promise.resolve()
   private nextStart = 0
   private offset = 0
+  private receiveWindow=5000
   private syncedAt = -Infinity
   private syncing: Promise<number> | null = null
   // Suppress concurrent duplicate submissions. Durable lifetime deduplication
@@ -218,7 +219,7 @@ export class BingxClient {
     try { beforeWrite?.(); onStart?.(this.now()) }
     catch (error) { release(); throw new WriteGuardError(error) }
     const query = authenticated
-      ? signedQuery({ ...params, timestamp: Math.floor(this.now() + this.offset - 500), recvWindow: 5000 }, this.credentials!.apiSecret)
+      ? signedQuery({ ...params, timestamp: Math.floor(this.now() + this.offset - 500), recvWindow: this.receiveWindow }, this.credentials!.apiSecret)
       : new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)])).toString()
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeout)
@@ -274,7 +275,10 @@ export class BingxClient {
       const after = this.now()
       const serverTime = number(data.serverTime)
       if (!(serverTime > 0)) throw new Error("Exchange did not return a valid clock")
-      this.offset = serverTime - (before + after) / 2
+      // Receipt anchoring avoids a future timestamp when outbound latency dominates.
+      // Keep the default window for fast links; observed latency may require a bounded wider window.
+      this.offset = serverTime - after
+      this.receiveWindow=Math.max(5000,Math.min(60000,Math.ceil(2*(after-before)+1000)))
       this.syncedAt = after
       return serverTime
     })()

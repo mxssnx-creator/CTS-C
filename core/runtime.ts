@@ -10,10 +10,10 @@ import type { Candle, EngineSettings, EngineEvent } from './types'
 import { generateStrategyCatalog } from './catalog'
 import {flatEngineSettings,validateConfiguration} from './settings-schema'
 
-interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null }
+interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
 interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null}
-const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:1440,lastTick:null,lastError:null }
+const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:1440,lastTick:null,lastError:null,feeReadFailures:[],feeCheckedAt:null }
 function retainEvents(target:EngineEvent[],source:readonly EngineEvent[],limit=5000){
   if(source.length>=limit)target.length=0
   for(let i=Math.max(0,source.length-limit);i<source.length;i++)target.push(source[i])
@@ -94,13 +94,14 @@ export class TerminalRuntime {
     const settings=this.engine.settings
     // Removed symbols remain managed until their owned paper positions close.
     this.engine.updateSettings({...settings,symbols})
-    const symbolFees:NonNullable<EngineSettings['symbolFees']>={}
+    const symbolFees:NonNullable<EngineSettings['symbolFees']>={},feeReadFailures:string[]=[]
+    for(const symbol of symbols)if(settings.symbolFees?.[symbol])symbolFees[symbol]=settings.symbolFees[symbol]
     for(let offset=0;offset<symbols.length;offset+=5){
       const batch=symbols.slice(offset,offset+5),fees=await Promise.allSettled(batch.map(symbol=>this.client.commission(symbol)))
-      for(let i=0;i<batch.length;i++){const fee=fees[i];if(fee.status==='fulfilled')symbolFees[batch[i]]={makerFeePct:Math.max(0,fee.value.maker*100),takerFeePct:fee.value.taker*100}}
+      for(let i=0;i<batch.length;i++){const fee=fees[i];if(fee.status==='fulfilled')symbolFees[batch[i]]={makerFeePct:Math.max(0,fee.value.maker*100),takerFeePct:fee.value.taker*100};else feeReadFailures.push(batch[i])}
     }
     this.engine.updateSettings({symbolFees})
-    this.control={...this.control,running:true,exchangeExecution:true,lastError:null}
+    this.control={...this.control,running:true,exchangeExecution:true,lastError:null,feeReadFailures,feeCheckedAt:Date.now()}
     this.persist()
     this.schedule()
   }
@@ -272,7 +273,7 @@ export class TerminalRuntime {
       readiness:{x02Configured:Boolean(connectionCredentials('bingx-x02')),configured:Boolean(connectionCredentials(this.connectionId)),environment:connectionInfo(this.connectionId).environment,status:this.control.lastError||this.accountError||(this.control.running?warmedCount>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${warmedCount}/${s.symbolCount}`:connectionCredentials(this.connectionId)?`Configured; ready to verify ${connectionInfo(this.connectionId).environment}`:`Dedicated ${connectionInfo(this.connectionId).name} credentials required`),engineStatus:this.control.running?'running':'stopped',warmedSymbols:warmedCount,lastTick:this.control.lastTick},
       positionCount:live.open,positionDisplayLimit:1000,metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
       coordinationStats:this.engine.coordinationStats(),
-      engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory,symbolFees:s.settings.symbolFees??{},feeFallbackSymbols:s.settings.symbols.filter(symbol=>!s.settings.symbolFees?.[symbol])},
+      engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory,symbolFees:s.settings.symbolFees??{},feeReadFailures:this.control.feeReadFailures,feeCheckedAt:this.control.feeCheckedAt,feeFallbackSymbols:s.settings.symbols.filter(symbol=>!s.settings.symbolFees?.[symbol])},
       execution:{lots:this.executor.lots(),intents:this.store.intents(100),summary:this.executor.summary()},lastReplay:this.store.get('lastReplay')}
   }
 }

@@ -336,3 +336,18 @@ test("native conditional GET may return its filled child only with exact trigger
   const wrong=fixture(()=>json({...order,orderId:child,triggerOrderId:'999'})).client
   await assert.rejects(wrong.orderById('XRP-USDT',parent),/exact trigger-parent/)
 })
+
+
+test('asymmetric slow transport cannot create future signatures and gets a bounded observed-latency window',async()=>{
+ let now=1_790_000_000_000,reads=0
+ const client=new BingxVstClient(credentials,{now:()=>now,minRequestIntervalMs:0,sleep:async()=>{},fetch:async(input)=>{
+  const url=new URL(String(input))
+  if(url.pathname.endsWith('/server/time')){now+=5100;return json({serverTime:now-100})}
+  reads++;const stamp=Number(url.searchParams.get('timestamp')),window=Number(url.searchParams.get('recvWindow'))
+  assert.ok(stamp<=now,'asymmetric synchronization must not sign in the future')
+  assert.ok(window>=5000&&window<=60000)
+  now+=6000;assert.ok(now-stamp<=window,'the observed slow-link delay must fit the declared receive window')
+  return json({makerCommissionRate:.0002,takerCommissionRate:.0005})
+ }})
+ assert.deepEqual(await client.commission('BTC-USDT'),{maker:.0002,taker:.0005,source:'exchange'});assert.equal(reads,1)
+})
