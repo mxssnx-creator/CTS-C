@@ -4,6 +4,18 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { StateStore } from '../core/store'
+import { DEFAULT_ENGINE_SETTINGS } from '../core/engine'
+test('small settings snapshot is atomic with the engine checkpoint and legacy settings need no JS ledger parse',()=>{
+  const store=new StateStore(':memory:')
+  try{
+    store.saveEngineJSON(JSON.stringify({version:1,settings:DEFAULT_ENGINE_SETTINGS}),[],DEFAULT_ENGINE_SETTINGS)
+    assert.deepEqual(store.engineSettings(),DEFAULT_ENGINE_SETTINGS)
+    store.database.prepare("DELETE FROM records WHERE key='engine-settings'").run()
+    const getRaw=store.getRaw.bind(store)
+    store.getRaw=key=>{assert.notEqual(key,'engine','full ledger must not be fetched into JavaScript');return getRaw(key)}
+    assert.deepEqual(store.engineSettings(),DEFAULT_ENGINE_SETTINGS)
+  }finally{store.close()}
+})
 test('durable intent survives restart and can never be claimed twice', () => {
   const directory = mkdtempSync(join(tmpdir(), 'ctsc-store-'))
   try {

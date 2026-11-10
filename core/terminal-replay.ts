@@ -15,27 +15,32 @@ function metrics(positions: PseudoPosition[]) {
 
 /** Parameters are ranked on a chronological training slice only. Holdout is
  * read after the shortlist is frozen and never updates engine settings. */
-export function runTerminalReplay(symbol: string, candles: MarketCandle[], settings: Record<string, unknown> = {}) {
-  if (candles.length < 100 || candles.length > 5000) throw new Error("Replay needs 100..5000 chronological candles")
+function* replaySteps(symbol: string, candles: MarketCandle[], settings: Record<string, unknown> = {}) {
+  if (candles.length < 100 || candles.length > 20000) throw new Error("Replay needs 100..20000 chronological candles")
   const split = Math.floor(candles.length * .65)
-  const train = candles.slice(0, split).map(c => ({ ...c, timestamp: c.time * 1000 }))
-  const test = candles.slice(split).map(c => ({ ...c, timestamp: c.time * 1000 }))
+  const barSeconds=Number(settings.replayBarSeconds??0)
+  if(!Number.isFinite(barSeconds)||barSeconds<0)throw new Error("Invalid replay interval")
+  const train = candles.slice(0, split).map(c => ({ ...c, timestamp: (c.time+barSeconds) * 1000 }))
+  const test = candles.slice(split).map(c => ({ ...c, timestamp: (c.time+barSeconds) * 1000 }))
   const configs = generateStrategyCatalog("terminal-research", settings)
   const minSamples = Math.max(1, Math.min(200, Number(settings.mainEvalPosCount) || 8))
   const minPf = Math.max(1, Number(settings.baseProfitFactor) || 1.05)
-  const evaluated = configs.map(config => {
-    const score = metrics(replayStrategy(symbol, train, config))
-    return { config, score, enough: score.trades >= minSamples, passed: score.trades >= minSamples && (score.pf ?? 0) >= minPf }
-  })
+  const evaluated = [] as {config:StrategyConfig;score:ReturnType<typeof metrics>;enough:boolean;passed:boolean}[]
+  for(const config of configs){
+    const score = metrics(replayStrategy(symbol, train, config,train.length*2))
+    evaluated.push({ config, score, enough: score.trades >= minSamples, passed: score.trades >= minSamples && (score.pf ?? 0) >= minPf })
+    yield
+  }
   const selected: typeof evaluated = []
   for (const range of STRATEGY_RANGES) {
     const candidates = evaluated.filter(v => v.config.range === range).sort((a, b) => Number(b.passed) - Number(a.passed) || Number(b.enough) - Number(a.enough) || (b.score.pf ?? -1) - (a.score.pf ?? -1) || b.score.netReturnSumPct - a.score.netReturnSumPct || a.config.id.localeCompare(b.config.id))
     selected.push(...candidates.slice(0, 3))
   }
-  const rows = selected.map(({config, score, passed}) => ({
+  const rows=[] as {id:string;range:StrategyConfig['range'];tactic:string;tpStep:StrategyConfig['tpStep'];slRatio:StrategyConfig['slRatio'];exitMode:StrategyConfig['exitMode'];training:ReturnType<typeof metrics>;trainingPassed:boolean;holdout:ReturnType<typeof metrics>}[]
+  for(const {config,score,passed} of selected){rows.push({
     id: config.id, range: config.range, tactic: config.type, tpStep: config.tpStep, slRatio: config.slRatio, exitMode: config.exitMode,
-    training: score, trainingPassed: passed, holdout: metrics(replayStrategy(symbol, test, config)),
-  }))
+    training: score, trainingPassed: passed, holdout: metrics(replayStrategy(symbol, test, config,test.length*2,train)),
+  });yield}
   return {
     symbol, mode: "research-replay", costModel: "net after maker/taker fallback plus fee-relative slippage once", candleExecution: "Observed candle closes only; gaps fill at observed price; no intrabar assumptions",
     trainingCandles: train.length, holdoutCandles: test.length, holdoutStartsAt: new Date(test[0].timestamp).toISOString(),
@@ -43,6 +48,19 @@ export function runTerminalReplay(symbol: string, candles: MarketCandle[], setti
     samplesPercent: configs.length ? 100 * evaluated.filter(x => x.enough).length / configs.length : 0,
     eligible: evaluated.filter(x => x.passed).length, minSamples, minPf, rows,
     executionEligible: false,
-    note: "Research results do not place orders or qualify forward Main/Real stages. Returns and drawdown are equal-size percentage-point sums, not account equity.",
+    note: "Replay uses the engine's observed-price exits and independent long/short positions. Holdout indicators retain training prehistory, with fresh holdout positions. All closed outcomes are counted. Research does not place orders or qualify Main/Real stages. Returns and drawdown are percentage-point sums, not account equity.",
+  }
+}
+export function runTerminalReplay(symbol:string,candles:MarketCandle[],settings:Record<string,unknown>={}){
+  const steps=replaySteps(symbol,candles,settings)
+  for(;;){const next=steps.next();if(next.done)return next.value}
+}
+/** Yield between candidates so research cannot monopolize the trading event loop. */
+export async function runTerminalReplayAsync(symbol:string,candles:MarketCandle[],settings:Record<string,unknown>={},signal?:AbortSignal){
+  const steps=replaySteps(symbol,candles,settings)
+  for(let count=0;;count++){
+    signal?.throwIfAborted()
+    const next=steps.next();if(next.done)return next.value
+    if(count%4===0)await new Promise<void>(resolve=>setImmediate(resolve))
   }
 }

@@ -20,6 +20,8 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run check
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run test:browser
       - run: python3 -m unittest discover -s integrations/research -p 'test_contract.py' -v
       - run: docker build -t cts-c:verified .
       - run: node scripts/docker-smoke.mjs

@@ -36,6 +36,7 @@ export interface PaperPosition {
   sizing?: { baseBudget: number; block: EngineSettings["coordinations"]["block"]; dca: EngineSettings["coordinations"]["dca"] }
   peak: number; lastAddPrice: number; addedSteps: number; costPct: number; takeProfitPct: number; stopLossPct: number
   exitMode: ExitMode; maxHoldMinutes: number; notional: number
+  trailingBasis?: "peak" | "entry"
 }
 export interface ClosedTrade {
   id: string; laneId: string; configId: string; symbol: string; direction: Direction; stage: Stage; coordination: Coordination
@@ -47,6 +48,7 @@ export interface LaneState {
   id: string; symbol: string; configId: string; direction: Direction; stage: Stage; coordination: Coordination
   config: StrategyConfig; samples: number[]; closedCount: number; wins: number; netPnl: number; grossProfit: number; grossLoss: number
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
+  costTotal?: number
 }
 export interface SignalState {
   count: number; prices: number[]; gains: number[]; losses: number[]; previousPrice?: number
@@ -64,14 +66,16 @@ export interface EngineEvent { type: "opened" | "added" | "closed" | "qualified"
 export interface EngineState {
   version: 1; settings: EngineSettings; lanes: Record<string, LaneState>; signals: Record<string, SignalState>
   lastTimestamp: Record<string, number>; recentTrades: ClosedTrade[]; intents: ExecutionIntent[]
+  recentLiveTrades?: ClosedTrade[]
   processedCandles: number; startedAt: number; updatedAt: number; equity: number; peakEquity: number; maxDrawdownPct: number
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]
 }
-export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; pfState: ProfitFactorState; netPnl: number }
+export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; pfState: ProfitFactorState; netPnl: number; wins:number; fees:number|null; longOpen:number; shortOpen:number; currentLanes:number; currentEnoughSamples:number; currentQualified:number; admissionReady:number; blockedByParent:number; currentProfitFactor:number; currentPfState:ProfitFactorState }
 export interface EngineSnapshot {
   settings: EngineSettings; catalogCount: number; symbolCount: number; processedCandles: number; updatedAt: number
   equity: number; peakEquity: number; maxDrawdownPct: number; stages: StageMetrics[]
   positions: (PaperPosition & { laneId: string; symbol: string; configId: string; stage: Stage; coordination: Coordination })[]
   trades: ClosedTrade[]; intents: ExecutionIntent[]; equityHistory: EngineState["equityHistory"]
+  liveTrades: ClosedTrade[]
   lanes: { id: string; symbol: string; configId: string; stage: Stage; direction: Direction; coordination: Coordination; count: number; required: number; enoughSamples: boolean; profitFactor: number; pfState: ProfitFactorState; qualified: boolean; netPnl: number }[]
 }

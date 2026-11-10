@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, Download, Layers3, RotateCcw, Save, SlidersHorizontal, Upload } from "lucide-react"
 import { ReplayStudy } from "./replay-study"
+import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS } from "@/core/indications"
 
 const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide"]
 const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
@@ -11,7 +12,7 @@ const RATIOS = Array.from({ length: 11 }, (_, index) => Number(((index + 1) * 0.
 const BALANCED_STEPS = [3, 5, 8, 12, 18, 24, 30]
 const BALANCED_RATIOS = [0.6, 1, 1.4]
 const MODES = ["fixed", "trailing", "trailing-only"]
-const INDICATIONS = ["MA_Cross", "RSI_Band", "MACD_Signal", "Bollinger_Bounce"]
+const INDICATIONS = [...ALL_INDICATIONS]
 const DEFAULTS: Record<string, unknown> = {
   baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
@@ -21,7 +22,7 @@ const DEFAULTS: Record<string, unknown> = {
   blockVolumeRatio: 0.2, makerFeePct: 0.05, takerFeePct: 0.08, slippagePctOfFees: 10,
   symbolCount: 100, historyCandles: 1440, volumeFactor: 0.01, baseNotional: 100,
   strategyEnabledRanges: RANGES, strategyTpSteps: BALANCED_STEPS, strategySlRatios: BALANCED_RATIOS,
-  strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
+  strategyExitModes: MODES, strategyIndicationTypes: [...CORE_INDICATIONS],
 }
 const NUMERIC_FIELDS = [
   { key: "baseProfitFactor", label: "Base → Main minimum PF", min: 0, max: 999, step: 0.01 },
@@ -169,7 +170,7 @@ export function StrategyLab({ settings, onSave, busy }: { settings: Record<strin
     dirtyRef.current = true; setDirty(true); setError(null); setMessage(`${name} preset prepared. Save to apply it to x02.`)
     setDraft(current => ({ ...current, strategyEnabledRanges: kind === "micro" ? ["Micro", "Minimal"] : [...RANGES],
       strategyTpSteps: kind === "micro" ? [3, 4, 5, 6, 7, 8] : kind === "balanced" ? [...BALANCED_STEPS] : [...STEPS],
-      strategySlRatios: kind === "balanced" ? [...BALANCED_RATIOS] : [...RATIOS], strategyExitModes: [...MODES], strategyIndicationTypes: [...INDICATIONS],
+      strategySlRatios: kind === "balanced" ? [...BALANCED_RATIOS] : [...RATIOS], strategyExitModes: [...MODES], strategyIndicationTypes: kind==="full"?[...INDICATIONS]:[...CORE_INDICATIONS],
       baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
       mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20 }))
   }
@@ -231,7 +232,7 @@ export function StrategyLab({ settings, onSave, busy }: { settings: Record<strin
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => preset("balanced")} className="terminal-button" disabled={busy || saving}>Balanced · 252</button>
           <button type="button" onClick={() => preset("micro")} className="terminal-button" disabled={busy || saving}><Layers3 className="mr-2 inline h-4 w-4" />Micro + Minimal</button>
-          <button type="button" onClick={() => preset("full")} className="terminal-button" disabled={busy || saving}>Full · 3,696</button>
+          <button type="button" onClick={() => preset("full")} className="terminal-button" disabled={busy || saving}>Full · 7,392</button>
           <button type="button" onClick={exportConfiguration} className="terminal-button"><Download className="h-4 w-4" />Export JSON</button>
           <button type="button" onClick={() => importInput.current?.click()} className="terminal-button"><Upload className="h-4 w-4" />{importing ? "Importing…" : "Import JSON"}</button>
           <input ref={importInput} type="file" accept="application/json,.json" onChange={importConfiguration} className="hidden" aria-label="Import strategy configuration JSON" />

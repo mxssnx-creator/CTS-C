@@ -22,6 +22,10 @@ export function marketInterval(input: unknown): string {
   if (!intervals.has(value)) throw new Error("Unsupported candle interval")
   return value
 }
+export function intervalSeconds(interval:string):number {
+  marketInterval(interval)
+  return Number(interval.slice(0,-1))*({m:60,h:3600,d:86400}[interval.at(-1)!]!)
+}
 async function cached<T>(key: string, ttl: number, work: () => Promise<T>): Promise<T> {
   const current = cache.get(key)
   if (current && current.expires > Date.now()) return current.value as T
@@ -57,10 +61,12 @@ export function normalizeCandles(rows: unknown[], venue: MarketVenue): MarketCan
   if (!normalized.length || normalized.some(c => Object.values(c).some(v => !Number.isFinite(v)) || c.time <= 0 || c.low <= 0 || c.high < Math.max(c.open, c.close) || c.low > Math.min(c.open, c.close) || c.volume < 0)) throw new Error("Market data contains invalid candles")
   return [...new Map(normalized.map(c => [c.time, c])).values()].sort((a, b) => a.time - b.time)
 }
-export async function getMarketCandles(venue: MarketVenue, symbol: string, interval: string, demo: boolean): Promise<MarketCandle[]> {
+export async function getMarketCandles(venue: MarketVenue, symbol: string, interval: string, demo: boolean, options:{limit?:number;endTime?:number}={}): Promise<MarketCandle[]> {
   marketInterval(interval)
   symbol = marketSymbol(symbol)
-  return cached(`candles:${venue}:${demo}:${symbol}:${interval}`, 15_000, async () => {
+  const limit=options.limit??200
+  if(!Number.isInteger(limit)||limit<1||limit>1000||options.endTime!==undefined&&(!Number.isSafeInteger(options.endTime)||options.endTime<=0))throw new Error("Invalid market history request")
+  return cached(`candles:${venue}:${demo}:${symbol}:${interval}:${limit}:${options.endTime??"latest"}`, 15_000, async () => {
     const job = candleQueue.catch(() => {}).then(async () => {
       const remaining = 1100 - (Date.now() - lastCandleRequest)
       if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining))
@@ -68,7 +74,8 @@ export async function getMarketCandles(venue: MarketVenue, symbol: string, inter
       const url = endpoint(venue, demo, venue === "bingx" ? "/openApi/swap/v3/quote/klines" : "/v5/market/kline")
       url.searchParams.set("symbol", venue === "bingx" ? symbol : symbol.replace("-", ""))
       url.searchParams.set("interval", venue === "bingx" ? interval : ({ "1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "D" }[interval]!))
-      url.searchParams.set("limit", "200")
+      url.searchParams.set("limit", String(limit))
+      if(options.endTime!==undefined)url.searchParams.set(venue==="bingx"?"endTime":"end",String(options.endTime))
       if (venue === "bybit") url.searchParams.set("category", "linear")
       const body = await read(url)
       return normalizeCandles(venue === "bingx" ? body.data : body.result?.list, venue)
@@ -76,6 +83,26 @@ export async function getMarketCandles(venue: MarketVenue, symbol: string, inter
     candleQueue = job
     return job
   })
+}
+/** Completed chronological history for research; the live chart may include its forming bar. */
+export async function getResearchCandles(venue:MarketVenue,symbol:string,interval:string,demo:boolean,count=1000,cutoff=Date.now()):Promise<MarketCandle[]>{
+  if(!Number.isInteger(count)||count<100||count>5000)throw new Error("Research candles must be 100..5000")
+  const duration=intervalSeconds(interval), rows=new Map<number,MarketCandle>()
+  let endTime=Math.floor(cutoff/(duration*1000))*duration*1000-1
+  for(let page=0;page<Math.ceil(count/1000)+1&&rows.size<count;page++){
+    const batch=await getMarketCandles(venue,symbol,interval,demo,{limit:Math.min(1000,count-rows.size+1),endTime})
+    const closed=batch.filter(c=>c.time*1000<=endTime&&(c.time+duration)*1000<=cutoff)
+    if(!closed.length)break
+    const before=rows.size
+    for(const candle of closed)rows.set(candle.time,candle)
+    if(rows.size===before)break
+    endTime=closed[0].time*1000-1
+  }
+  const result=[...rows.values()].sort((a,b)=>a.time-b.time).slice(-count)
+  if(result.length<100)throw new Error("Insufficient completed research candles")
+  if(result.at(-1)!.time+duration!==Math.floor(cutoff/(duration*1000))*duration)throw new Error("Research history is stale")
+  if(result.some((c,i)=>i>0&&c.time-result[i-1].time!==duration))throw new Error("Research history has missing candles")
+  return result
 }
 export async function getMarketQuotes(venue: MarketVenue, symbols: string[], demo: boolean): Promise<Record<string, MarketQuote>> {
   const canonical = symbols.map(marketSymbol)

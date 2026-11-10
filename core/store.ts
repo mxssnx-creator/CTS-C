@@ -27,15 +27,22 @@ export class StateStore {
     this.saveEngineJSON(JSON.stringify(state), events)
   }
   /** Trusted engine serialization avoids a second full-state parse/clone. */
-  saveEngineJSON(serialized: string, events: unknown[] = []) {
+  saveEngineJSON(serialized: string, events: unknown[] = [], settings?:unknown) {
     this.database.exec("BEGIN IMMEDIATE")
     try {
       this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run(serialized, Date.now())
+      if(settings!==undefined)this.set('engine-settings',settings)
       const insert = this.database.prepare("INSERT INTO events(data,created) VALUES(?,?)")
       for (const event of events) insert.run(JSON.stringify(event), Date.now())
       this.database.exec("DELETE FROM events WHERE id < (SELECT COALESCE(MAX(id),0)-5000 FROM events)")
       this.database.exec("COMMIT")
     } catch (error) { this.database.exec("ROLLBACK"); throw error }
+  }
+  engineSettings():import('./types').EngineSettings|null {
+    const saved=this.get<import('./types').EngineSettings>('engine-settings')
+    if(saved)return saved
+    const row=this.database.prepare("SELECT json_extract(data,'$.settings') AS data FROM records WHERE key='engine'").get() as {data:string|null}|undefined
+    return row?.data?JSON.parse(row.data):null
   }
   events(limit = 100): Record<string, unknown>[] { return (this.database.prepare("SELECT data FROM events ORDER BY id DESC LIMIT ?").all(Math.max(1, Math.min(1000, limit))) as { data: string }[]).map(row => JSON.parse(row.data)) }
   claimIntent(id: string, payload: Record<string, unknown>): boolean {

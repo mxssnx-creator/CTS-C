@@ -14,7 +14,8 @@
     "check:x02": "node --import tsx scripts/x02-preflight.ts",
     "test:runtime": "node scripts/runtime-smoke.mjs",
     "check": "npm run typecheck && npm test && npm run build && npm run test:runtime",
-    "postbuild": "node scripts/prepare-standalone.mjs"
+    "postbuild": "node scripts/prepare-standalone.mjs",
+    "test:browser": "node --import tsx scripts/browser-smoke.mjs"
   },
   "dependencies": {
     "lightweight-charts": "^5.2.0",
@@ -29,6 +30,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.27",
+    "playwright-core": "1.62.1",
     "postcss": "8.5.32",
     "tailwindcss": "^3.4.19",
     "tsx": "^4.21.0",

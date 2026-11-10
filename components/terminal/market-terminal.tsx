@@ -10,7 +10,7 @@ export function MarketTerminal() {
   const [symbol, setSymbol] = useState("BTC-USDT")
   const [interval, setIntervalValue] = useState("5m")
   const [venue, setVenue] = useState("bingx")
-  const [environment, setEnvironment] = useState("public")
+  const [environment, setEnvironment] = useState("demo")
   const [reload, setReload] = useState(0)
   const [status, setStatus] = useState("Waiting for market data")
   const [lastClose, setLastClose] = useState<number | null>(null)
