@@ -300,11 +300,15 @@ export class TradingEngine {
       takeProfitPct: position.takeProfitPct, stopLossPct: position.stopLossPct, exitMode: position.exitMode,maxOrderNotional:position.maxOrderNotional,qualificationId:position.admission?.length?hashId(JSON.stringify(position.admission)):undefined,
       minimumAddRatio:lane.coordination==='block'?position.sizing?.block.ratio:lane.coordination==='dca'?position.sizing?.dca.multiplier:undefined,source: "real-qualified", status: "pending" })
   }
-  processCandles(symbolInput: string, candles: Candle[], options: { allowExecution?: boolean } = {}): EngineEvent[] {
+  processCandles(symbolInput: string, candles: Candle[], options: { allowExecution?: boolean;eventLimit?:number } = {}): EngineEvent[] {
     const symbol = normalizeSymbol(symbolInput), s = this.state.settings
     const configured=s.symbols.includes(symbol)
     if (!configured&&!this.active.get(symbol)?.size) throw new Error(`Symbol ${symbol} is not configured`)
     const events: EngineEvent[] = []
+    const eventLimit=options.eventLimit??Infinity
+    if(eventLimit!==Infinity&&(!Number.isInteger(eventLimit)||eventLimit<0))throw new Error('Invalid event limit')
+    let eventIndex=0
+    const emit=(event:EngineEvent)=>{if(eventLimit===0)return;if(events.length<eventLimit)events.push(event);else{events[eventIndex]=event;eventIndex=(eventIndex+1)%eventLimit}}
     let inputTimestamp = -Infinity
     // Validate the complete batch before any mutation, so rejected input is atomic.
     for (const candle of candles) {
@@ -320,7 +324,7 @@ export class TradingEngine {
         const lane = this.state.lanes[id], position = lane.open!
         const event = this.mark(lane, candle)
         if (event) {
-          events.push(event)
+          emit(event)
           if (event.type === "closed") justClosed.add(id)
           if (lane.stage === "live" && position.executionEligible) {
             if (event.type === "closed") this.enqueueIntent(lane, position, candle, "close", position.quantity)
@@ -352,7 +356,7 @@ export class TradingEngine {
             if(axisReady&&!lane?.open&&!justClosed.has(id)){
               lane??=this.lane(symbol, config, signal, coordination, stage)
               const position = this.open(lane, candle)
-              events.push({ type: "opened", laneId: lane.id, timestamp: candle.timestamp, stage })
+              emit({ type: "opened", laneId: lane.id, timestamp: candle.timestamp, stage })
               if (stage === "live" && options.allowExecution) {
                 position.executionEligible = true
                 this.enqueueIntent(lane, position, candle, "entry", position.quantity)
@@ -365,7 +369,7 @@ export class TradingEngine {
       }
       this.state.lastTimestamp[symbol] = candle.timestamp; this.state.updatedAt = Math.max(this.state.updatedAt, candle.timestamp); this.state.processedCandles++
     }
-    return events
+    return eventIndex?[...events.slice(eventIndex),...events.slice(0,eventIndex)]:events
   }
   /** Manage existing positions on observed quote ticks; signals remain closed-bar only. */
   processTick(symbolInput: string, price: number, timestamp: number): EngineEvent[] {

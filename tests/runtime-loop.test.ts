@@ -218,6 +218,6 @@ test('fresh signal updates use exchange OHLCV and volume while warm-up remains n
   const seen:any[]=[],original=runtime.engine.processCandles.bind(runtime.engine)
   runtime.engine.processCandles=(symbol,candles,options)=>{seen.push({symbol,candles,options});return original(symbol,candles,options)}
   await internal.tick();if(internal.executionTask)await internal.executionTask
-  assert.deepEqual(seen,[{symbol,candles:[native],options:{allowExecution:true}}]);assert.equal(runtime.engine.lastProcessedAt(symbol),now)
+  assert.deepEqual(seen,[{symbol,candles:[native],options:{allowExecution:true,eventLimit:5000}}]);assert.equal(runtime.engine.lastProcessedAt(symbol),now)
  })
 })
