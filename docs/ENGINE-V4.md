@@ -54,6 +54,8 @@ Block Shared divides one budget across entry and favorable additions. Additive u
 
 The exchange executor captures one actual entry quantity scale and uses it for subsequent additions. Entry normalization accounts for the smallest planned relative leg. A partially filled entry updates its scale from actual fills; an impossible sub-minimum addition is rejected before protection is canceled. A per-order notional cap also applies before protective cancellation. Protection and closes use only journaled native IDs and actual owned quantities. Tiny floating subtraction noise is clamped consistently with the ownership tolerance.
 
+Cold non-executable history recovery also progresses while a quote read is pending, in bounded cooperative slices. Fresh executable bars wait for the normal quote-cycle path. Exact-state regression tests compare delayed-quote recovery with a full observed pass, including every stage outcome, rather than dropping configurations or samples to obtain faster progress.
+
 ## Incremental durable checkpoints
 
 Engine metadata and changed lanes commit atomically. Existing checkpoints migrate in guarded batches; partially copied rows remain invisible until the final metadata commit, and the original checkpoint stays readable after interruption. Ordinary saves update only dirty lanes, preserve all lifetime outcomes and native intent journals, and acknowledge dirty state only after success. Identical immutable configuration values share memory after restore.

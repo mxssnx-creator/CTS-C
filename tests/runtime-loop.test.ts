@@ -280,3 +280,37 @@ test("a delayed account response cannot write after shutdown and replacement own
   finally{replacement.shutdown()}
  })
 })
+
+
+test('cold history advances during a blocked quote read while fresh live bars wait for that quote cycle',async()=>{
+ await isolated(async runtime=>{
+  const r=runtime as any,blocked=deferred<any[]>(),now=Math.floor(Date.now()/60000)*60000
+  r.client.quotes=()=>blocked.promise;r.prefetchHistory=()=>{};r.executor={process:async()=>[]}
+  runtime.engine=new TradingEngine({symbols:['BTC-USDT','ETH-USDT'],catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}})
+  runtime.control.warmed=['ETH-USDT'];const bar=(timestamp:number)=>({timestamp,open:100,high:100,low:100,close:100,volume:1})
+  runtime.engine.processCandles('ETH-USDT',[bar(now-60000)])
+  const data=Array.from({length:512},(_,i)=>bar(now-(511-i)*60000))
+  r.warmJobs.set('BTC-USDT',{data,plan:{count:512,cursor:null,cutoff:now},live:false})
+  r.warmJobs.set('ETH-USDT',{data:[bar(now)],plan:{count:100,cursor:now-60000,cutoff:now},live:true})
+  const task=r.tick();await new Promise(resolve=>setTimeout(resolve,80))
+  assert.ok(runtime.engine.lastProcessedAt('BTC-USDT')!==null,'closed observed history must progress while quotes are pending')
+  assert.equal(runtime.engine.lastProcessedAt('ETH-USDT'),now-60000,'a fresh executable bar waits for normal quote-cycle processing')
+  assert.equal(runtime.engine.pendingIntents().length,0)
+  blocked.resolve([]);await within(task);if(r.executionTask)await r.executionTask
+  assert.equal(runtime.engine.lastProcessedAt('ETH-USDT'),now)
+ })
+})
+
+test('cold recovery during delayed quotes matches a full observed pass without truncation or duplicate samples',async()=>{
+ await isolated(async runtime=>{
+  const r=runtime as any,blocked=deferred<any[]>(),now=Math.floor(Date.now()/60000)*60000
+  r.client.quotes=()=>blocked.promise;r.prefetchHistory=()=>{};r.executor={process:async()=>[]};runtime.control.warmed=[]
+  runtime.engine=new TradingEngine({symbols:['BTC-USDT'],stageGateMode:'processed-sets',stageLastN:{base:1,main:1,real:1},stageMinPF:{base:0,main:0,real:0},catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}})
+  const data=Array.from({length:256},(_,i)=>{const close=100+9*Math.sin(i/11);return {timestamp:now-(255-i)*60000,open:close,high:close,low:close,close,volume:1}}),reference=new TradingEngine(runtime.engine.settings)
+  reference.processCandles('BTC-USDT',data);r.warmJobs.set('BTC-USDT',{data,plan:{count:256,cursor:null,cutoff:now},live:false})
+  const task=r.tick();for(let i=0;i<100&&runtime.engine.lastProcessedAt('BTC-USDT')!==now;i++)await new Promise(resolve=>setTimeout(resolve,20))
+  assert.equal(runtime.engine.lastProcessedAt('BTC-USDT'),now);assert.equal(runtime.control.warmed.includes('BTC-USDT'),true)
+  blocked.resolve([]);await within(task);if(r.executionTask)await r.executionTask
+  const actual=JSON.parse(runtime.engine.serializeState()),expected=JSON.parse(reference.serializeState());actual.startedAt=expected.startedAt=0;assert.deepEqual(actual,expected)
+ })
+})

@@ -135,13 +135,61 @@ export class TerminalRuntime {
       if(!this.leaseLost&&this.control.running)this.accountError=`Account refresh: ${error instanceof Error?error.message:'unavailable'}`
     }).finally(()=>{this.accountTask=undefined})
   }
+  private consumeHistory(events:EngineEvent[],coldOnly=false){
+      const warmed=[...this.warmJobs.entries()].filter(([,job])=>(job.data||job.error)&&(!coldOnly||!job.live)).slice(0,3)
+      for(const [symbol,job] of warmed){
+        this.ensureLease()
+        try {
+          if(job.error)throw new Error(job.error)
+          if(job.data){
+            if(!job.validated){
+              validateObservedCandles(job.data)
+              if(job.plan){
+                if(this.engine.lastProcessedAt(symbol)!==job.plan.cursor)throw new Error('History cursor changed during recovery')
+                validateHistory(symbol,job.data,job.plan)
+              }
+              job.cursor=this.engine.lastProcessedAt(symbol)
+              const cursor=job.cursor
+              job.data=job.data.filter(candle=>cursor===null||candle.timestamp>cursor)
+              job.offset=0;job.validated=true
+            }
+            if(this.engine.lastProcessedAt(symbol)!==job.cursor)throw new Error('History cursor changed during a partial recovery')
+            const began=performance.now(),offset=job.offset??0
+            while((job.offset??0)<job.data.length&&(job.offset??0)-offset<128&&performance.now()-began<200){
+              const chunk=job.data.slice(job.offset,(job.offset??0)+8)
+              const fresh=job.live===true&&job.data.length===1&&job.plan?.cutoff===Math.floor(Date.now()/60000)*60000
+              retainEvents(events,this.engine.processCandles(symbol,chunk,{allowExecution:fresh&&this.control.exchangeExecution,eventLimit:5000}))
+              job.offset=(job.offset??0)+chunk.length;job.cursor=this.engine.lastProcessedAt(symbol)
+            }
+            if((job.offset??0)>=job.data.length){
+              this.warmJobs.delete(symbol)
+              if((!job.plan||job.plan.cutoff>=Math.floor(Date.now()/60_000)*60_000)&&!this.control.warmed.includes(symbol))this.control.warmed.push(symbol)
+            }
+          }
+        } catch(error) {this.warmJobs.delete(symbol);this.control.lastError=`${symbol}: ${error instanceof Error?error.message:'History unavailable'}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
+      }
+      if(warmed.length)this.persist(events.splice(0),false)
+  }
   private schedule() { if(this.timer||!this.control.running)return; this.timer=setTimeout(()=>{this.timer=undefined;void this.serial(()=>this.tick()).finally(()=>this.schedule())},1000);this.timer.unref?.() }
   private async tick() {
     if(!this.control.running)return
     try {
       this.ensureLease()
-      const quotes=await this.client.quotes()
-      const now=Date.now(), settings=this.engine.settings, events:EngineEvent[]=[]
+      const events:EngineEvent[]=[]
+      this.prefetchHistory()
+      let quoteReady=false
+      const quoteRead=this.client.quotes()
+      void quoteRead.then(()=>{quoteReady=true},()=>{quoteReady=true})
+      await Promise.resolve()
+      while(!quoteReady&&this.control.running){
+        const cold=[...this.warmJobs.values()].some(job=>!job.live)
+        if(!cold)break
+        this.consumeHistory(events,true)
+        this.prefetchHistory()
+        await new Promise<void>(resolve=>setTimeout(resolve,25))
+      }
+      const quotes=await quoteRead
+      const now=Date.now(), settings=this.engine.settings
       const managed=new Set(this.engine.managedSymbols())
       let dataGap=false
       this.ensureLease()
@@ -182,39 +230,7 @@ export class TerminalRuntime {
         })).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Executor unavailable'}).finally(()=>{this.executionTask=undefined})
       }
       this.prefetchHistory()
-      const warmed=[...this.warmJobs.entries()].filter(([,job])=>job.data||job.error).slice(0,3)
-      for(const [symbol,job] of warmed){
-        this.ensureLease()
-        try {
-          if(job.error)throw new Error(job.error)
-          if(job.data){
-            if(!job.validated){
-              validateObservedCandles(job.data)
-              if(job.plan){
-                if(this.engine.lastProcessedAt(symbol)!==job.plan.cursor)throw new Error('History cursor changed during recovery')
-                validateHistory(symbol,job.data,job.plan)
-              }
-              job.cursor=this.engine.lastProcessedAt(symbol)
-              const cursor=job.cursor
-              job.data=job.data.filter(candle=>cursor===null||candle.timestamp>cursor)
-              job.offset=0;job.validated=true
-            }
-            if(this.engine.lastProcessedAt(symbol)!==job.cursor)throw new Error('History cursor changed during a partial recovery')
-            const began=performance.now(),offset=job.offset??0
-            while((job.offset??0)<job.data.length&&(job.offset??0)-offset<128&&performance.now()-began<200){
-              const chunk=job.data.slice(job.offset,(job.offset??0)+8)
-              const fresh=job.live===true&&job.data.length===1&&job.plan?.cutoff===Math.floor(Date.now()/60000)*60000
-              retainEvents(events,this.engine.processCandles(symbol,chunk,{allowExecution:fresh&&this.control.exchangeExecution,eventLimit:5000}))
-              job.offset=(job.offset??0)+chunk.length;job.cursor=this.engine.lastProcessedAt(symbol)
-            }
-            if((job.offset??0)>=job.data.length){
-              this.warmJobs.delete(symbol)
-              if((!job.plan||job.plan.cutoff>=Math.floor(Date.now()/60_000)*60_000)&&!this.control.warmed.includes(symbol))this.control.warmed.push(symbol)
-            }
-          }
-        } catch(error) {this.warmJobs.delete(symbol);this.control.lastError=`${symbol}: ${error instanceof Error?error.message:'History unavailable'}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
-      }
-      if(warmed.length)this.persist(events.splice(0),false)
+      this.consumeHistory(events)
       this.refreshAccount()
     } catch(error) {this.control.lastError=error instanceof Error?error.message:'Exchange processing unavailable';if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner))this.store.set('control',this.control)}
   }
