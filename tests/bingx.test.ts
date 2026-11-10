@@ -24,6 +24,17 @@ function snapshotFixture(handler: (url: URL, method: string) => Promise<Response
   return fixture((url, method) => url.pathname.endsWith("/fillHistory") ? new Response("unsupported route", { status: 404 }) : handler(url, method))
 }
 
+test("malformed exchange inventories are not treated as empty", async () => {
+  const malformedPositions=fixture(()=>json({unexpected:[]})).client
+  await assert.rejects(()=>malformedPositions.positions(),/position inventory was not an array/)
+  const malformedOrders=fixture(()=>json({unexpected:[]})).client
+  await assert.rejects(()=>malformedOrders.openOrders(),/open-order inventory was not an array/)
+  const unknownSide=fixture(()=>json([{symbol:"BTC-USDT",positionAmt:"1"}])).client
+  await assert.rejects(()=>unknownSide.positions(),/position side was unavailable/)
+  const badQuantity=fixture(()=>json([{symbol:"BTC-USDT",positionSide:"LONG",positionAmt:"invalid"}])).client
+  await assert.rejects(()=>badQuantity.positions(),/quantity was invalid/)
+})
+
 test("x02 aliases never import mainnet credentials", () => {
   assert.equal(demoCredentials({ BINGX_API_KEY: "mainnet", BINGX_API_SECRET: "mainnet" }), null)
   assert.deepEqual(demoCredentials({ BINGX_X02_KEY: " demo ", BINGX_X02_SECRET: "secret" }), { apiKey: "demo", apiSecret: "secret" })
