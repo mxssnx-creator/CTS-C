@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "verifiedOn": "2026-11-10",
+  "runId": "diagnostic-4c3fd6b1-abd2-4b86-8b86-305185940d74",
+  "connection": "bingx-x02",
+  "environment": "BingX VST",
+  "scope": "Actual direct-client native order lifecycle; not strategy qualification or full DemoExecutor integration",
+  "symbol": "XRP-USDT",
+  "cases": [
+    {
+      "direction": "LONG",
+      "requestedQuantity": 3,
+      "filledQuantity": 3,
+      "averageEntry": 1.0586,
+      "nativeProtectionOrdersCreated": 2,
+      "nativeProtectionVisible": true,
+      "nativeProtectionCanceled": true,
+      "exactFilledQuantityClosed": true
+    },
+    {
+      "direction": "SHORT",
+      "requestedQuantity": 3,
+      "filledQuantity": 3,
+      "averageEntry": 1.0563,
+      "nativeProtectionOrdersCreated": 2,
+      "nativeProtectionVisible": true,
+      "nativeProtectionCanceled": true,
+      "exactFilledQuantityClosed": true
+    }
+  ],
+  "finalResidualPositions": 0,
+  "finalResidualOrders": 0,
+  "foreignInventoryPreserved": true,
+  "attachedChildMappingObserved": false,
+  "fullExecutorIntegrationVerified": false,
+  "automaticStrategyExecutionVerified": false,
+  "profitabilityVerified": false
+}

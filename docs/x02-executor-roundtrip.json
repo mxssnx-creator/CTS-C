@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "verifiedOn": "2026-11-10",
+  "runId": "executor-386226d2-314e-4336-b657-7a3ee370e9a9",
+  "connection": "bingx-x02",
+  "environment": "BingX VST",
+  "symbol": "XRP-USDT",
+  "scope": "Actual durable DemoExecutor diagnostic: forced entry, add, native protection replacement, exact owned close, fee reconciliation",
+  "cases": [
+    {
+      "direction": "LONG",
+      "entryFilledQuantity": 2,
+      "addFilledQuantity": 2,
+      "closedQuantity": 4,
+      "nativeProtectionResizedAndCanceled": true,
+      "realizedGrossPnl": 0,
+      "fees": 0.00426,
+      "realizedNetPnl": -0.00426,
+      "exchangeRealizedPnl": 0
+    },
+    {
+      "direction": "SHORT",
+      "entryFilledQuantity": 2,
+      "addFilledQuantity": 2,
+      "closedQuantity": 4,
+      "nativeProtectionResizedAndCanceled": true,
+      "realizedGrossPnl": -0.0024,
+      "fees": 0.004262,
+      "realizedNetPnl": -0.006662,
+      "exchangeRealizedPnl": -0.0024
+    }
+  ],
+  "acceptedOrders": 14,
+  "totals": {
+    "realizedGrossPnl": -0.0024,
+    "fees": 0.008522,
+    "realizedNetPnl": -0.010922
+  },
+  "finalOwnedLots": 0,
+  "finalProtectionGaps": 0,
+  "finalResidualPositions": 0,
+  "finalResidualOrders": 0,
+  "foreignInventoryPreserved": true,
+  "executorLifecycleVerified": true,
+  "automaticStrategyQualificationVerified": false,
+  "nativeConditionalTriggerFillVerified": false,
+  "profitabilityVerified": false,
+  "priorRunRecovery": {
+    "runIdPrefix": "executor-c44",
+    "exactOwnedQuantityClosed": 2,
+    "realizedGrossPnl": 0.0008,
+    "fees": 0.002124,
+    "realizedNetPnl": -0.001324,
+    "finalResidualPositions": 0,
+    "finalResidualOrders": 0,
+    "observation": "Transient read error 109400; exact owned quantity reconciled and closed; read-only resync/retry handling added, no blind POST retry"
+  }
+}

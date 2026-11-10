@@ -1,0 +1,40 @@
+{
+  "name": "cts-c-independent",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "build": "next build",
+    "start": "node scripts/start-server.mjs",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check:x02": "node --import tsx scripts/x02-preflight.ts",
+    "test:runtime": "node scripts/runtime-smoke.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run test:runtime",
+    "postbuild": "node scripts/prepare-standalone.mjs"
+  },
+  "dependencies": {
+    "lightweight-charts": "^5.2.0",
+    "lucide-react": "^0.454.0",
+    "next": "15.5.29",
+    "next-themes": "^0.4.6",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.27",
+    "postcss": "8.5.32",
+    "tailwindcss": "^3.4.19",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "postcss": "$postcss"
+  }
+}

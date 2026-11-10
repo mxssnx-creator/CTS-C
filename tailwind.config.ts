@@ -1,0 +1,2 @@
+import type { Config } from 'tailwindcss'
+export default { content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'], darkMode: 'class', theme: { extend: { colors: { background: 'var(--terminal-bg)', foreground: 'var(--terminal-fg)', card: 'var(--terminal-panel)', border: 'var(--terminal-border)', primary: 'var(--terminal-accent)', 'muted-foreground': 'var(--terminal-muted)', destructive: 'var(--terminal-red)' } } }, plugins: [] } satisfies Config

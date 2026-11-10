@@ -1,0 +1,10 @@
+*
+!Dockerfile
+!requirements-tested.txt
+!requirements-freqtrade-tested.txt
+!requirements-feed-tested.txt
+!bridge.py
+!feed.py
+!freqtrade_dry_run.py
+!freqtrade.spot.json
+!CTSResearchStrategy.py

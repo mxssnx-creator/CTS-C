@@ -1,0 +1,25 @@
+name: Independent CTS-C verification
+on:
+  push:
+    branches: [main, 'agent/**']
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ctsc-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: python3 -m unittest discover -s integrations/research -p 'test_contract.py' -v
+      - run: docker build -t cts-c:verified .
+      - run: node scripts/docker-smoke.mjs

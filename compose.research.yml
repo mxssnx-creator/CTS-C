@@ -1,0 +1,100 @@
+name: cts-c-research
+
+x-research-base: &research-base
+  image: cts-c-research:local
+  build:
+    context: ./integrations/research
+    target: research
+  profiles: [research]
+  read_only: true
+  tmpfs:
+    - /tmp:uid=10001,gid=10001,mode=1777
+  volumes:
+    - research-reports:/reports
+  restart: "no"
+
+services:
+  research-health:
+    <<: *research-base
+    network_mode: none
+    command: [health]
+
+  market-fetch:
+    <<: *research-base
+    command: [fetch, --symbol, "BTC/USDT:USDT", --timeframe, 1m, --count, "1000", --out, /reports/btc-vst.json]
+
+  market-watch:
+    <<: *research-base
+    command: [schedule, --symbol, "BTC/USDT:USDT", --timeframe, 1m, --count, "500", --cycles, "3", --seconds, "60", --out, /reports/btc-vst.json]
+
+  research-indicators:
+    <<: *research-base
+    network_mode: none
+    command: [indicators, /reports/btc-vst.json, --out, /reports/indicators.json]
+
+  research-backtest:
+    <<: *research-base
+    network_mode: none
+    command: [backtest, /reports/btc-vst.json, --fee-bps, "8", --slippage-percent, "10", --out, /reports/research.json]
+
+  research-store:
+    <<: *research-base
+    network_mode: none
+    command: [store, /reports/btc-vst.json, --database, /reports/research.duckdb]
+
+  research-allocate:
+    <<: *research-base
+    network_mode: none
+    command: [allocate, /reports/btc-vst.json, /reports/eth-vst.json, --max-weight, "0.6", --out, /reports/weights.json]
+
+  research-report:
+    <<: *research-base
+    network_mode: none
+    command: [report, /reports/research.json, --out, /reports/tearsheet.html]
+
+  freqtrade-validate:
+    image: cts-c-freqtrade:local
+    build:
+      context: ./integrations/research
+      target: freqtrade
+    profiles: [freqtrade-dry-run]
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=1777
+    volumes:
+      - freqtrade-paper:/opt/research/output
+    command: [--validate-only]
+    restart: "no"
+
+  freqtrade-paper:
+    image: cts-c-freqtrade:local
+    build:
+      context: ./integrations/research
+      target: freqtrade
+    profiles: [freqtrade-dry-run]
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=1777
+    volumes:
+      - freqtrade-paper:/opt/research/output
+    command: [--seconds, "120"]
+    restart: "no"
+
+  cryptofeed-public:
+    image: cts-c-cryptofeed:local
+    build:
+      context: ./integrations/research
+      target: cryptofeed
+    profiles: [cryptofeed-public]
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=1777
+    volumes:
+      - research-reports:/reports
+    command: [--exchange, kraken, --symbol, BTC-USD, --seconds, "30", --out, /reports/public-trades.jsonl]
+    restart: "no"
+
+volumes:
+  research-reports:
+  freqtrade-paper:

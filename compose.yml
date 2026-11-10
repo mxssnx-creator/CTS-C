@@ -1,0 +1,19 @@
+services:
+  terminal:
+    build: .
+    ports: ['127.0.0.1:3001:3001']
+    environment:
+      CTS_ADMIN_PASSWORD: ${CTS_ADMIN_PASSWORD:?Set CTS_ADMIN_PASSWORD}
+      BINGX_X02_KEY: ${BINGX_X02_KEY:-}
+      BINGX_X02_SECRET: ${BINGX_X02_SECRET:-}
+      CTS_DATA_DIR: /app/data
+      CTS_COOKIE_SECURE: ${CTS_COOKIE_SECURE:-false}
+      CTS_TRUSTED_ORIGINS: ${CTS_TRUSTED_ORIGINS:-}
+    volumes: [cts_state:/app/data]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+volumes:
+  cts_state:

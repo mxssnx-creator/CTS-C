@@ -1,0 +1,4 @@
+# Keep feeds isolated from the numerical research environment.
+# Release 2.5.0 tested here on Python 3.12.14; isolate it from current upstream main.
+# yapic-json may require a C/C++ compiler when a platform wheel is unavailable.
+cryptofeed==2.5.0

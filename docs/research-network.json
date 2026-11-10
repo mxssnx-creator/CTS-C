@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "verifiedOn": "2026-11-10",
+  "scope": "Bounded public data and isolated paper comparison; no exchange orders",
+  "ccxt": {
+    "version": "4.5.92",
+    "status": "passed",
+    "origin": "exchange-vst",
+    "symbol": "BTC/USDT:USDT",
+    "intervalMs": 60000,
+    "requestedRows": 100,
+    "completedCandles": 99,
+    "sha256": "bfa80b00c364ae2eb11e3c822dcc84f6e06043d97e3ef2472bcba8d704bc0c8b",
+    "tlsVerification": true,
+    "netrcAuthentication": false
+  },
+  "cryptofeed": {
+    "version": "2.5.0",
+    "status": "passed",
+    "exchange": "KRAKEN",
+    "symbol": "BTC-USD",
+    "durationLimitSeconds": 20,
+    "capturedMessages": 20,
+    "origin": "exchange-public",
+    "sha256": "5f9a5a9bc1e334c0174db8b9b430514ded042a2de5568933035417bc00f3ff48",
+    "coinbaseStatus": "HTTP 401 during metadata lookup; Kraken is the default",
+    "finalPublicConfigCheck": {
+      "durationLimitSeconds": 15,
+      "capturedMessages": 9,
+      "explicitPublicConfig": true,
+      "netrcAuthentication": false,
+      "configEnvironmentImport": false,
+      "logfileWrites": false,
+      "sha256": "57ef18e482849e452f76a7874a81fe668f917e431935264347b315f308615d4b"
+    }
+  },
+  "apscheduler": {
+    "version": "3.11.3",
+    "status": "passed",
+    "cycles": 1,
+    "completedCandles": 99,
+    "overlappingInvocationSkipped": true
+  },
+  "freqtrade": {
+    "version": "2026.10",
+    "status": "passed-bounded-dry-run",
+    "mode": "spot-dry-run",
+    "exchange": "bingx",
+    "symbols": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "SOL/USDT"
+    ],
+    "durationLimitSeconds": 45,
+    "runningStateObserved": true,
+    "heartbeatObserved": true,
+    "simulatedBuyObserved": true,
+    "exitCode": 0,
+    "netrcAuthentication": false,
+    "sha256": "b7eda8ba30fe2c3bf19cc528d694f6bb79eb5b3561c435a654cb59bfa7f118ff"
+  },
+  "ordersSubmittedToExchange": 0,
+  "dockerRuntimeVerified": false,
+  "sustainedAvailabilityVerified": false,
+  "profitabilityVerified": false
+}
