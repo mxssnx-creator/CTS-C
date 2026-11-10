@@ -15,6 +15,7 @@ export function planHistory(configuredCount:number,cursor:number|null,now=Date.n
 }
 /** Reject gaps before mutating the indicator, stage or position ledger. */
 export function validateHistory(symbol:string,candles:Candle[],plan:HistoryPlan):void {
+  if(plan.cursor===null&&candles.length<plan.count)throw new Error(`Incomplete requested history for ${symbol}: ${candles.length}/${plan.count} candles`)
   const unseen=plan.cursor===null?candles:candles.filter(c=>c.timestamp>plan.cursor!)
   if(plan.cursor===plan.cutoff&&unseen.length===0)return
   if(!unseen.length||unseen.at(-1)!.timestamp!==plan.cutoff)throw new Error(`Incomplete observed history for ${symbol}`)

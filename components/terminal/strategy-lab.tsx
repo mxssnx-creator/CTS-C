@@ -154,6 +154,8 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
           <section className="terminal-panel p-5">
             <div className="mb-5 flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-[var(--terminal-accent)]" /><h3 className="text-sm font-semibold">Stage gates & completed evidence</h3></div>
             <p className="terminal-muted mb-5 text-xs">PF 1.0 is neutral. Each stage uses its own most recent completed samples. The Real gate controls progression into Live; exchange execution also requires a verified connection.</p>
+            <div className="mb-5">{enumField("stageGateMode", "Stage progression", [{ value: "processed-sets", label: "Independent processed sets" }, { value: "continuous-ancestors", label: "Recheck all ancestor windows" }])}</div>
+            <p className="terminal-muted mb-5 text-xs">Independent sets retain their admission proof and learn from their own new trades. Real remains the final current gate; Live mirrors fresh accepted Real entries. Changing mode starts separate downstream cohorts and preserves prior results.</p>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{NUMERIC_FIELDS.map(numberField)}</div>
           </section>
         </div>

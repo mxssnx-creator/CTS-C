@@ -18,6 +18,7 @@ export interface PseudoPosition {
   direction?: Direction; indication_type?: string
 }
 export interface EngineSettings {
+  stageGateMode?:'continuous-ancestors'|'processed-sets'
   connectionId: string; symbols: string[]; initialEquity: number; baseNotional: number; volumeFactor: number
   volumeRatios?:Record<Coordination,number>
   maxOrderNotional?:number
@@ -38,6 +39,7 @@ export interface GateProof {stage:Stage;laneId:string;count:number;required:numb
 export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   executionEligible?: boolean
+  parentPositionId?:string
   admission?:GateProof[]
   sizing?: { baseBudget: number; block: EngineSettings["coordinations"]["block"]; dca: EngineSettings["coordinations"]["dca"] }
   peak: number; lastAddPrice: number; addedSteps: number; costPct: number; takeProfitPct: number; stopLossPct: number
@@ -51,6 +53,7 @@ export interface ClosedTrade {
   grossPnl: number; cost: number; netPnl: number; netReturnPct: number; reason: string; fills: EntryFill[]
   source: "paper"
   admission?:GateProof[]
+  parentPositionId?:string
 }
 export interface LaneState {
   id: string; symbol: string; configId: string; direction: Direction; stage: Stage; coordination: Coordination
@@ -58,6 +61,7 @@ export interface LaneState {
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
   costTotal?: number
   admittedClosed?:number;admittedProfit?:number;admittedLoss?:number;admittedNetPnl?:number
+  parentProof?:GateProof[]
 }
 export interface SignalState {
   count: number; prices: number[]; gains: number[]; losses: number[]; previousPrice?: number
@@ -80,6 +84,7 @@ export interface ExecutionIntent {
   maxOrderNotional?:number
   qualificationId?:string
   minimumAddRatio?:number
+  realPositionId?:string
 }
 export interface EngineEvent { type: "opened" | "added" | "closed" | "qualified" | "execution"; status?:string; reason?:string; laneId: string; timestamp: number; stage: Stage; trade?: ClosedTrade }
 export interface EngineState {

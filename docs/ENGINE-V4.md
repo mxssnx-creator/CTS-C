@@ -4,7 +4,7 @@ The result to assess is the net outcome **after** a configuration was admitted, 
 
 | Metric | Scope |
 | --- | --- |
-| Validated window PF | Current last-N windows of current configurations meeting their own and ancestor gates. A selection statistic. |
+| Validated window PF | Current last-N windows of current configurations meeting their own gate and the selected progression policy. A selection statistic. |
 | Admitted forward PF | Every subsequent closed outcome carrying immutable own-parent admission proof, including later losses and retired cohorts. |
 | Lifetime PF | All recorded outcomes, including older checkpoints without admission proof. |
 | Validated execution PF | Complete closed owned exchange lots originating from engine admission proof. |
@@ -13,6 +13,14 @@ The result to assess is the net outcome **after** a configuration was admitted, 
 Paper PF normalizes net outcome by filled entry notional. Exchange PF normalizes actual reconciled net P&L by total actual opening notional, not current remaining quantity. Fees are applied once; funding is excluded. Open lots and incomplete accounting are reported separately. No-loss samples display their state instead of a fabricated finite estimate.
 
 Each Main, Real and Live paper entry captures the preceding stages' lane IDs, sample counts, N, PF, threshold, and check time. Each stage still learns from its own subsequent positions. A current winner filter never erases a later losing execution. Older checkpoints remain usable but their missing proof is disclosed.
+
+## Independent processed stages
+
+The selectable `processed-sets` policy is available for controlled comparison. Base qualification creates a fresh Main set with zero copied samples. Main subsequently learns independently; its own qualified window creates a fresh Real set. Existing admitted Main/Real sets keep learning from their own positions even when earlier-stage windows later change. Each set retains immutable, configuration-specific admission lineage. Real is the current final entry gate. Live opens only alongside a newly opened accepted Real position, captures that Real position ID, and rechecks Real before asynchronous execution. Paper Live and its Real parent share entries and captured exit economics.
+
+`continuous-ancestors` remains the default and applies to restored checkpoints without an explicit mode. The new policy has not passed the declared cross-stage PF requirements and is not automatically promoted. It rechecks every ancestor window on every downstream entry. Switching modes preserves Base evidence and separates downstream cohorts; it never copies parent trade samples. Both policies retain losing admitted trades in forward PF. A high selected window PF is not a guarantee of subsequent performance.
+
+History recovery validates the full requested span before mutation, then yields in eight-bar slices with a per-tick time budget. Cold checkpoints are less frequent only when there is no owned exchange exposure or pending execution. The writer lease remains fenced and heartbeated; event retention does not truncate engine calculations.
 
 ## Additional indications
 
