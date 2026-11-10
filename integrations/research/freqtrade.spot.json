@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.freqtrade.io/schema.json",
+  "bot_name": "CTS-C isolated spot research",
+  "dry_run": true,
+  "dry_run_wallet": 1000,
+  "trading_mode": "spot",
+  "margin_mode": "",
+  "max_open_trades": 3,
+  "stake_currency": "USDT",
+  "stake_amount": 20,
+  "tradable_balance_ratio": 0.95,
+  "fiat_display_currency": "USD",
+  "timeframe": "5m",
+  "strategy": "CTSResearchStrategy",
+  "cancel_open_orders_on_exit": true,
+  "unfilledtimeout": { "entry": 5, "exit": 5, "unit": "minutes" },
+  "entry_pricing": { "price_side": "other", "use_order_book": false, "order_book_top": 1, "price_last_balance": 0.0, "check_depth_of_market": { "enabled": false, "bids_to_ask_delta": 1 } },
+  "exit_pricing": { "price_side": "other", "use_order_book": false, "order_book_top": 1 },
+  "exchange": {
+    "name": "bingx",
+    "key": "",
+    "secret": "",
+    "ccxt_config": { "enableRateLimit": true },
+    "ccxt_async_config": { "enableRateLimit": true },
+    "pair_whitelist": ["BTC/USDT", "ETH/USDT", "SOL/USDT"],
+    "pair_blacklist": []
+  },
+  "pairlists": [{ "method": "StaticPairList" }],
+  "telegram": { "enabled": false, "token": "", "chat_id": "" },
+  "initial_state": "running",
+  "force_entry_enable": false,
+  "internals": { "process_throttle_secs": 5 }
+}

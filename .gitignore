@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.data/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+*.log
+__pycache__/
+.venv*/
+output/
+*.sqlite*
+*.duckdb*

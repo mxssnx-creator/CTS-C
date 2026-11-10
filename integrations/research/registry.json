@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "verifiedOn": "2026-11-10",
+  "scope": "Installed adapter and bounded public-market checks; not deployment uptime or trading performance",
+  "distinctTestsPassed": 17,
+  "dockerBuildVerified": false,
+  "exchangeOrderPlacement": false,
+  "reference": "https://x.com/Corki_0x/status/2117534398648098965",
+  "integrations": [
+    {
+      "id": "cryptofeed",
+      "name": "Cryptofeed",
+      "versionTested": "2.5.0",
+      "role": "Public market streams",
+      "adapter": "integrations/research/feed.py",
+      "status": "verified-public",
+      "localVerification": "Typed Trade replay, decimal precision, source labeling, invalid-price rejection",
+      "networkVerification": "Actual Kraken BTC-USD public capture observed 20 trades in 20 seconds; Coinbase 2.5.0 metadata request returned HTTP 401",
+      "composeService": "cryptofeed-public"
+    },
+    {
+      "id": "ccxt",
+      "name": "CCXT",
+      "versionTested": "4.5.92",
+      "role": "BingX VST public candles",
+      "adapter": "integrations/research/bridge.py fetch",
+      "status": "verified-public",
+      "localVerification": "Sandbox host selection before requests; credential-free client",
+      "networkVerification": "Actual credential-free VST fetch returned 99 completed BTC/USDT:USDT one-minute candles after explicit proxy/CA routing correction; TLS verification retained",
+      "composeService": "market-fetch"
+    },
+    {
+      "id": "freqtrade",
+      "name": "Freqtrade",
+      "versionTested": "2026.10",
+      "role": "Independent spot dry-run comparison",
+      "adapter": "integrations/research/freqtrade_dry_run.py",
+      "status": "verified-dry-run",
+      "localVerification": "Actual dry-run schema, loaded strategy, entry/exit signals and causal prefix invariance",
+      "networkVerification": "Actual 45-second spot dry-run reached RUNNING on three pairs, produced a simulated BTC buy, emitted a heartbeat, and stopped at its bound; no exchange credentials or orders",
+      "composeService": "freqtrade-paper"
+    },
+    {
+      "id": "vectorbt",
+      "name": "VectorBT",
+      "versionTested": "0.28.5",
+      "role": "Chronological parameter research",
+      "adapter": "integrations/research/bridge.py backtest",
+      "status": "verified-offline",
+      "localVerification": "Nine EMA candidates, training-only selection and 150-row holdout equity with per-fill costs",
+      "networkVerification": "Not required",
+      "composeService": "research-backtest"
+    },
+    {
+      "id": "talib",
+      "name": "TA-Lib",
+      "versionTested": "0.6.8",
+      "role": "Technical indicators",
+      "adapter": "integrations/research/bridge.py indicators",
+      "status": "verified-offline",
+      "localVerification": "EMA, RSI, MACD, ATR; prefix invariance and null warmup",
+      "networkVerification": "Not required",
+      "composeService": "research-indicators"
+    },
+    {
+      "id": "skfolio",
+      "name": "skfolio",
+      "versionTested": "0.20.2",
+      "role": "Research allocation proposals",
+      "adapter": "integrations/research/bridge.py allocate",
+      "status": "verified-offline",
+      "localVerification": "Training fit, capped weights, conservation and separate gross holdout result",
+      "networkVerification": "Not required",
+      "composeService": "research-allocate"
+    },
+    {
+      "id": "quantstats",
+      "name": "QuantStats",
+      "versionTested": "0.0.86",
+      "role": "Daily equity reports",
+      "adapter": "integrations/research/bridge.py report",
+      "status": "verified-offline",
+      "localVerification": "HTML generation from synthetic holdout and Node-to-Python CSV service pipeline",
+      "networkVerification": "No network benchmark; not required",
+      "composeService": "research-report"
+    },
+    {
+      "id": "duckdb",
+      "name": "DuckDB",
+      "versionTested": "1.5.6",
+      "role": "Research records",
+      "adapter": "integrations/research/bridge.py store",
+      "status": "verified-offline",
+      "localVerification": "Transactional ingestion, duplicate-safe primary keys and source isolation",
+      "networkVerification": "Not required",
+      "composeService": "research-store"
+    },
+    {
+      "id": "apscheduler",
+      "name": "APScheduler",
+      "versionTested": "3.11.3",
+      "role": "Bounded public-data refresh",
+      "adapter": "integrations/research/bridge.py schedule",
+      "status": "verified-public",
+      "localVerification": "One bounded, nonoverlapping cycle with mocked public-fetch data",
+      "networkVerification": "One bounded scheduled public VST fetch completed with 99 candles; overlapping invocation was correctly skipped",
+      "composeService": "market-watch"
+    },
+    {
+      "id": "lightweight-charts",
+      "name": "Lightweight Charts",
+      "versionTested": "5.2.1",
+      "role": "Candle visualization",
+      "adapter": "integrations/research/chart.mjs",
+      "status": "export-verified",
+      "localVerification": "Self-contained HTML export generated from labeled fixture; native UI validated separately",
+      "networkVerification": "Exporter uses a local library and has no network calls",
+      "composeService": null
+    }
+  ]
+}

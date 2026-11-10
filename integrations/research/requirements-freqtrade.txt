@@ -1,0 +1,2 @@
+# Install separately from numerical research: Freqtrade has its own dependency set.
+freqtrade==2026.10

@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.data
+.env*
+integrations/research/.venv*
+integrations/research/output
+**/__pycache__
+*.log
