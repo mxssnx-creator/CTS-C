@@ -130,6 +130,8 @@ node scripts/run-x02.mjs --execute
 
 The supervisor launches its own production server on `127.0.0.1`, signs in, saves **100 symbols, 1,440 warmup candles, and volume factor 0.01**, then enables x02 VST execution through the normal qualification gates. Other saved strategy settings remain in use. Run one server for that port/state directory.
 
+Large saved states can take longer to initialize: startup requests allow 120 seconds. A known ownership conflict before settings are changed may wait up to 60 seconds for the previous lease to expire; ambiguous trading actions are never blindly retried. Restored symbol cursors limit history fetching to the missing tail, with at least 100 observed bars and the configured history ceiling.
+
 Status is refreshed about every five seconds in `CTS_DATA_DIR/x02-runtime-observation.json`; server output goes to `CTS_DATA_DIR/runtime-server.log`. Both files are created with mode `0600`. The default data directory is `.data`, which is gitignored; keep these operational records private when using another directory. Check the observation's `checkedAt` timestamp: an old file does not establish that the process is still running.
 
 This foreground supervisor runs while its host process remains alive. A workspace suspension or shutdown can stop it; the workspace is not a managed 24/7 service. Use a persistent host and a process manager for unattended operation. Initial startup or server failure exits the helper and requires an external restart; transient status, authentication, or network observation failures are retried. `Ctrl+C` stops the local processes without liquidating exchange positions. Saved running state can resume on a later server startup.

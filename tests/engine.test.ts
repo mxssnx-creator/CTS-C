@@ -416,3 +416,32 @@ test("PF metadata distinguishes no-loss infinity from finite999, empty and flat 
     assert.equal(lane.qualified, values.length >= lane.required && expected.profitFactor >= 0)
   }
 })
+
+test("owned JSON restoration preserves exact decisions while the public constructor isolates supplied state", () => {
+  const cfg = settings(), original = new TradingEngine(cfg)
+  original.processCandles("BTC-USDT", candles(700))
+  const checkpoint = original.exportState(), serialized = JSON.stringify(checkpoint)
+  const isolated = new TradingEngine(cfg, checkpoint), owned = TradingEngine.fromSerialized(serialized)
+  assert.equal(owned.serializeState(), isolated.serializeState())
+  const id = Object.keys(checkpoint.lanes)[0]
+  checkpoint.lanes[id].samples[0] = -123456
+  checkpoint.settings.stageMinPF.base = 987
+  assert.notEqual(isolated.exportState().lanes[id].samples[0], -123456)
+  assert.notEqual(isolated.settings.stageMinPF.base, 987)
+  assert.deepEqual(owned.processCandles("BTC-USDT", candles(150, 700)), isolated.processCandles("BTC-USDT", candles(150, 700)))
+  assert.deepEqual(owned.snapshot(), isolated.snapshot())
+  assert.throws(() => TradingEngine.fromSerialized("null"))
+  assert.throws(() => TradingEngine.fromSerialized('{"version":999}'))
+})
+
+test("last processed cursor is normalized, persistent, and unaffected by quote ticks", () => {
+  const engine = new TradingEngine(settings())
+  assert.equal(engine.lastProcessedAt("BTCUSDT"), null)
+  engine.processCandles("BTC-USDT", candles(90))
+  const expected = baseTime + 89 * 60_000
+  assert.equal(engine.lastProcessedAt("BTC/USDT"), expected)
+  engine.processTick("BTC-USDT", 100, expected + 1000)
+  assert.equal(engine.lastProcessedAt("BTCUSDT"), expected)
+  assert.equal(TradingEngine.fromSerialized(engine.serializeState()).lastProcessedAt("BTC-USDT"), expected)
+  assert.equal(engine.lastProcessedAt("ETH-USDT"), null)
+})

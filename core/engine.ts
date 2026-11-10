@@ -5,6 +5,7 @@ import { aggregateCostNormalizedResults, describeProfitFactor, POSITION_COST_PCT
 import type { Candle, ClosedTrade, Coordination, Direction, EngineEvent, EngineSettings, EngineSnapshot, EngineState, ExecutionIntent, LaneState, PaperPosition, Stage, StrategyConfig } from "./types"
 
 export const STAGES: Stage[] = ["base", "main", "real", "live"]
+const OWN_PARSED_STATE = Symbol("engine-owned JSON state")
 export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   connectionId: "bingx-x02", symbols: ["BTC-USDT", "ETH-USDT", "SOL-USDT"], initialEquity: 10_000,
   baseNotional: 100, volumeFactor: .01, stageLastN: { base: 20, main: 8, real: 8 },
@@ -61,11 +62,17 @@ export class TradingEngine {
   private coordinationIds = {} as Record<Coordination, string>
   private active = new Map<string, Set<string>>()
   private readonly maxRecentTrades = 1000
-  constructor(settings: Partial<EngineSettings> = {}, restored?: EngineState) {
+  /** Parse an independently owned checkpoint without duplicating its entire ledger. */
+  static fromSerialized(serialized: string): TradingEngine {
+    const restored = JSON.parse(serialized) as EngineState
+    if (!restored || typeof restored !== "object") throw new Error("Invalid engine state")
+    return new TradingEngine(restored.settings, restored, OWN_PARSED_STATE)
+  }
+  constructor(settings: Partial<EngineSettings> = {}, restored?: EngineState, ownership?: symbol) {
     const validated = validateEngineSettings({ ...restored?.settings, ...settings })
     if (restored && restored.version !== 1) throw new Error("Unsupported engine state")
     if (restored && restored.settings.connectionId !== validated.connectionId) throw new Error("Restored engine belongs to another connection")
-    this.state = restored ? structuredClone(restored) : {
+    this.state = restored ? ownership === OWN_PARSED_STATE ? restored : structuredClone(restored) : {
       version: 1, settings: validated, lanes: {}, signals: {}, lastTimestamp: {}, recentTrades: [], intents: [], processedCandles: 0,
       startedAt: Date.now(), updatedAt: 0, equity: validated.initialEquity, peakEquity: validated.initialEquity, maxDrawdownPct: 0, equityHistory: [],
     }
@@ -78,6 +85,7 @@ export class TradingEngine {
     }
   }
   get settings(): EngineSettings { return structuredClone(this.state.settings) }
+  lastProcessedAt(symbol: string): number | null { return this.state.lastTimestamp[normalizeSymbol(symbol)] ?? null }
   updateSettings(input: Partial<EngineSettings>): void {
     const previous = this.state.settings
     if (input.connectionId && input.connectionId !== previous.connectionId) throw new Error("Use a separate engine for another connection")

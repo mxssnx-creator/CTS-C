@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings } from './engine'
 import { BingxVstClient, demoCredentials, stableClientOrderId } from './bingx'
 import { planExecutionIntents } from './runtime-policy'
-import { closedHistory } from './history'
+import { closedHistory, resumeHistoryCount } from './history'
 import { DemoExecutor } from './executor'
 import { getStore } from './store'
-import type { Candle, EngineSettings, EngineState, EngineEvent } from './types'
+import type { Candle, EngineSettings, EngineEvent } from './types'
 import { generateStrategyCatalog } from './catalog'
 
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null }
@@ -30,8 +30,8 @@ export class TerminalRuntime {
   private client = new BingxVstClient()
   private executor = new DemoExecutor(getStore(), this.client, {beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
   constructor() {
-    const restored = getStore().get<EngineState>('engine')
-    this.engine = new TradingEngine(restored?.settings ?? DEFAULT_ENGINE_SETTINGS, restored ?? undefined)
+    const restored = getStore().getRaw('engine')
+    this.engine = restored ? TradingEngine.fromSerialized(restored) : new TradingEngine(DEFAULT_ENGINE_SETTINGS)
     this.control = { ...DEFAULT_CONTROL, ...getStore().get<Control>('control'), warmed: [] }
   }
   private validateLiveIntent(intent:import('./types').ExecutionIntent){
@@ -44,8 +44,8 @@ export class TerminalRuntime {
     this.leased=true
     this.heartbeat=setInterval(()=>{try{this.ensureLease()}catch(error){this.control.lastError=error instanceof Error?error.message:'Ownership lost';clearInterval(this.heartbeat)}},5000)
     this.heartbeat.unref?.()
-    const restored=getStore().get<EngineState>('engine')
-    if(restored)this.engine=new TradingEngine(restored.settings,restored)
+    const restored=getStore().getRaw('engine')
+    if(restored)this.engine=TradingEngine.fromSerialized(restored)
     this.control={...this.control,...getStore().get<Control>('control'),warmed:[]}
   }
   shutdown(){clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&getStore().ownsLease(this.owner)){this.persist();getStore().releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false;this.leaseLost=true;this.control.running=false}
@@ -87,7 +87,8 @@ export class TerminalRuntime {
     const needed=this.engine.settings.symbols.filter(symbol=>!this.control.warmed.includes(symbol)&&!this.warmJobs.has(symbol)&&(this.warmRetryAt.get(symbol)??0)<=Date.now())
     for(const symbol of needed.slice(0,Math.max(0,3-this.warmJobs.size))){
       const job:{data?:Candle[];error?:string}={};this.warmJobs.set(symbol,job)
-      void closedHistory(this.client,symbol,this.control.historyCandles).then(data=>{job.data=data}).catch(error=>{job.error=error instanceof Error?error.message:'History unavailable'})
+      const count=resumeHistoryCount(this.control.historyCandles,this.engine.lastProcessedAt(symbol))
+      void closedHistory(this.client,symbol,count).then(data=>{job.data=data}).catch(error=>{job.error=error instanceof Error?error.message:'History unavailable'})
     }
   }
   private schedule() { if(this.timer||!this.control.running)return; this.timer=setTimeout(()=>{this.timer=undefined;void this.serial(()=>this.tick()).finally(()=>this.schedule())},1000);this.timer.unref?.() }

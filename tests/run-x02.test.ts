@@ -5,7 +5,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { assertPortAvailable, childCompletion, childIsRunning, createRequester, observeRuntime, stopChild, writeObservation } from '../scripts/run-x02.mjs'
+import { assertPortAvailable, childCompletion, childIsRunning, createRequester, observeRuntime, stopChild, writeObservation, RunnerRequestError, saveInitialSettings, waitForReady, STARTUP_REQUEST_TIMEOUT } from '../scripts/run-x02.mjs'
 
 const token = 'a'.repeat(64), replacement = 'b'.repeat(64)
 function login(cookie = token) { return Response.json({ authenticated: true }, { headers: { 'Set-Cookie': `cts_session=${cookie}; Path=/; HttpOnly` } }) }
@@ -36,7 +36,7 @@ test('runner limits an unsuccessful refresh and excludes response secrets from e
     return Response.json({ error: 'sensitive-account-value' }, { status: 401 })
   })
   await client.authenticate()
-  await assert.rejects(client.request('/api/terminal'), error => error instanceof Error && error.message === '/api/terminal: HTTP 401')
+  await assert.rejects(client.request('/api/terminal'), error => error instanceof Error && error.message === 'GET /api/terminal: HTTP 401')
   assert.equal(logins, 2); assert.equal(reads, 2)
 })
 
@@ -92,4 +92,74 @@ test('runner refuses a port already occupied by another local process', async ()
   assert.ok(address && typeof address !== 'string')
   try { await assert.rejects(assertPortAvailable(address.port), { code: 'EADDRINUSE' }) }
   finally { await new Promise<void>(resolve => listener.close(() => resolve())) }
+})
+
+
+test('startup requests allow 120 seconds and preserve that timeout through session refresh', async (context) => {
+  const timeouts: number[] = []
+  const original = AbortSignal.timeout
+  context.mock.method(AbortSignal, 'timeout', (milliseconds: number) => { timeouts.push(milliseconds); return original(milliseconds) })
+  let reads = 0
+  const client = createRequester('http://127.0.0.1:43210', 'test-password-only', async url => {
+    if (String(url).endsWith('/api/auth/login')) return login()
+    return ++reads === 1 ? Response.json({}, { status: 401 }) : Response.json({ ready: true })
+  })
+  await client.authenticate({ timeoutMs: STARTUP_REQUEST_TIMEOUT })
+  await client.request('/api/terminal', { action: 'start-x02' }, { timeoutMs: STARTUP_REQUEST_TIMEOUT })
+  assert.deepEqual(timeouts, [120_000, 120_000, 120_000, 120_000])
+  await client.request('/api/terminal')
+  assert.equal(timeouts.at(-1), 30_000, 'observations retain the shorter timeout')
+})
+
+test('readiness tolerates a restore lasting longer than 30 seconds but remains bounded', async () => {
+  let clock = 0, attempts = 0
+  const timeouts: number[] = []
+  await waitForReady({ now: () => clock, canContinue: () => true, sleep: async (milliseconds: number) => { clock += milliseconds },
+    request: async (_path: string, _body: unknown, options: { timeoutMs: number }) => {
+      timeouts.push(options.timeoutMs)
+      if (++attempts === 1) { clock += 31_000; throw new Error('Restoring persisted engine') }
+      return { result: { ready: true, application: 'CTS-C' } }
+    },
+  })
+  assert.equal(attempts, 2); assert.ok(clock > 30_000)
+  assert.deepEqual(timeouts, [120_000, 88_800])
+  clock = 0; attempts = 0
+  await assert.rejects(waitForReady({ now: () => clock, canContinue: () => true, sleep: async (milliseconds: number) => { clock += milliseconds },
+    request: async () => { attempts++; clock += 60_000; throw new Error('Unavailable') },
+  }), /within 120 seconds/)
+  assert.equal(attempts, 2)
+})
+
+test('initial settings retry only the explicit pre-mutation ownership refusal', async () => {
+  let clock = 0, attempts = 0
+  const timeouts: number[] = []
+  const result = await saveInitialSettings(async (_path: string, body: { action: string }, options: { timeoutMs: number }) => {
+    assert.equal(body.action, 'save-settings'); timeouts.push(options.timeoutMs)
+    if (++attempts < 3) throw new RunnerRequestError('POST /api/terminal [save-settings]', 409, 'RUNTIME_OWNED')
+    return { result: { success: true } }
+  }, { symbolCount: 100 }, { now: () => clock, sleep: async (milliseconds: number) => { clock += milliseconds } })
+  assert.equal(result.result.success, true); assert.equal(attempts, 3)
+  assert.deepEqual(timeouts, [120_000, 59_000, 58_000])
+})
+
+test('ownership waiting stops after 60 seconds and never retries an ambiguous POST failure', async () => {
+  let clock = 0, attempts = 0
+  await assert.rejects(saveInitialSettings(async () => { attempts++; throw new RunnerRequestError('save-settings', 409, 'RUNTIME_OWNED') }, {},
+    { now: () => clock, sleep: async (milliseconds: number) => { clock += milliseconds } }), /ownership unavailable after 60 seconds/)
+  assert.equal(clock, 60_000); assert.equal(attempts, 60)
+  for (const error of [new RunnerRequestError('save-settings', 400, 'RUNTIME_OWNED'), new RunnerRequestError('save-settings', 409, undefined),
+    new RunnerRequestError('save-settings', 500, 'RUNTIME_OWNED'), new Error('timeout: unknown action outcome')]) {
+    let calls = 0
+    await assert.rejects(saveInitialSettings(async () => { calls++; throw error }, {}, { sleep: async () => {} }), value => value === error)
+    assert.equal(calls, 1)
+  }
+})
+
+test('request failures include the action and only an allowlisted conflict code', async () => {
+  const client = createRequester('http://127.0.0.1:43210', 'test-password-only', async () => Response.json({ code: 'RUNTIME_OWNED', error: 'private account details' }, { status: 409 }))
+  await assert.rejects(client.request('/api/terminal', { action: 'save-settings' }), error => error instanceof RunnerRequestError
+    && error.code === 'RUNTIME_OWNED' && error.message === 'POST /api/terminal [save-settings]: HTTP 409 (RUNTIME_OWNED)')
+  const timeout = createRequester('http://127.0.0.1:43210', 'test-password-only', async () => { throw new DOMException('private transport details', 'TimeoutError') })
+  await assert.rejects(timeout.request('/api/terminal', { action: 'start-x02' }, { timeoutMs: STARTUP_REQUEST_TIMEOUT }),
+    error => error instanceof Error && error.message === 'POST /api/terminal [start-x02]: request timed out after 120000ms')
 })

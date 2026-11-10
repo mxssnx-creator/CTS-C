@@ -6,7 +6,7 @@ Validation date: **10 November 2026**. This record concerns the fresh, independe
 
 | Check | Evidence and scope |
 |---|---|
-| Node suite | The final completed `npm run check` passed **116 Node tests, 116 passes, 0 failures**, Next.js 15.5.29 production build, and standalone authentication/persistence/restart smoke. The full release check exited successfully. |
+| Node suite | The expanded suite passed **125 Node tests, 125 passes, 0 failures**, including large-state restoration, incremental restart history, and bounded startup ownership handling. The full release check also completed the production build and standalone authentication/persistence/restart smoke successfully. |
 | Production build and dependency audit | Next.js **15.5.29** production build passed. `npm audit` reported **0 vulnerabilities** after PostCSS 8.5.32 override and Sharp 0.35.5 resolution. This is the audit result at validation time, not a permanent security guarantee. |
 | Standalone runtime smoke | **Passed after correcting the standalone login origin handling:** clean terminal, authentication, settings persistence, missing-credential rejection, cross-site write rejection, paper CSV, invalid input, restart, and durable logout. The test used blank exchange credentials and submitted zero orders. |
 | Interface | Read-only fixture QA passed across six views, five themes/styles, desktop, and mobile. Review the clearly labeled [desktop](ui-review/desktop.jpg) and [mobile](ui-review/mobile.jpg) fixture images; their values are not exchange-account evidence. |
@@ -63,13 +63,21 @@ The test suite uses deterministic fixtures and mocked exchange transports; only 
 | PF metadata | Explicit `empty`, `flat`, `no-losses`, and `finite` states distinguish missing evidence and no-loss results from measured finite ratios, including a genuine ratio of 999. Snapshot metadata is verified independently of the numeric sentinel. |
 | Axis / Block / DCA | Disjoint Axis windows, own subsequent outcomes, shared versus additive Block budget, priced DCA fills and weighted entry, cost applied once over accumulated notional. |
 | Observed ticks | Existing-position management between bars without creating new indicator signals or changing the completed-bar cursor. |
-| Workload | Deterministic 100-symbol × 300-bar processing with the 252-configuration preset: the latest shared-host benchmark reported 34.437 seconds for 30,000 bars, 268 ms for all 100 quote ticks, 113,400 lanes, and 314 MB heap. These are synthetic test measurements, not a fixed latency or live-market throughput guarantee. |
+| Workload | Deterministic 100-symbol × 300-bar processing with the 252-configuration preset: the latest shared-host benchmark reported 43.767 seconds for 30,000 bars, 372 ms for all 100 quote ticks, 113,400 lanes, and 312 MB heap. These are synthetic test measurements, not a fixed latency or live-market throughput guarantee. |
 | Transport | Dedicated x02 credential selection, raw-value signing and encoded transport, lossless large IDs, paced reads, exact rejection/unknown handling, no blind POST retry, stable client IDs. |
 | Executor | Durable reservation visible before POST, duplicate/concurrent-call idempotency, partial-fill application, restart reconciliation, lane-owned closes, unexplained venue-reduction deferral, unresolved intents retained beyond display windows. |
 | Authentication | Opaque sessions, expiry/password rotation, durable revocation, origin checks, malformed/oversized bodies, concurrent login rate-limit enforcement. |
 | Public data/replay | Validated identifiers and OHLC, no invented prices on upstream failure, training shortlist invariant to holdout changes. |
 
 The direct exchange exercise bypassed strategy qualification deliberately as a connector diagnostic. It is not evidence that an automatically qualified strategy traded or earned a profit. The completed [observed-market study](market-study.json) replayed 12 symbols × 1,440 completed one-minute candles: **17,280 observed bars, no missing minutes**, 252 configurations per symbol, and zero orders. It reported aggregate Base PF **0.41539** and Main PF **0.11118**. There were 56 currently qualified Base lanes, but no Main lane had the required eight samples; Real and Live had no admissions. These are modeled, cost-adjusted outcomes on actual candle data, not exchange profit. No high-PF or automatically executed strategy result is claimed.
+
+The standalone package excludes runtime SQLite journals, local environment files, and private runtime directories. A postbuild artifact check rejects these files if they appear in the deployment directory; production state remains in the separately configured data directory.
+
+## Completed 100-symbol warmup and restart workload
+
+The initial authorized workspace run completed warmup for all 100 symbols with 252 configurations and more than 144,000 observed candles. Two independent lanes reached the Live paper stage; no automatically qualified exchange order had been submitted at the captured time. See [the timestamped initial observation](x02-runtime-start.json). This is a completed initial warmup, not sustained uptime or profitable exchange performance.
+
+The 24-hour workload produced 162,977 lanes, 80,730 open **paper** positions, and a 272.8 MB JSON checkpoint. The open-paper count is not an exchange-position count. A read-only restore measured 3.34 seconds for the SQLite read plus 1.94 seconds to restore privately owned parsed state, with approximately 697 MiB process RSS after collection. The smaller synthetic benchmark is not a bound for this workload. Repeated configuration, position, and lane-identity records dominate checkpoint size. Initial restart attempts exposed an ownership lease delay and a 30-second startup timeout; the release adds bounded explicit-conflict waiting, 120-second startup requests, restoration without a redundant deep clone, and cursor-based history fetching. Full-state checkpointing remains synchronous; a 100 ms loop or low-memory bound is not established for this workload.
 
 ## Research adapter evidence
 

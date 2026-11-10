@@ -20,7 +20,8 @@ export class StateStore {
       CREATE INDEX IF NOT EXISTS intents_status_created ON intents(status,created);
     `)
   }
-  get<T>(key: string): T | null { const row = this.database.prepare("SELECT data FROM records WHERE key=?").get(key) as { data: string } | undefined; return row ? JSON.parse(row.data) as T : null }
+  getRaw(key: string): string | null { const row = this.database.prepare("SELECT data FROM records WHERE key=?").get(key) as { data: string } | undefined; return row?.data ?? null }
+  get<T>(key: string): T | null { const data = this.getRaw(key); return data === null ? null : JSON.parse(data) as T }
   set(key: string, value: unknown) { this.database.prepare("INSERT INTO records VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run(key, JSON.stringify(value), Date.now()) }
   saveEngine(state: unknown, events: unknown[] = []) {
     this.saveEngineJSON(JSON.stringify(state), events)

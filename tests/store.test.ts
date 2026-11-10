@@ -24,6 +24,8 @@ test('durable intent survives restart and can never be claimed twice', () => {
     assert.equal(third.hasSession('hash'), false)
     assert.equal(third.events().length, 1)
     assert.deepEqual(third.get('engine'), {version:1})
+    assert.equal(third.getRaw('engine'), '{"version":1}')
+    assert.equal(third.getRaw('missing'), null)
     assert.equal(statSync(filename).mode & 0o777, 0o600)
     third.close()
   } finally { rmSync(directory, {recursive:true, force:true}) }

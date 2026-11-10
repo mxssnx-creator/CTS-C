@@ -2,6 +2,11 @@ import type { Candle as VenueCandle } from './bingx'
 import type { Candle } from './types'
 
 interface HistorySource { candles(symbol:string,interval:string,limit:number,endTime?:number):Promise<VenueCandle[]> }
+/** Restored indicators already own their prefix; fetch only the missing tail. */
+export function resumeHistoryCount(configuredCount:number,lastClosedAt:number|null,now=Date.now()):number {
+  if(lastClosedAt===null)return configuredCount
+  return Math.min(configuredCount,Math.max(100,Math.ceil((now-lastClosedAt)/60_000)+1))
+}
 /** Backfill observed closed minutes; BingX VST may cap a page at 1,000. */
 export async function closedHistory(source:HistorySource,symbol:string,count:number,cutoff=Date.now()):Promise<Candle[]> {
   if(!Number.isInteger(count)||count<100||count>1440)throw new Error('History count must be 100..1440')

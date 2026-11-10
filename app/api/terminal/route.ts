@@ -17,5 +17,8 @@ export async function POST(request:NextRequest){
       else return NextResponse.json({error:'Unknown action'},{status:400})
       return NextResponse.json({success:true})
     })
-  }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Action failed'},{status:400})}
+  }catch(error){
+    if(error instanceof Error&&error.message==='Another CTS-C process owns this data directory')return NextResponse.json({error:'Another CTS-C process owns this data directory',code:'RUNTIME_OWNED'},{status:409})
+    return NextResponse.json({error:error instanceof Error?error.message:'Action failed'},{status:400})
+  }
 }

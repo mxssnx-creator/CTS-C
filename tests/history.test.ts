@@ -1,6 +1,22 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {closedHistory} from '../core/history'
+import {closedHistory,resumeHistoryCount} from '../core/history'
+
+test('restart history uses retained cursors without dropping the unseen closed tail',async()=>{
+  const start=1700000040000,now=start+1600*60000
+  assert.equal(resumeHistoryCount(1440,null,now),1440)
+  assert.equal(resumeHistoryCount(1440,now-3*60000,now),100)
+  assert.equal(resumeHistoryCount(1440,now-200*60000,now),201)
+  assert.equal(resumeHistoryCount(1440,now-2000*60000,now),1440)
+  assert.equal(resumeHistoryCount(100,now-200*60000,now),100)
+  const cursor=now-200*60000
+  const candles=Array.from({length:1600},(_,i)=>({time:start+i*60000,open:100,high:101,low:99,close:100,volume:1}))
+  let requests=0
+  const result=await closedHistory({async candles(_s,_i,limit,endTime){requests++;return candles.filter(c=>c.time<=endTime!).slice(-limit)}},'BTC-USDT',resumeHistoryCount(1440,cursor,now),now)
+  assert.equal(requests,1)
+  assert.equal(result.filter(c=>c.timestamp>cursor).length,200)
+  assert.equal(result.at(-1)?.timestamp,now)
+})
 
 test('history backfills capped venue pages without duplicating or inventing bars',async()=>{
   const start=1700000040000

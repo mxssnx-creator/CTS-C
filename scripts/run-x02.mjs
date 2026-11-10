@@ -6,32 +6,86 @@ import { loadEnvFile } from 'node:process'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+export const STARTUP_REQUEST_TIMEOUT = 120_000
+export const OBSERVATION_REQUEST_TIMEOUT = 30_000
+export class RunnerRequestError extends Error {
+  constructor(context, status, code) {
+    super(`${context}: HTTP ${status}${code ? ` (${code})` : ''}`)
+    this.status = status
+    this.code = code
+  }
+}
 export function createRequester(origin, password, fetcher = fetch) {
   let cookie = ''
-  async function request(path, body, retried = false) {
-    const response = await fetcher(origin + path, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      redirect: 'error', signal: AbortSignal.timeout(30_000),
-    })
+  async function request(path, body, options = {}, retried = false) {
+    const timeoutMs = options.timeoutMs ?? OBSERVATION_REQUEST_TIMEOUT
+    const action = ['save-settings', 'start-x02', 'pause-x02', 'configure-x02'].includes(body?.action) ? ` [${body.action}]` : ''
+    const context = `${body === undefined ? 'GET' : 'POST'} ${path}${action}`
+    let response
+    try {
+      response = await fetcher(origin + path, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
+      })
+    } catch (error) {
+      // Preserve action context without printing fetch errors, URLs or account data.
+      throw new Error(`${context}: ${error?.name === 'TimeoutError' || error?.name === 'AbortError' ? `request timed out after ${timeoutMs}ms` : 'transport failed; action outcome is unconfirmed'}`)
+    }
     if (response.status === 401 && cookie && path !== '/api/auth/login' && !retried) {
       await response.body?.cancel()
-      await authenticate()
-      return request(path, body, true)
+      await authenticate(options)
+      return request(path, body, options, true)
     }
-    // Never copy an arbitrary response body into logs: it may contain account data.
-    if (!response.ok) { await response.body?.cancel(); throw new Error(`${path}: HTTP ${response.status}`) }
-    const result = await response.json()
+    // Read only the allowlisted conflict code; never copy response bodies to logs.
+    if (!response.ok) {
+      let code
+      if (response.status === 409) {
+        try { if ((await response.json()).code === 'RUNTIME_OWNED') code = 'RUNTIME_OWNED' } catch { /* Not an explicit ownership conflict. */ }
+      } else await response.body?.cancel()
+      throw new RunnerRequestError(context, response.status, code)
+    }
+    let result
+    try { result = await response.json() } catch { throw new Error(`${context}: invalid JSON response; action outcome is unconfirmed`) }
     return { response, result }
   }
-  async function authenticate() {
-    const login = await request('/api/auth/login', { password })
+  async function authenticate(options = {}) {
+    const login = await request('/api/auth/login', { password }, options)
     const nextCookie = login.response.headers.get('set-cookie')?.split(';')[0]
-    if (!nextCookie || !/^cts_session=[a-f0-9]{64}$/.test(nextCookie)) throw new Error('Login returned no valid session cookie')
+    if (!nextCookie || !/^cts_session=[a-f0-9]{64}$/.test(nextCookie)) throw new Error('POST /api/auth/login: no valid session cookie')
     cookie = nextCookie
   }
   return { request, authenticate }
+}
+
+export async function waitForReady({ request, canContinue, sleep, now = Date.now }) {
+  const deadline = now() + STARTUP_REQUEST_TIMEOUT
+  while (canContinue()) {
+    const remaining = deadline - now()
+    if (remaining <= 0) throw new Error('GET /api/health: server did not become ready within 120 seconds')
+    try {
+      const health = await request('/api/health', undefined, { timeoutMs: remaining })
+      if (health.result.ready === true && health.result.application === 'CTS-C') return
+    } catch { /* Health reads have no side effects and may retry until ready. */ }
+    await sleep(Math.min(200, Math.max(0, deadline - now())))
+  }
+  throw new Error('GET /api/health: startup canceled or server exited')
+}
+export async function saveInitialSettings(request, settings, { sleep, now = Date.now, canContinue = () => true }) {
+  let ownershipDeadline
+  for (;;) {
+    if (!canContinue()) throw new Error('POST /api/terminal [save-settings]: startup canceled or server exited')
+    const remaining = ownershipDeadline === undefined ? STARTUP_REQUEST_TIMEOUT : ownershipDeadline - now()
+    if (remaining <= 0) throw new Error('POST /api/terminal [save-settings]: runtime ownership unavailable after 60 seconds')
+    try { return await request('/api/terminal', { action: 'save-settings', settings }, { timeoutMs: remaining }) }
+    catch (error) {
+      // This exact response guarantees the lease guard refused before any mutation.
+      if (!(error instanceof RunnerRequestError) || error.status !== 409 || error.code !== 'RUNTIME_OWNED') throw error
+      ownershipDeadline ??= now() + 60_000
+      await sleep(Math.min(1000, Math.max(0, ownershipDeadline - now())))
+    }
+  }
 }
 
 export function childIsRunning(child) { return child.exitCode === null && child.signalCode === null }
@@ -99,21 +153,14 @@ export async function runX02() {
   const { request, authenticate } = createRequester(origin, process.env.CTS_ADMIN_PASSWORD)
   const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
   try {
-    for (let i = 0; i < 100; i++) {
-      if (!childIsRunning(child)) throw new Error('Server exited; inspect runtime-server.log')
-      if (stopping) return
-      try {
-        const health = await request('/api/health')
-        if (health.result.ready !== true || health.result.application !== 'CTS-C') throw new Error('Unexpected health response')
-        break
-      } catch { if (i === 99) throw new Error('Server did not become ready'); await sleep(200) }
-    }
-    if (stopping || !childIsRunning(child)) return
-    await authenticate()
-    if (stopping || !childIsRunning(child)) return
-    await request('/api/terminal', { action: 'save-settings', settings: { symbolCount: 100, historyCandles: 1440, volumeFactor: .01 } })
-    if (stopping || !childIsRunning(child)) return
-    await request('/api/terminal', { action: 'start-x02' })
+    const canContinue = () => !stopping && childIsRunning(child)
+    await waitForReady({ request, canContinue, sleep })
+    if (!canContinue()) return
+    await authenticate({ timeoutMs: STARTUP_REQUEST_TIMEOUT })
+    if (!canContinue()) return
+    await saveInitialSettings(request, { symbolCount: 100, historyCandles: 1440, volumeFactor: .01 }, { sleep, canContinue })
+    if (!canContinue()) return
+    await request('/api/terminal', { action: 'start-x02' }, { timeoutMs: STARTUP_REQUEST_TIMEOUT })
     await observeRuntime({ request, isRunning: () => childIsRunning(child), isStopping: () => stopping, sleep, warn: message => console.error(message), publish: s => {
       const status = { checkedAt: new Date().toISOString(), environment: 'BingX VST', runtime: s.readiness, connection: s.connections[0], symbols: s.engine.symbolCount, configurations: s.engine.catalogCount, processedCandles: s.engine.processedCandles, stages: s.stages, execution: s.execution.summary }
       writeObservation(dataDir, status)
