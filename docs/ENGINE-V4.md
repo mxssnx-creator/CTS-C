@@ -36,6 +36,8 @@ Each family, period, timeframe, TP step, SL ratio, exit mode, symbol, direction,
 
 Live signal updates fetch exchange completed OHLCV. Quote ticks manage positions and do not manufacture volume. Historical recovery is non-executable; only a fresh incremental completed minute can create entry intents.
 
+Warmup retains at most 5,000 audit events per batch/checkpoint, using bounded buffers rather than spreading arbitrarily large arrays into function arguments. Every candle, lane, position, intent and PF accumulator is still computed. Regression tests compare complete engine state with bounded, unbounded and zero retained events and exercise a 200,000-event checkpoint burst.
+
 ## Axis and Block
 
 Axis uses disjoint previous and recent windows from the matching Normal configuration and direction. Its reference may be the matching stage or continuous Base history. Neither reference supplies Axis's own Main/Real results. Existing defaults keep the matching-stage rule.

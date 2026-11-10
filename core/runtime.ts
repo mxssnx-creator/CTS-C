@@ -13,6 +13,11 @@ import {flatEngineSettings,validateConfiguration} from './settings-schema'
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
 const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:1440,lastTick:null,lastError:null }
+function retainEvents(target:EngineEvent[],source:readonly EngineEvent[],limit=5000){
+  if(source.length>=limit)target.length=0
+  for(let i=Math.max(0,source.length-limit);i<source.length;i++)target.push(source[i])
+  if(target.length>limit)target.splice(0,target.length-limit)
+}
 export class TerminalRuntime {
   engine: TradingEngine
   control: Control
@@ -57,8 +62,7 @@ export class TerminalRuntime {
   shutdown(){clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false;this.leaseLost=true;this.control.running=false}
   serial<T>(operation:()=>Promise<T>): Promise<T> { const next=this.sequence.catch(()=>{}).then(operation); this.sequence=next; return next }
   private persist(events: EngineEvent[] = [],force=true) {
-    this.ensureLease();this.bufferedEvents.push(...events)
-    if(this.bufferedEvents.length>5000)this.bufferedEvents=this.bufferedEvents.slice(-5000)
+    this.ensureLease();retainEvents(this.bufferedEvents,events)
     if(!force&&Date.now()-this.checkpointAt<5000&&!this.engine.pendingIntents().length)return
     this.store.saveEngineJSON(this.engine.serializeState(),this.bufferedEvents,this.engine.settings);this.store.set('control',this.control)
     this.bufferedEvents=[];this.checkpointAt=Date.now()
@@ -135,7 +139,7 @@ export class TerminalRuntime {
         const bar=this.bars.get(quote.symbol)
         if(!bar)this.bars.set(quote.symbol,{bucket,candle:{timestamp:bucket,open:quote.price,high:quote.price,low:quote.price,close:quote.price,volume:0},lastObservation:quote.timestamp})
         else if(quote.timestamp>bar.lastObservation){bar.candle.high=Math.max(bar.candle.high,quote.price);bar.candle.low=Math.min(bar.candle.low,quote.price);bar.candle.close=quote.price;bar.lastObservation=quote.timestamp}
-        events.push(...this.engine.processTick(quote.symbol,quote.price,quote.timestamp))
+        retainEvents(events,this.engine.processTick(quote.symbol,quote.price,quote.timestamp))
       }
       this.control.lastTick=now;if(!dataGap)this.control.lastError=null
       this.persist(events.splice(0),false)
@@ -163,7 +167,7 @@ export class TerminalRuntime {
               validateHistory(symbol,job.data,job.plan)
             }
             const fresh=job.live===true&&job.plan?.cutoff===Math.floor(Date.now()/60000)*60000
-            events.push(...this.engine.processCandles(symbol,job.data,{allowExecution:fresh&&this.control.exchangeExecution}))
+            retainEvents(events,this.engine.processCandles(symbol,job.data,{allowExecution:fresh&&this.control.exchangeExecution,eventLimit:5000}))
             if((!job.plan||job.plan.cutoff>=Math.floor(Date.now()/60_000)*60_000)&&!this.control.warmed.includes(symbol))this.control.warmed.push(symbol)
           }
         } catch(error) {this.control.lastError=`${symbol}: ${error instanceof Error?error.message:'History unavailable'}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
