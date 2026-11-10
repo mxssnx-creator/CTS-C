@@ -127,7 +127,7 @@ export function parseVenueJson(input: string): unknown {
 }
 
 class VenueError extends Error {
-  constructor(readonly code: string, message: string, readonly httpStatus: number, readonly ambiguous: boolean) { super(message) }
+  constructor(readonly code: string, message: string, readonly httpStatus: number, readonly ambiguous: boolean,readonly retryAt?:number) { super(message) }
 }
 class WriteGuardError extends Error {
   constructor(readonly original: unknown) { super(original instanceof Error ? original.message : "Exchange write ownership check failed") }
@@ -181,6 +181,7 @@ export class BingxClient {
   private nextStart = 0
   private offset = 0
   private receiveWindow=5000
+  private cooldowns=new Map<string,number>()
   private syncedAt = -Infinity
   private syncing: Promise<number> | null = null
   // Suppress concurrent duplicate submissions. Durable lifetime deduplication
@@ -215,6 +216,8 @@ export class BingxClient {
 
   private async request(path: string, params: Record<string, string | number | boolean> = {}, method: "GET" | "POST" | "DELETE" = "GET", authenticated = false, onStart?: (timestamp: number) => void, beforeWrite?: () => void): Promise<unknown> {
     if (authenticated && !this.configured) throw new VenueError("MISSING_CREDENTIALS", "Dedicated x02 credentials are unavailable", 0, false)
+    const blockedUntil=this.cooldowns.get(path)??0
+    if(blockedUntil>this.now())throw new VenueError('100410',`Exchange endpoint is cooling down until ${new Date(blockedUntil).toISOString()}`,0,false,blockedUntil)
     const release = await this.reserveStart()
     try { beforeWrite?.(); onStart?.(this.now()) }
     catch (error) { release(); throw new WriteGuardError(error) }
@@ -242,7 +245,9 @@ export class BingxClient {
         const signature = authenticated ? new URLSearchParams(query).get("signature") : null
         for (const secret of [this.credentials?.apiKey, this.credentials?.apiSecret, signature]) if (secret) detail = detail.replaceAll(secret, "[redacted]")
         detail = detail.replace(/((?:api[_-]?key|api[_-]?secret|signature)\s*[=:]\s*)[^&\s,]+/gi, "$1[redacted]").slice(0, 300)
-        throw new VenueError(code, `BingX rejected request (code ${code})${detail ? `: ${detail}` : ""}`, response.status, ["INVALID_RESPONSE", "100500", "109500", "110500", "101481"].includes(code))
+        const retryAt=code==='100410'?Number(detail.match(/unblocked after\s+(\d{13})/)?.[1]):undefined
+        if(retryAt&&retryAt>this.now())this.cooldowns.set(path,retryAt)
+        throw new VenueError(code, `BingX rejected request (code ${code})${detail ? `: ${detail}` : ""}`, response.status, ["INVALID_RESPONSE", "100500", "109500", "110500", "101481"].includes(code),retryAt)
       }
       return envelope.data
     } catch (error) {
@@ -256,6 +261,7 @@ export class BingxClient {
     try { return await this.request(path, params, "GET", authenticated) }
     catch (error) {
       if (!(error instanceof VenueError) || !(error.ambiguous || ["429", "100410", "100429", "100421", "109400"].includes(error.code))) throw error
+      if(error.retryAt&&error.retryAt>this.now())throw error
       if (["100421", "109400"].includes(error.code)) await this.clock()
       else await this.sleep(550)
       return this.request(path, params, "GET", authenticated)
@@ -358,8 +364,10 @@ export class BingxClient {
     throw new Error("Exchange position mode was not recognized")
   }
 
-  async commission(symbol: string): Promise<Commission> {
-    const data = object(await this.read("/openApi/swap/v2/user/commissionRate", { symbol: normalizeSymbol(symbol) }, true))
+  async commission(symbol?: string): Promise<Commission> {
+    // Perpetual commissionRate is an account endpoint, without a symbol parameter.
+    if(symbol!==undefined)normalizeSymbol(symbol)
+    const data = object(await this.read("/openApi/swap/v2/user/commissionRate", {}, true))
     const value = Object.keys(object(data.commission)).length ? object(data.commission) : data
     const maker = Number(value.makerCommissionRate)
     const taker = Number(value.takerCommissionRate)

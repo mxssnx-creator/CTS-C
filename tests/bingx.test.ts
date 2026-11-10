@@ -351,3 +351,16 @@ test('asymmetric slow transport cannot create future signatures and gets a bound
  }})
  assert.deepEqual(await client.commission('BTC-USDT'),{maker:.0002,taker:.0005,source:'exchange'});assert.equal(reads,1)
 })
+
+
+test('commission endpoint cooldown prevents repeat traffic until the venue deadline without blocking other reads',async()=>{
+ let now=1_790_000_000_000,commissionReads=0,otherReads=0;const until=now+60000
+ const client=new BingxVstClient(credentials,{now:()=>now,minRequestIntervalMs:0,sleep:async()=>{},fetch:async(input)=>{
+  const u=new URL(String(input));if(u.pathname.endsWith('/server/time'))return json({serverTime:now})
+  if(u.pathname.endsWith('/commissionRate')){assert.equal(u.searchParams.has('symbol'),false);commissionReads++;return commissionReads===1?new Response(JSON.stringify({code:100410,msg:`The endpoint will be unblocked after ${until}`})):json({makerCommissionRate:.0002,takerCommissionRate:.0005})}
+  otherReads++;return json([])
+ }})
+ await assert.rejects(()=>client.commission('BTC-USDT'),/unblocked after/);await assert.rejects(()=>client.commission('ETH-USDT'),/cooling down/);assert.equal(commissionReads,1)
+ assert.deepEqual(await client.positions(),[]);assert.equal(otherReads,1)
+ now=until+1;assert.equal((await client.commission()).taker,.0005);assert.equal(commissionReads,2)
+})

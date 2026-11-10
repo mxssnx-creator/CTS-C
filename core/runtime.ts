@@ -96,10 +96,10 @@ export class TerminalRuntime {
     this.engine.updateSettings({...settings,symbols})
     const symbolFees:NonNullable<EngineSettings['symbolFees']>={},feeReadFailures:string[]=[]
     for(const symbol of symbols)if(settings.symbolFees?.[symbol])symbolFees[symbol]=settings.symbolFees[symbol]
-    for(let offset=0;offset<symbols.length;offset+=5){
-      const batch=symbols.slice(offset,offset+5),fees=await Promise.allSettled(batch.map(symbol=>this.client.commission(symbol)))
-      for(let i=0;i<batch.length;i++){const fee=fees[i];if(fee.status==='fulfilled')symbolFees[batch[i]]={makerFeePct:Math.max(0,fee.value.maker*100),takerFeePct:fee.value.taker*100};else feeReadFailures.push(batch[i])}
-    }
+    try{
+      const fee=await this.client.commission()
+      for(const symbol of symbols)symbolFees[symbol]={makerFeePct:Math.max(0,fee.maker*100),takerFeePct:fee.taker*100}
+    }catch{for(const symbol of symbols)feeReadFailures.push(symbol)}
     this.engine.updateSettings({symbolFees})
     this.control={...this.control,running:true,exchangeExecution:true,lastError:null,feeReadFailures,feeCheckedAt:Date.now()}
     this.persist()
