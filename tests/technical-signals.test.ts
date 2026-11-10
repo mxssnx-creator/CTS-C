@@ -74,8 +74,8 @@ test('adapted Trend Fade and reversal Break produce actual reversal signals',()=
 })
 
 test('Trend and Break coordinations progress independently through all stages',()=>{
- for(const type of ['Trend','Break']){
-  const engine=new TradingEngine({symbols:['BTC-USDT'],stageLastN:{base:1,main:1,real:1},stageMinPF:{base:0,main:0,real:0},catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:[type]},coordinations:{axis:{enabled:true,previous:1,last:1,outcome:'any'},block:{enabled:true,steps:2,ratio:.2,mode:'shared'},dca:{enabled:true,steps:2,distancePct:.1,multiplier:.2}}})
+ for(const stageGateMode of ['continuous-ancestors','processed-sets'] as const)for(const type of ['Trend','Break']){
+  const engine=new TradingEngine({stageGateMode,symbols:['BTC-USDT'],stageLastN:{base:1,main:1,real:1},stageMinPF:{base:0,main:0,real:0},catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:[type]},coordinations:{axis:{enabled:true,previous:1,last:1,outcome:'any'},block:{enabled:true,steps:2,ratio:.2,mode:'shared'},dca:{enabled:true,steps:2,distancePct:.1,multiplier:.2}}})
   engine.processCandles('BTC-USDT',Array.from({length:2000},(_,i)=>bar(100+9*Math.sin(i/18),i)))
   const lanes=Object.values(engine.exportState().lanes)
   for(const coordination of ['normal','axis','block','dca'])for(const stage of ['base','main','real','live'])assert.ok(lanes.some(l=>l.coordination===coordination&&l.stage===stage&&l.closedCount>0),`${type}/${coordination}/${stage}`)

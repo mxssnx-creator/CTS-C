@@ -10,6 +10,7 @@ export const BALANCED_RATIOS = [0.6, 1, 1.4]
 export const MODES = ["fixed", "trailing", "trailing-only"]
 export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
+  stageGateMode: "continuous-ancestors",
   baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
   variantBlockEnabled: true, variantDcaEnabled: true, axisPrevEnabled: true,
@@ -45,7 +46,7 @@ export const COORDINATION_FIELDS = [
   { key: "dcaDistancePct", label: "DCA adverse distance (%)", min: 0.001, max: 100, step: 0.001 },
   { key: "dcaMultiplier", label: "DCA addition multiplier", min: 0.01, max: 10, step: 0.01 },
 ]
-const ENUM_FIELDS: Record<string, readonly string[]> = { axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
+const ENUM_FIELDS: Record<string, readonly string[]> = { stageGateMode:['continuous-ancestors','processed-sets'],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
@@ -97,7 +98,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
       if (!Array.isArray(value) || !value.length || value.some(item => !arrayOptions.includes(item)) || new Set(value).size !== value.length) throw new Error(`Choose valid, unique values for ${key}.`)
       output[key] = [...value]
     } else if (enumOptions) {
-      if (typeof value !== "string" || !enumOptions.includes(value)) throw new Error(`Choose a valid ${key === "axisOutcome" ? "Axis outcome" : "Block allocation mode"}.`)
+      if (typeof value !== "string" || !enumOptions.includes(value)) throw new Error(`Choose a valid ${key === "axisOutcome" ? "Axis outcome" : key === "stageGateMode" ? "stage gate mode" : key === "axisReferenceStage" ? "Axis reference stage" : "Block allocation mode"}.`)
       output[key] = value
     } else if (field) {
       const number = formNumbers && typeof value === "string" && value.trim() !== "" ? Number(value) : value
@@ -132,7 +133,7 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
 export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;historyCandles:number}):Record<string,unknown>{
   const values:Record<string,unknown>={...structuredClone(DEFAULTS)}
   for(const [key,value] of Object.entries(s.catalog))if(Object.hasOwn(DEFAULTS,key))values[key]=value
-  return {...values,symbolCount:control.symbolCount,historyCandles:control.historyCandles,volumeFactor:s.volumeFactor,baseNotional:s.baseNotional,maxOrderNotional:s.maxOrderNotional??0,
+  return {...values,stageGateMode:s.stageGateMode??'continuous-ancestors',symbolCount:control.symbolCount,historyCandles:control.historyCandles,volumeFactor:s.volumeFactor,baseNotional:s.baseNotional,maxOrderNotional:s.maxOrderNotional??0,
     normalVolumeRatio:s.volumeRatios?.normal??1,axisVolumeRatio:s.volumeRatios?.axis??1,blockVolumeFactor:s.volumeRatios?.block??1,dcaVolumeRatio:s.volumeRatios?.dca??1,
     prevPosWindow:s.stageLastN.base,mainEvalPosCount:s.stageLastN.main,realEvalPosCount:s.stageLastN.real,
     baseProfitFactor:s.stageMinPF.base,mainProfitFactor:s.stageMinPF.main,realProfitFactor:s.stageMinPF.real,

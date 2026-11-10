@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings } from './engine'
+import { TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings,validateObservedCandles } from './engine'
 import { connectionClient, connectionCredentials, stableClientOrderId,type BingxClient } from './bingx'
 import {CONNECTIONS,connectionInfo,type ConnectionId} from './connections'
 import { planExecutionIntents } from './runtime-policy'
@@ -12,6 +12,7 @@ import {flatEngineSettings,validateConfiguration} from './settings-schema'
 
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
+interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null}
 const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:1440,lastTick:null,lastError:null }
 function retainEvents(target:EngineEvent[],source:readonly EngineEvent[],limit=5000){
   if(source.length>=limit)target.length=0
@@ -31,7 +32,7 @@ export class TerminalRuntime {
   private sequence: Promise<unknown> = Promise.resolve()
   private executionTask?:Promise<void>
   private bars = new Map<string,Bar>()
-  private warmJobs=new Map<string,{data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean}>()
+  private warmJobs=new Map<string,HistoryJob>()
   private warmRetryAt=new Map<string,number>()
   private marks = new Map<string,{price:number;timestamp:number}>()
   private client:BingxClient
@@ -63,7 +64,10 @@ export class TerminalRuntime {
   serial<T>(operation:()=>Promise<T>): Promise<T> { const next=this.sequence.catch(()=>{}).then(operation); this.sequence=next; return next }
   private persist(events: EngineEvent[] = [],force=true) {
     this.ensureLease();retainEvents(this.bufferedEvents,events)
-    if(!force&&Date.now()-this.checkpointAt<5000&&!this.engine.pendingIntents().length)return
+    const cold=this.control.warmed.length<this.engine.managedSymbols().length
+    const exposed=this.executor.lots?.().some(lot=>lot.quantity>1e-10)??false
+    const interval=cold&&!exposed?30000:5000
+    if(!force&&Date.now()-this.checkpointAt<interval&&!this.engine.pendingIntents().length)return
     this.store.saveEngineJSON(this.engine.serializeState(),this.bufferedEvents,this.engine.settings);this.store.set('control',this.control)
     this.bufferedEvents=[];this.checkpointAt=Date.now()
   }
@@ -100,7 +104,7 @@ export class TerminalRuntime {
     const latest=Math.floor(Date.now()/60000)*60000
     const needed=this.engine.managedSymbols().filter(symbol=>(!this.control.warmed.includes(symbol)||(this.engine.lastProcessedAt(symbol)??latest)<latest)&&!this.warmJobs.has(symbol)&&(this.warmRetryAt.get(symbol)??0)<=Date.now())
     for(const symbol of needed.slice(0,Math.max(0,3-this.warmJobs.size))){
-      const job:{data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean}={};this.warmJobs.set(symbol,job)
+      const job:HistoryJob={};this.warmJobs.set(symbol,job)
       try {
         const plan=job.plan=planHistory(this.control.historyCandles,this.engine.lastProcessedAt(symbol))
         job.live=this.control.warmed.includes(symbol)&&plan.cursor===latest-60000
@@ -158,19 +162,35 @@ export class TerminalRuntime {
       this.prefetchHistory()
       const warmed=[...this.warmJobs.entries()].filter(([,job])=>job.data||job.error).slice(0,3)
       for(const [symbol,job] of warmed){
-        this.ensureLease();this.warmJobs.delete(symbol)
+        this.ensureLease()
         try {
           if(job.error)throw new Error(job.error)
           if(job.data){
-            if(job.plan){
-              if(this.engine.lastProcessedAt(symbol)!==job.plan.cursor)throw new Error('History cursor changed during recovery')
-              validateHistory(symbol,job.data,job.plan)
+            if(!job.validated){
+              validateObservedCandles(job.data)
+              if(job.plan){
+                if(this.engine.lastProcessedAt(symbol)!==job.plan.cursor)throw new Error('History cursor changed during recovery')
+                validateHistory(symbol,job.data,job.plan)
+              }
+              job.cursor=this.engine.lastProcessedAt(symbol)
+              const cursor=job.cursor
+              job.data=job.data.filter(candle=>cursor===null||candle.timestamp>cursor)
+              job.offset=0;job.validated=true
             }
-            const fresh=job.live===true&&job.plan?.cutoff===Math.floor(Date.now()/60000)*60000
-            retainEvents(events,this.engine.processCandles(symbol,job.data,{allowExecution:fresh&&this.control.exchangeExecution,eventLimit:5000}))
-            if((!job.plan||job.plan.cutoff>=Math.floor(Date.now()/60_000)*60_000)&&!this.control.warmed.includes(symbol))this.control.warmed.push(symbol)
+            if(this.engine.lastProcessedAt(symbol)!==job.cursor)throw new Error('History cursor changed during a partial recovery')
+            const began=performance.now(),offset=job.offset??0
+            while((job.offset??0)<job.data.length&&(job.offset??0)-offset<128&&performance.now()-began<200){
+              const chunk=job.data.slice(job.offset,(job.offset??0)+8)
+              const fresh=job.live===true&&job.data.length===1&&job.plan?.cutoff===Math.floor(Date.now()/60000)*60000
+              retainEvents(events,this.engine.processCandles(symbol,chunk,{allowExecution:fresh&&this.control.exchangeExecution,eventLimit:5000}))
+              job.offset=(job.offset??0)+chunk.length;job.cursor=this.engine.lastProcessedAt(symbol)
+            }
+            if((job.offset??0)>=job.data.length){
+              this.warmJobs.delete(symbol)
+              if((!job.plan||job.plan.cutoff>=Math.floor(Date.now()/60_000)*60_000)&&!this.control.warmed.includes(symbol))this.control.warmed.push(symbol)
+            }
           }
-        } catch(error) {this.control.lastError=`${symbol}: ${error instanceof Error?error.message:'History unavailable'}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
+        } catch(error) {this.warmJobs.delete(symbol);this.control.lastError=`${symbol}: ${error instanceof Error?error.message:'History unavailable'}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
       }
       if(warmed.length)this.persist(events.splice(0),false)
       if(now-(this.store.get<{updatedAt:number}>('account')?.updatedAt??0)>30_000){ const balance=await this.client.balance();this.store.set('account',{...balance,updatedAt:Date.now(),source:connectionInfo(this.connectionId).environment}) }
@@ -184,6 +204,7 @@ export class TerminalRuntime {
     const catalogKeys=['strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
     for(const [key,value] of Object.entries(input)) {
+      if(key==='stageGateMode'){next.stageGateMode=value as EngineSettings['stageGateMode'];continue}
       if(catalogKeys.includes(key)){next.catalog[key]=value;continue}
       if(gateMap[key]){const[group,stage]=gateMap[key];next[group][stage]=Number(value);continue}
       if(key==='historyCandles'){if(!Number.isInteger(value)||Number(value)<100||Number(value)>1440)throw new Error('History candles must be 100..1440');continue}

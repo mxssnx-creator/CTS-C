@@ -2,6 +2,12 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {closedHistory,planHistory,validateHistory} from '../core/history'
 
+test('initial history requires its full requested span while incremental recovery needs only the unseen gap',()=>{
+ const cutoff=1700000640000,rows=Array.from({length:50},(_,i)=>({timestamp:cutoff-(49-i)*60000,open:100,high:100,low:100,close:100,volume:1}))
+ assert.throws(()=>validateHistory('BTC-USDT',rows,{cursor:null,count:100,cutoff}),/50\/100/)
+ assert.doesNotThrow(()=>validateHistory('BTC-USDT',rows,{cursor:cutoff-60000,count:100,cutoff}))
+})
+
 test('restart history uses retained cursors without dropping the unseen closed tail',async()=>{
   const start=1700000040000,now=start+1600*60000
   assert.deepEqual(planHistory(1440,null,now),{count:1440,cutoff:now,cursor:null})

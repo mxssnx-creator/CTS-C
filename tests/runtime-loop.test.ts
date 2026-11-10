@@ -221,3 +221,34 @@ test('fresh signal updates use exchange OHLCV and volume while warm-up remains n
   assert.deepEqual(seen,[{symbol,candles:[native],options:{allowExecution:true,eventLimit:5000}}]);assert.equal(runtime.engine.lastProcessedAt(symbol),now)
  })
 })
+
+test('history recovery yields between bounded slices and matches complete engine state and PF',async()=>{
+ await isolated(async runtime=>{
+  const internal=runtime as any,symbol=runtime.engine.settings.symbols[0],now=Math.floor(Date.now()/60000)*60000
+  internal.prefetchHistory=()=>{};internal.executor={process:async()=>[]};runtime.control.warmed=[]
+  runtime.engine=new TradingEngine({...runtime.engine.settings,symbols:[symbol],catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}})
+  const reference=new TradingEngine(runtime.engine.settings),candles=Array.from({length:512},(_,i)=>{const close=100+8*Math.sin(i/17);return {timestamp:now-(511-i)*60000,open:close,high:close,low:close,close,volume:1}})
+  reference.processCandles(symbol,candles,{allowExecution:false})
+  internal.warmJobs.set(symbol,{data:candles,plan:{count:512,cursor:null,cutoff:now}})
+  const sizes:number[]=[],processCandles=runtime.engine.processCandles.bind(runtime.engine)
+  runtime.engine.processCandles=(s,cs,options)=>{sizes.push(cs.length);return processCandles(s,cs,options)}
+  let ticks=0
+  while(!runtime.control.warmed.includes(symbol)&&ticks<100){await internal.tick();if(internal.executionTask)await internal.executionTask;ticks++}
+  assert.ok(ticks>1&&ticks<100);assert.ok(sizes.every(n=>n<=8));assert.equal(sizes.reduce((a,b)=>a+b,0),512)
+  assert.equal(runtime.control.running,true);assert.ok(getStore().ownsLease(internal.owner))
+  const actual=runtime.engine.exportState(),expected=reference.exportState();actual.startedAt=expected.startedAt=0
+  assert.deepEqual(actual,expected);assert.equal(runtime.engine.pendingIntents().length,0)
+ })
+})
+
+test('a malformed late history candle is rejected before any earlier slice mutates the engine',async()=>{
+ await isolated(async runtime=>{
+  const internal=runtime as any,symbol=runtime.engine.settings.symbols[0],now=Math.floor(Date.now()/60000)*60000
+  internal.prefetchHistory=()=>{};internal.executor={process:async()=>[]};runtime.control.warmed=[]
+  const data=Array.from({length:200},(_,i)=>({timestamp:now-(199-i)*60000,open:100,high:100,low:100,close:100,volume:1}));data[199].high=99
+  internal.warmJobs.set(symbol,{data,plan:{count:200,cursor:null,cutoff:now}})
+  await internal.tick();if(internal.executionTask)await internal.executionTask
+  assert.equal(runtime.engine.lastProcessedAt(symbol),null);assert.equal(runtime.engine.snapshot({laneLimit:0,positionLimit:0}).processedCandles,0)
+  assert.match(runtime.control.lastError??'',/Invalid or unsorted/);assert.equal(runtime.control.warmed.includes(symbol),false)
+ })
+})
