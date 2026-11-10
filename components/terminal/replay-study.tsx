@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react"
 import { Download, FlaskConical, Play } from "lucide-react"
+import { formatProfitFactor, profitFactorRank, type ProfitFactorState } from "./profit-factor"
 
-type ReplayMetrics = { trades: number; pf: number | null; netReturnSumPct: number; maxDrawdownPct: number; winRate: number; long: number; short: number; open: number }
+type ReplayMetrics = { trades: number; pf: number | null; pfState?: ProfitFactorState; netReturnSumPct: number; maxDrawdownPct: number; winRate: number; long: number; short: number; open: number }
 type ReplayRow = { id: string; range: string; tactic: string; tpStep: number; slRatio: number; exitMode: string; training: ReplayMetrics; trainingPassed: boolean; holdout: ReplayMetrics }
 type ReplayResult = { success: boolean; source: string; createdAt: string | number; configurations: number; enoughSamples: number; samplesPercent: number; eligible: number; minSamples?: number; minPf?: number; trainingCandles: number; holdoutCandles: number; rows: ReplayRow[]; executionEligible: false; note: string }
 const decimal = (value: number | null | undefined, places = 2) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(places) : "—"
@@ -24,7 +25,7 @@ export function ReplayStudy() {
   const [runIdentity, setRunIdentity] = useState<string | null>(null)
   const filtered = useMemo(() => (result?.rows ?? []).filter(row =>
     (range === "all" || row.range === range) && (tactic === "all" || row.tactic === tactic) && (!qualifiedOnly || row.trainingPassed)
-  ).sort((a, b) => Number(b.trainingPassed) - Number(a.trainingPassed) || (b.training.pf ?? -Infinity) - (a.training.pf ?? -Infinity) || a.id.localeCompare(b.id)), [result, range, tactic, qualifiedOnly])
+  ).sort((a, b) => Number(b.trainingPassed) - Number(a.trainingPassed) || profitFactorRank(b.training.pf, b.training.pfState) - profitFactorRank(a.training.pf, a.training.pfState) || a.id.localeCompare(b.id)), [result, range, tactic, qualifiedOnly])
   const pageCount = Math.max(1, Math.ceil(filtered.length / 25))
   const visible = filtered.slice(page * 25, (page + 1) * 25)
   const run = async (event: React.FormEvent) => {
@@ -91,5 +92,5 @@ export function ReplayStudy() {
   )
 }
 function MetricsCells({ metrics }: { metrics: ReplayMetrics }) {
-  return <><td className="border-l border-[var(--terminal-border)] px-3 py-3 text-right font-mono">{stat(metrics.trades)}<span className="terminal-muted block text-[10px]">{stat(metrics.long)}:{stat(metrics.short)}</span></td><td className="px-3 py-3 text-right font-mono">{decimal(metrics.pf)}</td><td className={`px-3 py-3 text-right font-mono ${metrics.netReturnSumPct < 0 ? "text-[var(--terminal-red)]" : "text-[var(--terminal-green)]"}`}>{decimal(metrics.netReturnSumPct)}</td><td className="px-3 py-3 text-right font-mono text-[var(--terminal-amber)]">{decimal(metrics.maxDrawdownPct)}</td></>
+  return <><td className="border-l border-[var(--terminal-border)] px-3 py-3 text-right font-mono">{stat(metrics.trades)}<span className="terminal-muted block text-[10px]">{stat(metrics.long)}:{stat(metrics.short)}</span></td><td className="px-3 py-3 text-right font-mono">{formatProfitFactor(metrics.pf, metrics.pfState, 2)}</td><td className={`px-3 py-3 text-right font-mono ${metrics.netReturnSumPct < 0 ? "text-[var(--terminal-red)]" : "text-[var(--terminal-green)]"}`}>{decimal(metrics.netReturnSumPct)}</td><td className="px-3 py-3 text-right font-mono text-[var(--terminal-amber)]">{decimal(metrics.maxDrawdownPct)}</td></>
 }

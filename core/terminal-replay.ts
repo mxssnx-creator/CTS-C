@@ -10,7 +10,7 @@ function metrics(positions: PseudoPosition[]) {
   const a = aggregateCostNormalizedResults(values)
   let cumulative = 0, peak = 0, maxDrawdownPct = 0
   for (const value of values) { cumulative += value; peak = Math.max(peak, cumulative); maxDrawdownPct = Math.max(maxDrawdownPct, peak - cumulative) }
-  return { trades: closed.length, pf: closed.length ? a.profitFactor : null, netReturnSumPct: a.netR, maxDrawdownPct, winRate: a.winRate * 100, long: closed.filter(p => p.direction === "long").length, short: closed.filter(p => p.direction === "short").length, open: positions.filter(p => p.status === "open").length }
+  return { trades: closed.length, pf: closed.length ? a.profitFactor : null, pfState: a.pfState, netReturnSumPct: a.netR, maxDrawdownPct, winRate: a.winRate * 100, long: closed.filter(p => p.direction === "long").length, short: closed.filter(p => p.direction === "short").length, open: positions.filter(p => p.status === "open").length }
 }
 
 /** Parameters are ranked on a chronological training slice only. Holdout is

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { generateStrategyCatalog } from "./catalog"
 import { advanceSignal, newSignalState } from "./replay"
-import { aggregateCostNormalizedResults, POSITION_COST_PCT_DEFAULT } from "./metrics"
+import { aggregateCostNormalizedResults, describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import type { Candle, ClosedTrade, Coordination, Direction, EngineEvent, EngineSettings, EngineSnapshot, EngineState, ExecutionIntent, LaneState, PaperPosition, Stage, StrategyConfig } from "./types"
 
 export const STAGES: Stage[] = ["base", "main", "real", "live"]
@@ -52,8 +52,8 @@ function windowMetrics(lane: LaneState | undefined, required: number, minPF: num
   const samples = lane?.samples ?? [], count = Math.min(samples.length, required)
   let profit = 0, loss = 0
   for (let i = 0; i < count; i++) { profit += Math.max(0, samples[i]); loss += Math.max(0, -samples[i]) }
-  const pf = loss > 0 ? profit / loss : profit > 0 ? 999 : 1
-  return { count, required, enoughSamples: count >= required, profitFactor: pf, qualified: count >= required && pf >= minPF }
+  const pf = describeProfitFactor(profit, loss, count)
+  return { count, required, enoughSamples: count >= required, ...pf, qualified: count >= required && pf.profitFactor >= minPF }
 }
 export class TradingEngine {
   private state: EngineState
@@ -335,8 +335,7 @@ export class TradingEngine {
     const stages = STAGES.map(stage => {
       const { profit, loss, ...stats } = stageStats[stage]
       stats.enoughSamplesPct = stats.lanes ? 100 * stats.enoughSamples / stats.lanes : 0
-      stats.profitFactor = loss > 0 ? profit / loss : profit > 0 ? 999 : 1
-      return stats
+      return { ...stats, ...describeProfitFactor(profit, loss, stats.closed) }
     })
     return structuredClone({ settings: s, catalogCount: this.configs.length, symbolCount: s.symbols.length, processedCandles: this.state.processedCandles, updatedAt: this.state.updatedAt,
       equity: this.state.equity, peakEquity: this.state.peakEquity, maxDrawdownPct: this.state.maxDrawdownPct, stages,

@@ -1,3 +1,13 @@
+import type { ProfitFactorState } from "./types"
+
+/** Numerical gate compatibility is separate from whether a finite PF exists. */
+export function describeProfitFactor(profit: number, loss: number, count: number): { profitFactor: number; pfState: ProfitFactorState } {
+  if (count === 0) return { profitFactor: 1, pfState: "empty" }
+  if (loss > 0) return { profitFactor: profit / loss, pfState: "finite" }
+  if (profit > 0) return { profitFactor: 999, pfState: "no-losses" }
+  return { profitFactor: 1, pfState: "flat" }
+}
+
 /** Fees are percentage points: 0.08 means 0.08%, slippage is % of fees. */
 export function resolveTradingCostPct(options: {
   makerFeePct?: number; takerFeePct?: number; entryLiquidity?: "maker" | "taker";
@@ -18,6 +28,7 @@ export type TradeDirection = "long" | "short" | string
 
 export interface CostNormalizedAggregate {
   profitFactor: number
+  pfState: ProfitFactorState
   grossPositiveR: number
   grossNegativeR: number
   avgSignedR: number
@@ -83,7 +94,7 @@ export function aggregateCostNormalizedResults(results: unknown[]): CostNormaliz
   const netR = signedResults.reduce((sum, value) => sum + value, 0)
 
   return {
-    profitFactor: grossNegativeR > 0 ? grossPositiveR / grossNegativeR : grossPositiveR > 0 ? 999 : 1,
+    ...describeProfitFactor(grossPositiveR, grossNegativeR, count),
     grossPositiveR,
     grossNegativeR,
     avgSignedR: count > 0 ? netR / count : 0,

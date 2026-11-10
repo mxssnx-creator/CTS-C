@@ -1,20 +1,34 @@
 {
   "schemaVersion": 1,
   "verifiedOn": "2026-11-10",
-  "scope": "Main application Docker image build only; optional research images excluded",
+  "scope": "Main application Docker image build and isolated container lifecycle at the recorded CI revision; optional research images excluded",
   "githubActions": {
-    "runId": "42838787068",
-    "jobId": "129908047163",
-    "commitPrefix": "ef665",
-    "result": "success"
+    "runId": "42843827800",
+    "jobId": "129925827555",
+    "commit": "49eb5bf2181305332c5f704543af8fb4e7ed04c1",
+    "result": "success",
+    "verificationSource": "GitHub connector fetch_workflow_run_jobs"
   },
   "applicationImageBuildVerified": true,
-  "containerRuntimeVerified": false,
+  "containerRuntimeVerified": true,
   "researchImagesBuildVerified": false,
   "runtimeSmokeCommand": "node scripts/docker-smoke.mjs",
   "runtimeSmokeLocalChecks": [
     "syntax",
     "help"
   ],
-  "ordersSubmitted": 0
+  "ordersSubmitted": 0,
+  "runtimeSmokeExecutionLocation": "GitHub Actions",
+  "runtimeSmokeVerifiedChecks": [
+    "health",
+    "unauthenticated rejection",
+    "administrator login",
+    "blank x02 credentials and startup rejection",
+    "settings save",
+    "container removal and recreation",
+    "named-volume settings persistence",
+    "session persistence",
+    "settings write after recreation",
+    "durable logout after another recreation"
+  ]
 }

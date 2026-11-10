@@ -3,6 +3,7 @@ export type Stage = "base" | "main" | "real" | "live"
 export type Coordination = "normal" | "axis" | "block" | "dca"
 export type StrategyRange = "Micro" | "Minimal" | "Short" | "Normal" | "Long" | "Wide"
 export type ExitMode = "fixed" | "trailing" | "trailing-only"
+export type ProfitFactorState = "empty" | "flat" | "no-losses" | "finite"
 export interface Candle { timestamp: number; open: number; high: number; low: number; close: number; volume: number }
 export interface StrategyConfig {
   id: string; connectionId: string; createdAt: string; enabled: boolean; catalogVersion?: number
@@ -66,11 +67,11 @@ export interface EngineState {
   processedCandles: number; startedAt: number; updatedAt: number; equity: number; peakEquity: number; maxDrawdownPct: number
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]
 }
-export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; netPnl: number }
+export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; pfState: ProfitFactorState; netPnl: number }
 export interface EngineSnapshot {
   settings: EngineSettings; catalogCount: number; symbolCount: number; processedCandles: number; updatedAt: number
   equity: number; peakEquity: number; maxDrawdownPct: number; stages: StageMetrics[]
   positions: (PaperPosition & { laneId: string; symbol: string; configId: string; stage: Stage; coordination: Coordination })[]
   trades: ClosedTrade[]; intents: ExecutionIntent[]; equityHistory: EngineState["equityHistory"]
-  lanes: { id: string; symbol: string; configId: string; stage: Stage; direction: Direction; coordination: Coordination; count: number; required: number; enoughSamples: boolean; profitFactor: number; qualified: boolean; netPnl: number }[]
+  lanes: { id: string; symbol: string; configId: string; stage: Stage; direction: Direction; coordination: Coordination; count: number; required: number; enoughSamples: boolean; profitFactor: number; pfState: ProfitFactorState; qualified: boolean; netPnl: number }[]
 }

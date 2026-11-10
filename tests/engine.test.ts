@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import { TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings } from "../core/engine"
 import { generateStrategyCatalog } from "../core/catalog"
+import { aggregateCostNormalizedResults, describeProfitFactor } from "../core/metrics"
 import type { Candle, EngineSettings } from "../core/types"
 
 const baseTime = 1_790_000_000_000
@@ -381,4 +382,37 @@ test("retention expands for changed Axis windows and respects disabled Axis and 
   engine.updateSettings({ coordinations: { ...cfg.coordinations, axis: { ...cfg.coordinations.axis, enabled: false } } })
   for (const lane of Object.values(engine.exportState().lanes)) assert.ok(lane.samples.length <= cfg.stageLastN[lane.stage === "live" ? "real" : lane.stage])
   assert.equal(engine.settings.maxSamples, 250, "the user-configurable ceiling is preserved")
+})
+
+test("PF metadata distinguishes no-loss infinity from finite999, empty and flat results", () => {
+  for (const [values, expected] of [
+    [[], { profitFactor: 1, pfState: "empty" }],
+    [[0, 0], { profitFactor: 1, pfState: "flat" }],
+    [[1, 2], { profitFactor: 999, pfState: "no-losses" }],
+    [[999, -1], { profitFactor: 999, pfState: "finite" }],
+    [[1000, -1], { profitFactor: 1000, pfState: "finite" }],
+    [[-1], { profitFactor: 0, pfState: "finite" }],
+  ] as const) {
+    const actual = aggregateCostNormalizedResults([...values])
+    assert.equal(actual.profitFactor, expected.profitFactor)
+    assert.equal(actual.pfState, expected.pfState)
+  }
+  assert.deepEqual(describeProfitFactor(999, 1, 2), { profitFactor: 999, pfState: "finite" })
+  const engine = new TradingEngine(settings())
+  assert.ok(engine.snapshot().stages.every(s => s.pfState === "empty"))
+  engine.processCandles("BTC-USDT", candles(600))
+  const state = engine.exportState(), snapshot = engine.snapshot()
+  for (const stage of snapshot.stages) {
+    const lanes = Object.values(state.lanes).filter(l => l.stage === stage.stage)
+    const expected = describeProfitFactor(lanes.reduce((n, l) => n + l.grossProfit, 0), lanes.reduce((n, l) => n + l.grossLoss, 0), lanes.reduce((n, l) => n + l.closedCount, 0))
+    assert.equal(stage.pfState, expected.pfState)
+    assert.equal(stage.profitFactor, expected.profitFactor)
+  }
+  for (const lane of snapshot.lanes) {
+    const values = state.lanes[lane.id].samples.slice(0, lane.required)
+    const expected = aggregateCostNormalizedResults(values)
+    assert.equal(lane.pfState, expected.pfState)
+    assert.equal(lane.profitFactor, expected.profitFactor)
+    assert.equal(lane.qualified, values.length >= lane.required && expected.profitFactor >= 0)
+  }
 })

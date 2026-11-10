@@ -88,7 +88,7 @@ The balanced default uses seven TP steps (`3, 5, 8, 12, 18, 24, 30`), three SL r
 
 Progression is **Base → Main → Real → Live**. A child stage begins only after its matching parent lane completes the required samples and meets its PF threshold. Each child then records its own subsequent results; parent samples are never copied forward. Defaults are 20 Base closes, 8 Main closes, 8 Real closes, and PF 1.1 at each gate. Rolling qualification can decline as results change.
 
-PF divides positive net percentage outcomes by the absolute sum of negative outcomes. Positive windows with no losses use internal sentinel 999; empty/flat windows use 1 internally. Missing evidence is displayed separately. Neither a sentinel nor a qualification gate predicts returns.
+PF divides positive net percentage outcomes by the absolute sum of negative outcomes. Positive windows with no losses use internal sentinel 999; empty/flat windows use 1 internally. Explicit `pfState` metadata lets the UI distinguish no-loss windows (`∞`) from a finite PF of 999 and from empty or flat results. Neither a sentinel nor a qualification gate predicts returns.
 
 | Coordination | Behavior |
 |---|---|
@@ -118,6 +118,23 @@ node --env-file=.env.local --import tsx scripts/x02-preflight.ts
 ```
 
 Starting x02 in the terminal verifies the account and contracts, warms symbols, and starts the persistent loop. Warmup defaults to 1,440 completed one-minute candles per symbol and is configurable from 100 to 1,440. Only eligible Live-stage paper entries can produce new exchange intents. A new loop pass is scheduled after the previous pass finishes; this is not a fixed-frequency or low-latency execution guarantee. Pause disables new entries/additions while continuing market processing and eligible owned closes. It is not account-wide liquidation.
+
+### Continuous supervisor
+
+With the administrator password and dedicated x02 credentials configured, run this from the repository root on an available `PORT` (default 3001):
+
+```bash
+npm run build
+node scripts/run-x02.mjs --execute
+```
+
+The supervisor launches its own production server on `127.0.0.1`, signs in, saves **100 symbols, 1,440 warmup candles, and volume factor 0.01**, then enables x02 VST execution through the normal qualification gates. Other saved strategy settings remain in use. Run one server for that port/state directory.
+
+Status is refreshed about every five seconds in `CTS_DATA_DIR/x02-runtime-observation.json`; server output goes to `CTS_DATA_DIR/runtime-server.log`. Both files are created with mode `0600`. The default data directory is `.data`, which is gitignored; keep these operational records private when using another directory. Check the observation's `checkedAt` timestamp: an old file does not establish that the process is still running.
+
+This foreground supervisor runs while its host process remains alive. A workspace suspension or shutdown can stop it; the workspace is not a managed 24/7 service. Use a persistent host and a process manager for unattended operation. Initial startup or server failure exits the helper and requires an external restart; transient status, authentication, or network observation failures are retried. `Ctrl+C` stops the local processes without liquidating exchange positions. Saved running state can resume on a later server startup.
+
+### Order ownership
 
 Orders have deterministic identities and a SQLite reservation committed before the network write. Unknown outcomes are queried rather than blindly resubmitted. Accepted requests are distinct from fills. Partial fills update lots by incremental confirmed quantity. Closes are bounded by that lane's owned lot; another lane's position or paper requested size cannot enlarge a close. Unexplained venue reductions defer affected activity for reconciliation.
 

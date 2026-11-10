@@ -1,0 +1,65 @@
+{
+  "checkedAt": "2026-11-10T15:30:34.100Z",
+  "environment": "BingX VST",
+  "runtime": {
+    "x02Configured": true,
+    "status": "Market warm-up 100/100",
+    "engineStatus": "running"
+  },
+  "connection": {
+    "id": "bingx-x02",
+    "name": "X02",
+    "exchange": "bingx",
+    "demo": true,
+    "configured": true,
+    "enabled": true,
+    "liveEnabled": true
+  },
+  "symbols": 100,
+  "configurations": 252,
+  "processedCandles": 144724,
+  "stages": {
+    "base": {
+      "sets": 160536,
+      "eligible": 1743,
+      "enoughSamples": 41511,
+      "samplesPercent": 25.85775153236657,
+      "pf": 0.5081482236603857
+    },
+    "main": {
+      "sets": 2384,
+      "eligible": 26,
+      "enoughSamples": 148,
+      "samplesPercent": 6.208053691275167,
+      "pf": 0.46421349743346585
+    },
+    "real": {
+      "sets": 55,
+      "eligible": 2,
+      "enoughSamples": 2,
+      "samplesPercent": 3.6363636363636362,
+      "pf": 0.30203157878094267
+    },
+    "live": {
+      "sets": 2,
+      "eligible": 0,
+      "enoughSamples": 0,
+      "samplesPercent": 0,
+      "pf": 999
+    }
+  },
+  "execution": {
+    "configured": true,
+    "environment": "BingX VST",
+    "intents": {},
+    "ownedLots": 0,
+    "realizedGrossPnl": 0,
+    "fees": 0,
+    "realizedNetPnl": 0,
+    "exchangeRealizedPnl": 0,
+    "protectionGaps": 0,
+    "accounting": "Owned fills and signed exchange commissions reconciled; net excludes funding"
+  },
+  "scope": "Observed workspace process at initial completed warmup; no claim of sustained service uptime or strategy profitability.",
+  "note": "Numeric PF999 is an internal no-loss sentinel, not a measured999-fold ratio. Explicit pfState metadata is included in the next application build."
+}
