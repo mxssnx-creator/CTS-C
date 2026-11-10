@@ -31,9 +31,9 @@ export class TerminalRuntime {
   private marks = new Map<string,{price:number;timestamp:number}>()
   private client:BingxClient
   private executor:DemoExecutor
-  constructor(readonly connectionId:ConnectionId='bingx-x02',readonly store:StateStore=getStore(connectionId)) {
+  constructor(readonly connectionId:ConnectionId='bingx-x02',readonly store:StateStore=getStore(connectionId),private readonly createClient:(id:ConnectionId)=>BingxClient=connectionClient) {
     connectionInfo(connectionId)
-    this.client=connectionClient(connectionId)
+    this.client=this.createClient(connectionId)
     this.executor=new DemoExecutor(this.store,this.client,{connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:intent=>this.validateLiveIntent(intent)})
     const restored = this.store.getRaw('engine')
     this.engine = restored ? TradingEngine.fromSerialized(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId})
@@ -66,7 +66,7 @@ export class TerminalRuntime {
   async start() {
     this.ensureLease()
     if(!connectionCredentials(this.connectionId))throw new Error(`Dedicated ${connectionInfo(this.connectionId).name} credentials are unavailable on the server.`)
-    this.client = connectionClient(this.connectionId)
+    this.client = this.createClient(this.connectionId)
     this.executor = new DemoExecutor(this.store,this.client,{connectionId:this.connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
     const [balance,contracts,quotes] = await Promise.all([this.client.balance(),this.client.contracts(),this.client.quotes()])
     this.store.set('account',{...balance,updatedAt:Date.now(),source:connectionInfo(this.connectionId).environment})
@@ -79,9 +79,9 @@ export class TerminalRuntime {
     // Removed symbols remain managed until their owned paper positions close.
     this.engine.updateSettings({...settings,symbols})
     const symbolFees:NonNullable<EngineSettings['symbolFees']>={}
-    for(const symbol of symbols){
-      const fee=await this.client.commission(symbol).catch(()=>null)
-      if(fee)symbolFees[symbol]={makerFeePct:Math.max(0,fee.maker*100),takerFeePct:fee.taker*100}
+    for(let offset=0;offset<symbols.length;offset+=5){
+      const batch=symbols.slice(offset,offset+5),fees=await Promise.allSettled(batch.map(symbol=>this.client.commission(symbol)))
+      for(let i=0;i<batch.length;i++){const fee=fees[i];if(fee.status==='fulfilled')symbolFees[batch[i]]={makerFeePct:Math.max(0,fee.value.maker*100),takerFeePct:fee.value.taker*100}}
     }
     this.engine.updateSettings({symbolFees})
     this.control={...this.control,running:true,exchangeExecution:true,lastError:null}
