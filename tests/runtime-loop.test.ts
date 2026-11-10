@@ -314,3 +314,29 @@ test('cold recovery during delayed quotes matches a full observed pass without t
   const actual=JSON.parse(runtime.engine.serializeState()),expected=JSON.parse(reference.serializeState());actual.startedAt=expected.startedAt=0;assert.deepEqual(actual,expected)
  })
 })
+
+
+test('eight live symbols progress during a pending quote cycle only against verified post-close marks',async()=>{
+ await isolated(async runtime=>{
+  const r=runtime as any,blocked=deferred<any[]>(),now=Math.floor(Date.now()/60000)*60000,symbols=Array.from({length:8},(_,i)=>`LIVE${i}-USDT`)
+  r.client.quotes=()=>blocked.promise;r.prefetchHistory=()=>{};r.executor={process:async()=>[]};runtime.control.warmed=symbols
+  runtime.engine=new TradingEngine({symbols,catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}})
+  const make=(timestamp:number)=>({timestamp,open:100,high:100,low:100,close:100,volume:1}),calls:{symbol:string;executable:boolean|undefined}[]=[]
+  for(const symbol of symbols){runtime.engine.processCandles(symbol,[make(now-60000)]);r.marks.set(symbol,{price:100,timestamp:Date.now()});r.warmJobs.set(symbol,{data:[make(now)],plan:{count:100,cursor:now-60000,cutoff:now},live:true})}
+  const process=runtime.engine.processCandles.bind(runtime.engine);runtime.engine.processCandles=(s,b,o)=>{calls.push({symbol:s,executable:o?.allowExecution});return process(s,b,o)}
+  const task=r.tick();for(let i=0;i<100&&calls.length<8;i++)await new Promise(resolve=>setTimeout(resolve,20))
+  assert.equal(calls.length,8);assert.ok(calls.every(c=>c.executable===true));assert.ok(symbols.every(s=>runtime.engine.lastProcessedAt(s)===now))
+  blocked.resolve([]);await within(task);if(r.executionTask)await r.executionTask;assert.equal(calls.length,8,'no duplicate processing after quote completion')
+ })
+})
+
+test('a stale or pre-close quote cannot authorize a fresh executable history bar',async()=>{
+ await isolated(async runtime=>{
+  const r=runtime as any,now=Math.floor(Date.now()/60000)*60000,symbol='BTC-USDT';r.prefetchHistory=()=>{};r.client.quotes=async()=>[];r.executor={process:async()=>[]}
+  runtime.engine=new TradingEngine({symbols:[symbol],catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}});runtime.control.warmed=[symbol]
+  const bar=(timestamp:number)=>({timestamp,open:100,high:100,low:100,close:100,volume:1});runtime.engine.processCandles(symbol,[bar(now-60000)])
+  r.marks.set(symbol,{price:100,timestamp:now-60000});r.warmJobs.set(symbol,{data:[bar(now)],plan:{count:100,cursor:now-60000,cutoff:now},live:true})
+  let allowed:boolean|undefined;const process=runtime.engine.processCandles.bind(runtime.engine);runtime.engine.processCandles=(s,b,o)=>{allowed=o?.allowExecution;return process(s,b,o)}
+  await r.tick();if(r.executionTask)await r.executionTask;assert.equal(allowed,false);assert.equal(runtime.engine.pendingIntents().length,0)
+ })
+})
