@@ -62,6 +62,14 @@ Open positions retain a monotonic activation order so restarts preserve event or
 
 The dense 50-symbol test exposed a second lease timeout while writing the old monolithic checkpoint. The runtime stopped with zero owned lots; the timeout and failed attempt remain in the evidence. Incremental checkpoints address the write volume without relaxing lease expiry or writer fencing.
 
+## Clock and commission refresh
+
+Clock synchronization anchors the returned server time at response receipt. A delayed outbound time request must not produce a future signature on a later fast request. The receive window stays at 5 seconds for fast responses and adapts to measured transport delay with a 60-second ceiling. A read-only VST check accepted the corrected signature with a 10,644 ms window; no order was submitted.
+
+The perpetual commission endpoint returns one account-level pair and accepts no symbol-specific input. Startup reads it once and applies it to the selected symbols, avoiding fifty duplicate calls and origin-arrival bursts. A venue endpoint cooldown prevents further traffic until the supplied unblock time; unrelated reads remain available.
+
+Commission refresh keeps the last verified pair if a read fails instead of replacing its economics with generic defaults. Newly verified fees still create the correct economic cohort when they change. Settings labels the latest refresh, cached values and missing fallbacks separately. The 5-of-50 coverage failure from the earlier run is retained as failed evidence, not presented as complete fee verification.
+
 ## Settings and connections
 
 The form, JSON imports and server saves share one strict editable schema. TP, SL, trail, hold and coordination budget factors are bounded and have separate meanings. Failed saves do not mutate the engine. New economics create new lanes; open positions retain their recorded exits and sizing.

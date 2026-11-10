@@ -36,7 +36,7 @@ async function main(){
   if(process.argv.includes('--account-fees')){
     const credentials=demoCredentials();if(!credentials)throw new Error('Dedicated x02 commission credentials required')
     const client=new BingxVstClient(credentials)
-    for(const symbol of symbols){const fee=await client.commission(symbol);fees[symbol]={makerFeePct:Math.max(0,fee.maker*100),takerFeePct:fee.taker*100}}
+    const fee=await client.commission();for(const symbol of symbols)fees[symbol]={makerFeePct:Math.max(0,fee.maker*100),takerFeePct:fee.taker*100}
   }
   const variants=[]
   const catalogs:readonly (readonly [string,readonly string[]])[]=process.argv.includes('--additions-only')?[["trend-break-additions",TECHNICAL_INDICATIONS]]:[["core",CORE_INDICATIONS],["expanded",INDICATIONS]]
@@ -66,7 +66,7 @@ async function main(){
     const profit=outcomes.reduce((sum,v)=>sum+Math.max(0,v),0),loss=outcomes.reduce((sum,v)=>sum+Math.max(0,-v),0)
     variants.push({name,studies,forward,heldout:{...describeProfitFactor(profit,loss,outcomes.length),closes:outcomes.length,netReturnSumPct:profit-loss}})
   }
-  const result={kind:"frozen-observed-vst-training-holdout",generatedAt:new Date().toISOString(),ordersSubmitted:0,datasets,settings,fees,feeSource:process.argv.includes('--account-fees')?'per-symbol x02 commission GET plus modeled 10% fee-relative slippage':'configured fallback',variants,methodology:"Two declared catalogs, identical data and costs. The first 65% ranks candidates; up to three per range with >=20 closes and PF>=1.1 are frozen before the remaining 35%. All selected holdout losses are retained. Selected candidates also run through the actual Base/Main/Real/Live engine and all four coordinations: train-only lane evidence is retained, all simulated training positions are discarded at the boundary, and holdout positions start fresh. Percentage sums across correlated lanes are not portfolio returns; there is no exchange executor or automatic settings change."}
+  const result={kind:"frozen-observed-vst-training-holdout",generatedAt:new Date().toISOString(),ordersSubmitted:0,datasets,settings,fees,feeSource:process.argv.includes('--account-fees')?'account-level x02 perpetual commission GET applied to each symbol plus modeled 10% fee-relative slippage':'configured fallback',variants,methodology:"Two declared catalogs, identical data and costs. The first 65% ranks candidates; up to three per range with >=20 closes and PF>=1.1 are frozen before the remaining 35%. All selected holdout losses are retained. Selected candidates also run through the actual Base/Main/Real/Live engine and all four coordinations: train-only lane evidence is retained, all simulated training positions are discarded at the boundary, and holdout positions start fresh. Percentage sums across correlated lanes are not portfolio returns; there is no exchange executor or automatic settings change."}
   await writeFile(output,JSON.stringify(result,null,2)+"\n")
   console.log(JSON.stringify({event:"complete",ordersSubmitted:0,variants:variants.map(v=>({name:v.name,...v.heldout}))}))
 }
