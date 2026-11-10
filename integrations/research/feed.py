@@ -4,7 +4,9 @@ import argparse
 import json
 import math
 import multiprocessing
+import os
 from pathlib import Path
+import tempfile
 
 
 def append_trade(trade, receipt_timestamp, output, origin="exchange-public"):
@@ -33,10 +35,18 @@ def capture(exchange, symbol, output):
     async def on_trade(trade, receipt_timestamp):
         append_trade(trade, receipt_timestamp, output)
 
-    handler = FeedHandler()
-    venue = {"coinbase": Coinbase, "kraken": Kraken}[exchange]
-    handler.add_feed(venue(symbols=[symbol], channels=[TRADES], callbacks={TRADES: on_trade}))
-    handler.run()
+    # Explicit config avoids CRYPTOFEED_CONFIG account imports and logfile
+    # writes into the read-only container application directory.
+    public_config = {"uvloop": True, "log": {"disabled": True}}
+    with tempfile.TemporaryDirectory(prefix="ctsc-public-feed-") as directory:
+        netrc = Path(directory) / "empty-netrc"
+        netrc.write_text("", encoding="utf-8")
+        netrc.chmod(0o600)
+        os.environ["NETRC"] = str(netrc)  # This is the isolated child process.
+        handler = FeedHandler(config=public_config)
+        venue = {"coinbase": Coinbase, "kraken": Kraken}[exchange]
+        handler.add_feed(venue(symbols=[symbol], channels=[TRADES], callbacks={TRADES: on_trade}, config=public_config))
+        handler.run()
 
 
 def main():

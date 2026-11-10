@@ -59,7 +59,7 @@ export interface ExecutionIntent {
   source: "real-qualified"; status: "pending" | "acknowledged" | "rejected"
   exchangeOrderId?: string; error?: string
 }
-export interface EngineEvent { type: "opened" | "added" | "closed" | "qualified"; laneId: string; timestamp: number; stage: Stage; trade?: ClosedTrade }
+export interface EngineEvent { type: "opened" | "added" | "closed" | "qualified" | "execution"; status?:string; reason?:string; laneId: string; timestamp: number; stage: Stage; trade?: ClosedTrade }
 export interface EngineState {
   version: 1; settings: EngineSettings; lanes: Record<string, LaneState>; signals: Record<string, SignalState>
   lastTimestamp: Record<string, number>; recentTrades: ClosedTrade[]; intents: ExecutionIntent[]

@@ -12,7 +12,7 @@ The [original Corki post](https://x.com/Corki_0x/status/2117534398648098965), da
 |---|---|---|
 | [Cryptofeed](https://github.com/bmoscon/cryptofeed) | `integrations/research/feed.py`: bounded Kraken trade capture to JSONL; optional Coinbase route | Kraken network capture verified; the pinned Coinbase adapter returned HTTP 401 during symbol lookup. Upstream does not list BingX support. These feeds never substitute for x02 execution prices. |
 | [CCXT](https://github.com/ccxt/ccxt) | `bridge.py fetch` / `schedule`: BingX swap VST candles, sandbox set before requests | No key/secret and no order methods; unfinished candles are discarded. |
-| [Freqtrade](https://github.com/freqtrade/freqtrade) | `freqtrade.spot.json`, `CTSResearchStrategy.py`, `freqtrade_dry_run.py` | Independent BingX **spot** dry-run comparison. Official support does not list BingX futures. Wrapper forces dry-run, rejects credentials, strips Freqtrade environment overrides, and has a duration limit. |
+| [Freqtrade](https://github.com/freqtrade/freqtrade) | `freqtrade.spot.json`, `CTSResearchStrategy.py`, `freqtrade_dry_run.py` | Independent BingX **spot** dry-run comparison. Official support does not list BingX futures. Wrapper forces dry-run, rejects credential aliases including nested CCXT fields, strips Freqtrade environment overrides, and has a duration limit. |
 | [VectorBT](https://github.com/polakowo/vectorbt) | `bridge.py backtest`: nine independent EMA candidates with a chronological 70/30 train/holdout split | Candidate selection uses training only; signals execute next open; fees and slippage apply per fill. This is an independent baseline, not the CTS Axis/Block/DCA execution model. |
 | [TA-Lib Python](https://github.com/TA-Lib/ta-lib-python) | `bridge.py indicators`: RSI, EMA, MACD, ATR | Warmup values remain null; no fabricated indicator values. |
 | [skfolio](https://github.com/skfolio/skfolio) | `bridge.py allocate`: fit inverse-volatility weights on training returns, cap weights, report holdout gross return | Research proposal only, never automatically applied. Allocation result explicitly excludes turnover, fees, and slippage. |
@@ -77,14 +77,14 @@ docker compose -f compose.research.yml run --rm research-backtest backtest /repo
 docker compose -f compose.research.yml run --rm research-report
 ```
 
-`research-reports` stores exported data and reports; `freqtrade-paper` stores the isolated paper ledger/user directory. The deployment owner can mount the former read-only into a report viewer. `registry.json` provides explicit verification metadata for UI cards; it describes the local checks below, not current deployment health. Docker was unavailable in this workspace: Compose YAML/context checks passed, but image builds and container execution are not claimed.
+`research-reports` stores exported data and reports; `freqtrade-paper` stores the isolated paper ledger/user directory. The deployment owner can mount the former read-only into a report viewer. `registry.json` provides explicit verification metadata for UI cards; it describes the local checks below, not current deployment health. Docker was unavailable in this workspace: research Compose YAML/context checks passed, but these optional research image builds and container execution are not claimed. The main Node application image has separate successful GitHub Actions build evidence in `VALIDATION.md`.
 
 ## Installation and reproducible commands
 
-Run from the repository root. Research Python packages are optional and do not change Node dependencies. Use a separate environment:
+Run from the repository root. Research Python packages are optional and do not change Node dependencies. Use Python 3.12 to match the tested environments:
 
 ```bash
-python -m venv integrations/research/.venv
+python3.12 -m venv integrations/research/.venv
 integrations/research/.venv/bin/python -m pip install -r integrations/research/requirements.txt
 integrations/research/.venv/bin/python integrations/research/bridge.py health
 ```
@@ -149,7 +149,7 @@ Candle bundles use `schemaVersion: 1`, explicit `origin`, `market`, `symbol`, `i
 - Two additional isolated adapter tests passed again against the fresh repository with actual dependencies: Freqtrade **2026.10** loaded the strategy, validated the complete dry-run configuration, produced entry and exit signals on a 500-candle synthetic fixture, and preserved exact prefix results when future candles were removed. Cryptofeed **2.5.0** replayed a typed `Trade` object, preserved decimal precision and synthetic provenance, and rejected a negative price. Each test ran in its own isolated Python 3.12.14 environment. Both dependency checks passed. Together with the numerical tests above, **17 distinct tests passed** across the three environments.
 - The Node service handoff completed end to end on 91 explicitly synthetic equity snapshots: CSV import, JSON hash/provenance record, and a QuantStats HTML report from 90 daily returns. It did not modify engine state.
 - Actual Freqtrade validation exposed and fixed disabled-Telegram fields and user-directory setup. `freqtradeSchemaVerified` is `true` with the installed package; `show-config` succeeded. After explicit Requests/aiohttp proxy and CA routing was added, a **45-second spot dry-run reached RUNNING**, loaded BTC/USDT, ETH/USDT, and SOL/USDT, generated an explicitly simulated BTC buy, emitted a heartbeat, and stopped at its bound with exit code 0. It used an empty NETRC and no exchange keys. This establishes a bounded paper session, not sustained uptime or profitable results.
-- A subsequent real **Kraken BTC-USD capture received 20 public trades in 20 seconds** and stopped at its bound. The Coinbase adapter in pinned Cryptofeed 2.5.0 returned HTTP 401 when loading symbol metadata; Kraken is therefore the default and documented runnable example. An earlier empty capture correctly returned nonzero. The offline typed-object replay and serialization also succeeded.
+- A subsequent real **Kraken BTC-USD capture received 20 public trades in 20 seconds** and stopped at its bound. The Coinbase adapter in pinned Cryptofeed 2.5.0 returned HTTP 401 when loading symbol metadata; Kraken is therefore the default and documented runnable example. After explicitly isolating feed configuration and NETRC, a final 15-second capture received another 9 trades. The adapter ignores `CRYPTOFEED_CONFIG` and disables logfile writes into the container application directory. An earlier empty capture correctly returned nonzero. The offline typed-object replay and serialization also succeeded.
 - `bridge.py health` reports distribution presence only and deliberately never marks a package runtime-verified from installation metadata.
 - The compact `research-network.json` validation record captures actual public-data counts, hashes, and the bounded dry-run evidence. Do not infer x02 fills or profitability from research results.
 

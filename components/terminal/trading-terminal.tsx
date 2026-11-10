@@ -143,7 +143,7 @@ export function TradingTerminal() {
     { title: "SCOUT", sub: "Market discovery", icon: ScanLine, color: "cyan", metric: snapshot ? `${count(base.sets)} Base sets` : "Awaiting snapshot", view: "terminal" as View },
     { title: "FILTER", sub: "Independent stage gates", icon: Filter, color: "rose", metric: snapshot ? `${count(base.eligible)} Base eligible` : "Awaiting snapshot", view: "strategies" as View },
     { title: "ANALYST", sub: "Sample & PF validation", icon: BarChart3, color: "violet", metric: base.pf == null ? "No observed PF" : `Base PF ${base.pf.toFixed(3)}`, view: "strategies" as View },
-    { title: "EXECUTOR", sub: "Exchange order lifecycle", icon: Zap, color: "green", metric: snapshot ? `${open.length} open positions` : "Awaiting snapshot", view: "positions" as View },
+    { title: "EXECUTOR", sub: "Exchange order lifecycle", icon: Zap, color: "green", metric: snapshot?.execution ? `${snapshot.execution.summary.ownedLots} owned exchange lots` : "Awaiting exchange ledger", view: "positions" as View },
     { title: "RISK", sub: "Stops, costs & ownership", icon: ShieldCheck, color: "amber", metric: x02Live ? "X02 entries enabled" : "X02 entries paused", view: "connections" as View },
     { title: "LOGGER", sub: "Persistent activity trail", icon: ClipboardList, color: "blue", metric: `${events.length} recorded events`, view: "activity" as View },
   ]

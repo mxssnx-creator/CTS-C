@@ -23,7 +23,16 @@
     "capturedMessages": 20,
     "origin": "exchange-public",
     "sha256": "5f9a5a9bc1e334c0174db8b9b430514ded042a2de5568933035417bc00f3ff48",
-    "coinbaseStatus": "HTTP 401 during metadata lookup; Kraken is the default"
+    "coinbaseStatus": "HTTP 401 during metadata lookup; Kraken is the default",
+    "finalPublicConfigCheck": {
+      "durationLimitSeconds": 15,
+      "capturedMessages": 9,
+      "explicitPublicConfig": true,
+      "netrcAuthentication": false,
+      "configEnvironmentImport": false,
+      "logfileWrites": false,
+      "sha256": "57ef18e482849e452f76a7874a81fe668f917e431935264347b315f308615d4b"
+    }
   },
   "apscheduler": {
     "version": "3.11.3",

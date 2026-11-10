@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "verifiedOn": "2026-11-10",
+  "scope": "Main application Docker image build only; optional research images excluded",
+  "githubActions": {
+    "runId": "42838787068",
+    "jobId": "129908047163",
+    "commitPrefix": "ef665",
+    "result": "success"
+  },
+  "applicationImageBuildVerified": true,
+  "containerRuntimeVerified": false,
+  "researchImagesBuildVerified": false,
+  "runtimeSmokeCommand": "node scripts/docker-smoke.mjs",
+  "runtimeSmokeLocalChecks": [
+    "syntax",
+    "help"
+  ],
+  "ordersSubmitted": 0
+}

@@ -48,7 +48,16 @@ docker compose up --build -d
 docker compose logs -f terminal
 ```
 
-Compose reads variables from the shell or `.env`, not `.env.local`. Set its required administrator password there. It binds to `127.0.0.1:3001`, runs as a non-root user, and persists SQLite in the `cts_state` volume. It forwards the explicit `CTS_TRUSTED_ORIGINS` configuration for a trusted reverse proxy. Docker builds and container execution have not been verified in this workspace.
+Compose reads variables from the shell or `.env`, not `.env.local`. Set its required administrator password there. It binds to `127.0.0.1:3001`, runs as a non-root user, and persists SQLite in the `cts_state` volume. It forwards the explicit `CTS_TRUSTED_ORIGINS` configuration for a trusted reverse proxy. The main application image built successfully in GitHub Actions; container runtime verification is a separate CI check recorded in [validation](docs/VALIDATION.md). The authoring workspace itself has no Docker daemon.
+
+To exercise an already built image without exchange credentials:
+
+```bash
+docker build -t cts-c:verified .
+node scripts/docker-smoke.mjs
+```
+
+The smoke uses its own random administrator, ephemeral loopback port, container, and named volume. It checks login, settings/session persistence across container recreation, durable logout, and the missing-x02 block, then removes its resources. It submits no exchange orders.
 
 ## Workspace
 
@@ -88,7 +97,7 @@ PF divides positive net percentage outcomes by the absolute sum of negative outc
 | Block | Adds after favorable movement. Shared mode distributes a fixed budget; additive mode increases it. |
 | DCA | Adds after a configured adverse movement with bounded additions and a sizing multiplier; updates weighted entry and costs. |
 
-The studio exposes range, step, ratio, exit, indication, gate, sizing, cost, Axis, Block, and DCA settings. Changes generate new economic identities where needed, so incompatible configurations cannot borrow historical samples. Open positions retain their captured sizing and exit terms.
+The studio exposes range, step, ratio, exit, indication, gate, sizing, cost, Axis, Block, and DCA settings. Validated settings JSON can be exported and imported; an import updates the draft and requires the normal Save action. Changes generate new economic identities where needed, so incompatible configurations cannot borrow historical samples. Open positions retain their captured sizing and exit terms.
 
 Initial paper sizing is `baseNotional × volumeFactor`: by default `100 × 0.01 = 1 USDT`, before coordination adjustments. Exchange minimums can raise submitted quantity; confirmed receipts determine actual fills. The default universe targets 100 available contracts with a fixed initial symbol priority, not a volatility ranking or guaranteed selection of the best markets.
 
@@ -114,7 +123,7 @@ Orders have deterministic identities and a SQLite reservation committed before t
 
 After a confirmed entry fill, the executor creates separate native stop-loss and, for fixed exits, take-profit orders and persists their acknowledged venue IDs. Protection is a subsequent request, not an atomic bracket: its status can be pending, active, unknown, or failed. Before an add/close, owned protective orders are canceled and reconciled; resized protection uses the confirmed remaining quantity. Trailing behavior depends on the running engine.
 
-Separate native IDs establish ownership without guessing an attached order's parent. A lost conditional-order reply remains unresolved because the venue does not support custom client IDs for those order types. Aggregate position reductions alone are never assigned to a strategy. The direct native lifecycle has been tested on x02; end-to-end executor verification is tracked separately in [validation](docs/VALIDATION.md).
+Separate native IDs establish ownership without guessing an attached order's parent. A lost conditional-order reply remains unresolved because the venue does not support custom client IDs for those order types. Aggregate position reductions alone are never assigned to a strategy. The direct native lifecycle and durable executor entry/add/protection-resize/close lifecycle have been tested on x02 with actual fee reconciliation. A separate natural LONG stop-loss trigger also verified explicit parent-child linkage and exact fill attribution; the sibling TP was canceled. This is distinct from the executor-driven entry/add/close diagnostic, and an actual TP trigger was not exercised. See [validation](docs/VALIDATION.md), [executor evidence](docs/x02-executor-roundtrip.json), and [native-trigger evidence](docs/x02-native-trigger.json).
 
 ## Accounting and research boundaries
 
@@ -176,7 +185,7 @@ The post supplies a tool list, not reproducible strategy parameters. These optio
 | APScheduler | Bounded public-data refresh | Mocked cycle and one actual bounded VST fetch |
 | Lightweight Charts | Native candle/volume chart and offline export | Installed v5 export; UI has separate checks |
 
-These describe local verification and the [bounded public-data checks](docs/research-network.json), not deployed service uptime. Python dependencies are optional and separate from `npm ci`. [REFERENCE-INTEGRATIONS.md](docs/REFERENCE-INTEGRATIONS.md) includes pinned environments, full commands, source attribution, contracts, tests, and independent `compose.research.yml` profiles. Research containers receive no exchange credentials. Their Docker build/run verification is outstanding.
+These describe local verification and the [bounded public-data checks](docs/research-network.json), not deployed service uptime. Python dependencies are optional and separate from `npm ci`; use Python 3.12 for the tested research environments. [REFERENCE-INTEGRATIONS.md](docs/REFERENCE-INTEGRATIONS.md) includes pinned environments, full commands, source attribution, contracts, tests, and independent `compose.research.yml` profiles. Research containers receive no exchange credentials. Their Docker build/run verification is outstanding.
 
 The terminal CSV contains **paper equity** and must use `engine-paper` provenance:
 

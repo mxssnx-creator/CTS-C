@@ -11,11 +11,27 @@ import tempfile
 ROOT = Path(__file__).resolve().parent
 
 
+def contains_credentials(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = "".join(char for char in str(key).lower() if char.isalnum())
+            credential = normalized in {"key", "apikey", "secret", "secretkey", "password", "passphrase",
+                                        "uid", "accountid", "privatekey", "token", "accesstoken", "authorization"}
+            credential = credential or normalized.endswith(("apikey", "apisecret"))
+            if credential and item:
+                return True
+            if contains_credentials(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_credentials(item) for item in value)
+    return False
+
+
 def validate_config(config):
     if config.get("dry_run") is not True or config.get("trading_mode") != "spot":
         raise ValueError("Only spot dry-run is supported by this research adapter")
     exchange = config.get("exchange", {})
-    if exchange.get("name") != "bingx" or any(exchange.get(key) for key in ("key", "secret", "password", "uid")):
+    if exchange.get("name") != "bingx" or contains_credentials(exchange):
         raise ValueError("This adapter requires a public BingX config without credentials")
     if any(":" in pair for pair in exchange.get("pair_whitelist", [])):
         raise ValueError("Futures pairs are not supported in this Freqtrade adapter")

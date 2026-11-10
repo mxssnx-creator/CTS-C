@@ -57,9 +57,14 @@ class ContractTests(unittest.TestCase):
             changed[key] = value
             with self.assertRaises(ValueError):
                 validate_config(changed)
-        config["exchange"]["key"] = "not-a-real-key"
-        with self.assertRaises(ValueError):
-            validate_config(config)
+        for injected in ({"key": "not-a-real-key"}, {"apiKey": "not-a-real-key"},
+                         {"api_key": "not-a-real-key"}, {"accountId": "not-an-account"},
+                         {"ccxt_config": {"secret": "not-a-real-secret"}},
+                         {"ccxt_async_config": {"headers": {"X-BX-APIKEY": "not-a-real-key"}}}):
+            changed = copy.deepcopy(config)
+            changed["exchange"].update(injected)
+            with self.assertRaises(ValueError):
+                validate_config(changed)
 
     def test_ledger_csv_import_preserves_supplied_net_equity_and_provenance(self):
         with tempfile.TemporaryDirectory() as directory:

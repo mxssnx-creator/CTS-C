@@ -26,6 +26,7 @@ interface Payload { intent: ExecutionIntent; order: OrderInput; role?: "protecti
 interface Receipt { outcome: OrderOutcome; appliedQuantity: number; appliedNotional: number; feeQuantity?: number; feeError?: string }
 class ExecutionDeferred extends Error {}
 class AlreadyClosed extends Error {}
+class IntentCanceledBeforeWrite extends Error {}
 const LOTS_KEY = "executor:owned-lots"
 const TERMINAL = new Set(["FILLED", "CANCELED", "CANCELLED", "REJECTED", "EXPIRED"])
 const EPSILON = 1e-10
@@ -49,7 +50,7 @@ export class DemoExecutor {
   private cycleRows: Map<string, JournalIntent> | null = null
   private cycleLots: Record<string, OwnedLot> | null = null
   private cycleIndex = new Map<string, Map<string, JournalIntent>>()
-  constructor(readonly store: StateStore = getStore(), readonly venue: ExecutorVenue = new BingxVstClient(), readonly options: { beforeSubmit?: () => void; now?: () => number; maxIntentAgeMs?: number } = {}) {
+  constructor(readonly store: StateStore = getStore(), readonly venue: ExecutorVenue = new BingxVstClient(), readonly options: { beforeSubmit?: () => void; validateIntent?: (intent: ExecutionIntent) => void; now?: () => number; maxIntentAgeMs?: number } = {}) {
     store.database.exec("CREATE TABLE IF NOT EXISTS execution_fill_ledger(order_id TEXT NOT NULL,trade_id TEXT NOT NULL,lot_id TEXT NOT NULL,quantity REAL NOT NULL,fee REAL NOT NULL,realized_pnl REAL,data TEXT NOT NULL,PRIMARY KEY(order_id,trade_id)); CREATE INDEX IF NOT EXISTS execution_fill_ledger_lot ON execution_fill_ledger(lot_id);")
   }
   private now() { return this.options.now?.() ?? Date.now() }
@@ -141,9 +142,20 @@ export class DemoExecutor {
     if (!this.store.claimIntent(id, data as unknown as Record<string, unknown>)) { this.refreshRow(id); return }
     this.refreshRow(id)
     this.guard()
+    const validateWrite = () => {
+      this.guard()
+      if (!data.role && data.intent.kind !== "close") {
+        try {
+          if (this.now() - data.intent.timestamp > (this.options.maxIntentAgeMs ?? 180_000)) throw new Error("Intent expired while exchange preflight was pending")
+          this.options.validateIntent?.(data.intent)
+        } catch (error) { throw new IntentCanceledBeforeWrite(error instanceof Error ? error.message : "Execution intent is no longer eligible") }
+      }
+    }
     let outcome: OrderOutcome
-    try { outcome = await this.venue.submitOrder(data.order, this.guard) }
-    catch { outcome = { status: "unknown", clientOrderId: id, reason: "Submission outcome unknown; reconciliation required" } }
+    try { outcome = await this.venue.submitOrder(data.order, validateWrite) }
+    catch (error) { outcome = error instanceof IntentCanceledBeforeWrite
+      ? { status: "rejected", clientOrderId: id, reason: `Canceled before exchange write: ${error.message}` }
+      : { status: "unknown", clientOrderId: id, reason: "Submission outcome unknown; reconciliation required" } }
     this.guard() // A process that lost its lease must not apply the late receipt.
     this.apply(id, outcome)
   }
@@ -183,7 +195,9 @@ export class DemoExecutor {
   }
   private async contract(symbol: string): Promise<Contract> {
     if (this.now() - this.contractsAt > 60_000 || !this.contractCache.size) {
-      this.contractCache = new Map((await this.venue.contracts()).map((row) => [row.symbol, row])); this.contractsAt = this.now()
+      let contracts: Contract[]
+      try { contracts = await this.venue.contracts() } catch (error) { throw new ExecutionDeferred(`Contract metadata read unavailable: ${error instanceof Error ? error.message : "unknown error"}`) }
+      this.contractCache = new Map(contracts.map((row) => [row.symbol, row])); this.contractsAt = this.now()
     }
     const contract = this.contractCache.get(symbol)
     if (!contract) throw new Error("Symbol is absent from current VST contract metadata")
@@ -194,7 +208,8 @@ export class DemoExecutor {
     const ambiguous = this.rows().some((row) => payload(row).order.symbol === symbol && payload(row).intent.direction === intent.direction && (!receipt(row) || receipt(row)?.outcome.status === "unknown"))
     if (ambiguous) throw new ExecutionDeferred("An order for this symbol/direction remains unknown; reconcile it before another write")
     const tracked = lots.filter((lot) => lot.connectionId === intent.connectionId && lot.symbol === symbol && lot.direction === intent.direction).reduce((sum, lot) => sum + lot.quantity, 0)
-    const positions = await this.venue.positions(symbol)
+    let positions: VenuePosition[]
+    try { positions = await this.venue.positions(symbol) } catch (error) { throw new ExecutionDeferred(`Position inventory read unavailable: ${error instanceof Error ? error.message : "unknown error"}`) }
     const actual = positions.filter((row) => row.symbol === symbol && row.direction === intent.direction.toUpperCase()).reduce((sum, row) => sum + row.quantity, 0)
     if (actual + EPSILON < tracked) throw new ExecutionDeferred("Exchange quantity is below owned lot totals; unresolved external/protective fills block new writes")
   }
@@ -208,7 +223,9 @@ export class DemoExecutor {
       const existingGap = this.lots().some((lot) => lot.connectionId === intent.connectionId && lot.symbol === normalizeSymbol(intent.symbol) && lot.direction === intent.direction && lot.quantity > EPSILON && (lot.protection === "error" || lot.protection === "unknown"))
       if (existingGap) throw new ExecutionDeferred("Existing exposure has unresolved protection; new entries/adds are blocked until it is protected or closed")
     }
-    if (await this.venue.positionMode() !== "hedge") throw new Error("Independent long/short execution requires hedge mode")
+    let mode: "hedge" | "one-way"
+    try { mode = await this.venue.positionMode() } catch (error) { throw new ExecutionDeferred(`Position mode read unavailable: ${error instanceof Error ? error.message : "unknown error"}`) }
+    if (mode !== "hedge") throw new Error("Independent long/short execution requires hedge mode")
     const symbol = normalizeSymbol(intent.symbol), contract = await this.contract(symbol)
     let owned = this.lot(intent)
     if (owned && (owned.laneId !== intent.laneId || owned.symbol !== symbol || owned.direction !== intent.direction)) throw new Error("Execution intent does not own this lot")
@@ -240,7 +257,9 @@ export class DemoExecutor {
       const out = receipt(row)?.outcome
       if (out?.status !== "accepted") throw new ExecutionDeferred("Conditional response is unknown; its native ID must be reconciled before resizing this lot")
       this.guard()
-      const canceled = await this.venue.cancelOwnedOrder(payload(row).order.symbol, row.id, out.order.orderId, this.guard)
+      let canceled: OrderOutcome
+      try { canceled = await this.venue.cancelOwnedOrder(payload(row).order.symbol, row.id, out.order.orderId, this.guard) }
+      catch (error) { throw new ExecutionDeferred(`Owned protection preflight/cancellation unavailable: ${error instanceof Error ? error.message : "unknown error"}`) }
       this.guard()
       if (canceled.status !== "accepted") throw new ExecutionDeferred("Owned protection cancellation is not confirmed")
       this.apply(row.id, canceled)
@@ -301,7 +320,12 @@ export class DemoExecutor {
       const data = payload(row), intent = data.intent, prior = receipt(row)
       let appliedQuantity = prior?.appliedQuantity || 0, appliedNotional = prior?.appliedNotional || 0
       if (outcome.status === "accepted") {
-        const filled = outcome.order.filledQuantity, average = outcome.order.averagePrice
+        const order = outcome.order
+        if ((order.symbol && normalizeSymbol(order.symbol) !== data.order.symbol) || (order.side && order.side.toUpperCase() !== data.order.side) || (order.positionSide && order.positionSide.toUpperCase() !== data.order.positionSide)) throw new Error("Exchange order symbol/side does not match the owned intent")
+        const earlier = prior?.outcome
+        if (earlier?.status === "accepted" && order.orderId !== earlier.order.orderId && order.triggerOrderId !== earlier.order.orderId) throw new Error("Changed venue order ID has no exact owned trigger-parent link")
+        const filled = order.filledQuantity, average = order.averagePrice
+        if (filled > Number(data.order.quantity) + EPSILON) throw new Error("Exchange fill exceeds the requested owned order quantity")
         if (!Number.isFinite(filled) || filled < appliedQuantity - EPSILON) throw new Error("Exchange cumulative fill quantity decreased")
         if (filled > appliedQuantity + EPSILON) {
           if (!(average > 0) || !Number.isFinite(average)) throw new Error("Filled order has no confirmed average price")

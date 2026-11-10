@@ -22,16 +22,20 @@ export class TerminalRuntime {
   private checkpointAt=0
   private bufferedEvents:EngineEvent[]=[]
   private sequence: Promise<unknown> = Promise.resolve()
+  private executionTask?:Promise<void>
   private bars = new Map<string,Bar>()
   private warmJobs=new Map<string,{data?:Candle[];error?:string}>()
   private warmRetryAt=new Map<string,number>()
   private marks = new Map<string,{price:number;timestamp:number}>()
   private client = new BingxVstClient()
-  private executor = new DemoExecutor(getStore(), this.client, {beforeSubmit:()=>this.ensureLease()})
+  private executor = new DemoExecutor(getStore(), this.client, {beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
   constructor() {
     const restored = getStore().get<EngineState>('engine')
     this.engine = new TradingEngine(restored?.settings ?? DEFAULT_ENGINE_SETTINGS, restored ?? undefined)
     this.control = { ...DEFAULT_CONTROL, ...getStore().get<Control>('control'), warmed: [] }
+  }
+  private validateLiveIntent(intent:import('./types').ExecutionIntent){
+    if(!this.control.exchangeExecution||!this.engine.activePositionIds().has(intent.positionId))throw new Error('Entry/add signal is no longer active; no exchange order submitted')
   }
   private ensureLease() {
     if(this.leaseLost)throw new Error('Execution ownership was lost; restart this process to reload durable state')
@@ -44,7 +48,7 @@ export class TerminalRuntime {
     if(restored)this.engine=new TradingEngine(restored.settings,restored)
     this.control={...this.control,...getStore().get<Control>('control'),warmed:[]}
   }
-  shutdown(){clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&getStore().ownsLease(this.owner)){this.persist();getStore().releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false}
+  shutdown(){clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&getStore().ownsLease(this.owner)){this.persist();getStore().releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false;this.leaseLost=true;this.control.running=false}
   serial<T>(operation:()=>Promise<T>): Promise<T> { const next=this.sequence.catch(()=>{}).then(operation); this.sequence=next; return next }
   private persist(events: EngineEvent[] = [],force=true) {
     this.ensureLease();this.bufferedEvents.push(...events)
@@ -57,7 +61,7 @@ export class TerminalRuntime {
     this.ensureLease()
     if(!demoCredentials())throw new Error('Dedicated x02 credentials are unavailable. Set BINGX_X02_KEY and BINGX_X02_SECRET on the server.')
     this.client = new BingxVstClient(demoCredentials()!)
-    this.executor = new DemoExecutor(getStore(),this.client,{beforeSubmit:()=>this.ensureLease()})
+    this.executor = new DemoExecutor(getStore(),this.client,{beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
     const [balance,contracts,quotes] = await Promise.all([this.client.balance(),this.client.contracts(),this.client.quotes()])
     getStore().set('account',{...balance,updatedAt:Date.now(),source:'BingX VST'})
     const available=new Set(quotes.filter(q=>q.price>0).map(q=>q.symbol))
@@ -111,15 +115,18 @@ export class TerminalRuntime {
       }
       this.control.lastTick=now;this.control.lastError=null
       this.persist(events.splice(0),false)
-      const pending=this.engine.pendingIntents().filter(i=>this.control.exchangeExecution||i.kind==='close')
-      const submittedIntentIds=new Set(pending.filter(i=>getStore().intent(stableClientOrderId(i.connectionId,i.id))).map(i=>i.id))
-      const plan=planExecutionIntents(pending,{activePositionIds:this.engine.activePositionIds(),submittedIntentIds,now:Date.now(),limit:10})
-      for(const rejection of plan.rejected)this.engine.markExecution(rejection.id,{status:'rejected',error:rejection.error})
-      if(plan.rejected.length)this.persist()
-      const pendingIds=new Set(this.engine.pendingIntents().map(i=>i.id))
-      const updates=await this.executor.process(plan.ready)
-      for(const update of updates)if(update.status!=='unknown'&&pendingIds.has(update.id))this.engine.markExecution(update.id,{...update,status:update.status})
-      if(updates.length)this.persist()
+      if(!this.executionTask){
+        const pending=this.engine.pendingIntents().filter(i=>this.control.exchangeExecution||i.kind==='close')
+        const submittedIntentIds=new Set(pending.filter(i=>getStore().intent(stableClientOrderId(i.connectionId,i.id))).map(i=>i.id))
+        const plan=planExecutionIntents(pending,{activePositionIds:this.engine.activePositionIds(),submittedIntentIds,now:Date.now(),limit:1})
+        for(const rejection of plan.rejected){this.engine.markExecution(rejection.id,{status:'rejected',error:rejection.error});const intent=pending.find(i=>i.id===rejection.id)!;events.push({type:'execution',laneId:intent.laneId,stage:'live',timestamp:Date.now(),status:'rejected',reason:rejection.error})}
+        if(plan.rejected.length)this.persist(events.splice(0))
+        this.executionTask=this.executor.process(plan.ready).then(updates=>this.serial(async()=>{
+          const pendingById=new Map(this.engine.pendingIntents().map(i=>[i.id,i])),audit:EngineEvent[]=[]
+          for(const update of updates)if(update.status!=='unknown'&&pendingById.has(update.id)){this.engine.markExecution(update.id,{...update,status:update.status});audit.push({type:'execution',laneId:pendingById.get(update.id)!.laneId,stage:'live',timestamp:Date.now(),status:update.status,reason:update.error})}
+          if(audit.length)this.persist(audit)
+        })).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Executor unavailable'}).finally(()=>{this.executionTask=undefined})
+      }
       this.prefetchHistory()
       const warmed=[...this.warmJobs.entries()].find(([,job])=>job.data||job.error)
       if(warmed){
@@ -174,7 +181,7 @@ export class TerminalRuntime {
       openPositions:positions.map(p=>({id:p.id,connectionId:s.settings.connectionId,symbol:p.symbol,direction:p.direction,entryPrice:p.entryPrice,quantity:p.quantity,status:'paper-open',unrealizedPnl:unrealized(p),realizedPnl:0,fee:null,createdAt:p.openedAt,closedAt:null,source:'paper'})),
       closedPositions:trades.map(p=>({id:p.id,connectionId:s.settings.connectionId,symbol:p.symbol,direction:p.direction,entryPrice:p.entryPrice,quantity:p.quantity,status:'paper-closed',unrealizedPnl:0,realizedPnl:p.netPnl,fee:p.cost,createdAt:p.openedAt,closedAt:p.closedAt,source:'paper'})),
       stages,settings,connections:[{id:'bingx-x02',name:'X02',exchange:'bingx',demo:true,configured:Boolean(demoCredentials()),enabled:this.control.running,liveEnabled:this.control.exchangeExecution}],
-      events:getStore().events().map(e=>({timestamp:new Date(Number(e.timestamp)||Date.now()).toISOString(),level:'info',phase:String(e.stage||'engine'),message:`${e.type}: ${String(e.laneId||'').slice(0,240)}`,connectionId:'bingx-x02'})),
+      events:getStore().events().map(e=>({timestamp:new Date(Number(e.timestamp)||Date.now()).toISOString(),level:e.status==='rejected'?'error':'info',phase:String(e.stage||'engine'),message:`${e.type}${e.status?' '+e.status:''}: ${e.reason||String(e.laneId||'').slice(0,240)}`,connectionId:'bingx-x02'})),
       readiness:{x02Configured:Boolean(demoCredentials()),status:this.control.lastError||(this.control.running?`Market warm-up ${this.control.warmed.length}/${s.symbolCount}`:demoCredentials()?'Configured; ready to verify VST':'Dedicated x02 credentials required'),engineStatus:this.control.running?'running':'stopped'},
       positionCount:s.stages.find(stage=>stage.stage==='live')?.open??0,positionDisplayLimit:1000,metricScope:'Lane counts are paper forward evaluations. PnL/fees cover Live-stage trades within the latest 1,000 closes across all stages; they are estimates including slippage. Account equity is separately read from BingX VST. No simulated value is presented as exchange equity.',
       engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory},

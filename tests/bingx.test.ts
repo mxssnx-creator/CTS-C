@@ -196,7 +196,7 @@ test("fill accounting refuses foreign identities or fabricated missing amounts",
 })
 
 test("lease guards run after asynchronous preflight and prevent exchange writes", async () => {
-  const { client, seen } = fixture(() => json(order))
+  const { client, seen } = fixture(() => json({...order,status:"NEW",executedQty:"0",avgPrice:"0"}))
   let submitGuardRan = false
   await assert.rejects(client.submitOrder(entry, () => {
     submitGuardRan = true
@@ -267,4 +267,61 @@ test("fill history auth and malformed responses never trigger weaker snapshot fa
     await assert.rejects(client.fills("456", 1794321000000, 1794322000000))
     assert.equal(seen.some((call) => call.url.pathname.endsWith("/allFillOrders")), false)
   }
+})
+
+test("venue errors retain the actionable reason while redacting credentials and signatures", async () => {
+  let signature = ""
+  const { client } = fixture((url) => {
+    signature = url.searchParams.get("signature") || ""
+    return new Response(JSON.stringify({code:109400,msg:`Invalid order parameter; apiKey=${credentials.apiKey} apiSecret=${credentials.apiSecret} signature=${signature}`}),{status:200})
+  })
+  const result = await client.submitOrder(entry)
+  assert.equal(result.status,"rejected")
+  if (result.status === "rejected") {
+    assert.match(result.reason,/Invalid order parameter/)
+    for (const value of [credentials.apiKey,credentials.apiSecret,signature]) assert.ok(!result.reason.includes(value))
+  }
+})
+
+test("generic109400 on a GET resynchronizes the clock once without retrying writes", async () => {
+  let attempts=0
+  const {client,seen}=fixture(()=>++attempts===1?new Response(JSON.stringify({code:109400,msg:"timestamp outside receive window"}),{status:200}):json({dualSidePosition:true}))
+  assert.equal(await client.positionMode(),"hedge")
+  assert.equal(attempts,2)
+  assert.equal(seen.filter(call=>call.url.pathname.endsWith('/server/time')).length,2)
+  assert.equal(seen.filter(call=>call.method==='POST').length,0)
+})
+
+test("bounded conditional evidence is read-only, symbol-scoped and preserves parent IDs", async () => {
+  const {client,seen}=fixture(url=>{
+    if(url.pathname.endsWith('/fillHistory'))assert.equal(url.searchParams.get('symbol'),'BTC-USDT')
+    assert.equal(url.searchParams.get('orderId'),null)
+    const value={symbol:'BTC-USDT',orderId:'2055068855617294300',triggerOrderId:'2055068855617294299',status:'FILLED',apiKey:'private-value',arbitrary:'not-evidence'}
+    if(url.pathname.endsWith('/allFillOrders'))return json({fill_orders:[value]})
+    if(url.pathname.endsWith('/fillHistory'))return json({fill_history_orders:[value],total:1})
+    return json({orders:[value,{symbol:'ETH-USDT',orderId:'999',triggerOrderId:'123'}]})
+  })
+  const evidence=await client.historyEvidence('BTC-USDT',1,100)
+  assert.equal(evidence.errors.length,0)
+  assert.equal(evidence.orders.length,1)
+  assert.equal(evidence.fullOrders.length,1)
+  assert.equal(evidence.trades[0].triggerOrderId,'2055068855617294299')
+  assert.equal(evidence.trades[0].apiKey,undefined)
+  assert.equal(evidence.trades[0].arbitrary,undefined)
+  assert.ok(seen.every(call=>call.method==='GET'))
+  assert.equal((parseVenueJson('{"triggerOrderId":2055068855617294299}')as{triggerOrderId:string}).triggerOrderId,'2055068855617294299')
+  await assert.rejects(client.historyEvidence('BTC-USDT',1,86_400_002),/at most one day/)
+})
+
+test("native conditional GET may return its filled child only with exact trigger-parent identity", async () => {
+  const parent='2120171627236384768',child='2120171672427302912'
+  const {client,seen}=fixture(()=>new Response(`{"code":0,"data":{"orderId":${child},"triggerOrderId":${parent},"symbol":"XRP-USDT","status":"FILLED","type":"STOP_MARKET","executedQty":"2","avgPrice":"1.0650"}}`,{status:200}))
+  const filled=await client.orderById('XRP-USDT',parent)
+  assert.equal(filled.orderId,child)
+  assert.equal(filled.triggerOrderId,parent)
+  const canceled=await client.cancelOwnedOrder('XRP-USDT',clientId,parent)
+  assert.equal(canceled.status,'accepted')
+  assert.equal(seen.filter(call=>call.method==='DELETE').length,0)
+  const wrong=fixture(()=>json({...order,orderId:child,triggerOrderId:'999'})).client
+  await assert.rejects(wrong.orderById('XRP-USDT',parent),/exact trigger-parent/)
 })

@@ -22,6 +22,7 @@ export type OrderInput = {
 }
 export type VenueOrder = {
   orderId: string
+  triggerOrderId?: string
   clientOrderId: string
   symbol: string
   side: string
@@ -106,7 +107,7 @@ export function signedQuery(params: Record<string, string | number | boolean>, s
 /** Node 24 reviver source retains numeric 64-bit venue IDs without regex edits. */
 export function parseVenueJson(input: string): unknown {
   return JSON.parse(input, (key: string, value: unknown, context?: { source?: string }) => {
-    if (/^(?:id|orderId|orderID|positionId|tradeId|transactId)$/.test(key) && typeof value === "number") {
+    if (/^(?:id|orderId|orderID|positionId|positionID|tradeId|transactId|triggerOrderId|parentOrderId|mainOrderId|stopLossOrderId|takeProfitOrderId)$/.test(key) && typeof value === "number") {
       if (context?.source) return context.source
       if (!Number.isSafeInteger(value)) throw new Error("Runtime cannot preserve venue ID precision")
       return String(value)
@@ -134,7 +135,7 @@ function parseOrder(input: unknown): VenueOrder {
   const orderId = text(value.orderId ?? value.orderID ?? value.id)
   if (!orderId) throw new Error("Exchange response did not include an order ID")
   return {
-    orderId, clientOrderId: text(value.clientOrderId), symbol: text(value.symbol),
+    orderId, triggerOrderId: text(value.triggerOrderId) || undefined, clientOrderId: text(value.clientOrderId), symbol: text(value.symbol),
     side: text(value.side), positionSide: text(value.positionSide), type: text(value.type), status: text(value.status),
     quantity: number(value.origQty ?? value.quantity), filledQuantity: number(value.executedQty ?? value.filledQty ?? value.cumQty),
     averagePrice: number(value.avgPrice ?? value.averagePrice), price: number(value.price), stopPrice: number(value.stopPrice),
@@ -221,8 +222,14 @@ export class BingxVstClient {
       try { envelope = object(parseVenueJson(raw)) } catch { throw new VenueError("INVALID_RESPONSE", "Exchange response could not be verified", response.status, true) }
       if (!(envelope.code === 0 || envelope.code === "0")) {
         const code = text(envelope.code || "INVALID_RESPONSE")
-        // Errors expose neither the request URL/signature nor credential values.
-        throw new VenueError(code, `BingX rejected request (code ${code})`, response.status, ["INVALID_RESPONSE", "100500", "109500", "110500", "101481"].includes(code))
+        // Retain the venue's actionable reason without credential/signature
+        // echoes. This also distinguishes transient read failures from bad
+        // parameters when the exchange reuses a generic error code.
+        let detail = text(envelope.msg ?? envelope.message).replace(/[\r\n\t]/g, " ")
+        const signature = authenticated ? new URLSearchParams(query).get("signature") : null
+        for (const secret of [this.credentials?.apiKey, this.credentials?.apiSecret, signature]) if (secret) detail = detail.replaceAll(secret, "[redacted]")
+        detail = detail.replace(/((?:api[_-]?key|api[_-]?secret|signature)\s*[=:]\s*)[^&\s,]+/gi, "$1[redacted]").slice(0, 300)
+        throw new VenueError(code, `BingX rejected request (code ${code})${detail ? `: ${detail}` : ""}`, response.status, ["INVALID_RESPONSE", "100500", "109500", "110500", "101481"].includes(code))
       }
       return envelope.data
     } catch (error) {
@@ -235,8 +242,8 @@ export class BingxVstClient {
     if (authenticated) await this.ensureClock()
     try { return await this.request(path, params, "GET", authenticated) }
     catch (error) {
-      if (!(error instanceof VenueError) || !(error.ambiguous || ["429", "100410", "100429", "100421"].includes(error.code))) throw error
-      if (error.code === "100421") await this.clock()
+      if (!(error instanceof VenueError) || !(error.ambiguous || ["429", "100410", "100429", "100421", "109400"].includes(error.code))) throw error
+      if (["100421", "109400"].includes(error.code)) await this.clock()
       else await this.sleep(550)
       return this.request(path, params, "GET", authenticated)
     }
@@ -427,6 +434,30 @@ export class BingxVstClient {
     })
   }
 
+  /** Bounded read-only evidence for conditional parent/child investigation.
+   * This is diagnostic evidence, never an ownership inference for trading. */
+  async historyEvidence(symbol: string, startTime: number, endTime: number): Promise<{orders: Record<string, unknown>[]; fullOrders: Record<string, unknown>[]; orderFills: Record<string, unknown>[]; trades: Record<string, unknown>[]; errors: string[]; truncated: boolean}> {
+    symbol = normalizeSymbol(symbol)
+    if (!Number.isSafeInteger(startTime) || !Number.isSafeInteger(endTime) || startTime <= 0 || endTime < startTime || endTime - startTime > 86_400_000) throw new Error("Diagnostic history requires a bounded range of at most one day")
+    const fields = new Set(["orderId","orderID","clientOrderId","clientOrderID","triggerOrderId","parentOrderId","symbol","type","side","positionSide","status","origQty","quantity","executedQty","avgPrice","stopPrice","time","updateTime","tradeId","qty","volume","price","amount","commission","currency","commissionAsset","realisedPNL","realizedPnl","fee","filledTime","filledTm","role"])
+    const results = await Promise.allSettled([
+      this.read("/openApi/swap/v2/trade/allOrders", {symbol,startTime,endTime,limit:100},true),
+      this.read("/openApi/swap/v2/trade/allFillOrders", {tradingUnit:"COIN",startTs:startTime,endTs:endTime},true),
+      this.read("/openApi/swap/v2/trade/fillHistory", {symbol,tradingUnit:"COIN",startTs:startTime,endTs:endTime,pageIndex:1,pageSize:100},true),
+      this.read("/openApi/swap/v1/trade/fullOrder", {symbol,startTime,endTime,limit:100},true),
+    ])
+    const errors: string[] = []; let truncated = false
+    const lists = results.map((result,index) => {
+      if (result.status === "rejected") { errors.push(`${["orders","orderFills","trades","fullOrders"][index]}: ${result.reason instanceof Error ? result.reason.message : "Read unavailable"}`); return [] }
+      const value = object(result.value)
+      const list = Array.isArray(result.value) ? result.value : value.orders ?? value.fill_orders ?? value.fill_history_orders
+      if (!Array.isArray(list)) { errors.push(`${["orders","orderFills","trades","fullOrders"][index]}: Unrecognized response shape`); return [] }
+      if (list.length >= 100 || number(value.total) > list.length) truncated = true
+      return list.map(object).filter(row=>text(row.symbol)===symbol).map(row=>Object.fromEntries(Object.entries(row).filter(([key])=>fields.has(key))))
+    })
+    return {orders:lists[0],orderFills:lists[1],trades:lists[2],fullOrders:lists[3],errors,truncated}
+  }
+
   async orderByClientId(symbol: string, clientOrderId: string): Promise<VenueOrder | null> {
     if (!isOwnedClientOrderId(clientOrderId)) throw new Error("Only CTS-C order identities may be queried by this executor")
     try {
@@ -491,7 +522,10 @@ export class BingxVstClient {
 
   async orderById(symbol: string, orderId: string): Promise<VenueOrder> {
     if (!/^\d+$/.test(orderId)) throw new Error("A venue order ID is required")
-    return parseOrder(await this.read("/openApi/swap/v2/trade/order", { symbol: normalizeSymbol(symbol), orderId }, true))
+    const order = parseOrder(await this.read("/openApi/swap/v2/trade/order", { symbol: normalizeSymbol(symbol), orderId }, true))
+    if (order.orderId !== orderId && order.triggerOrderId !== orderId) throw new Error("Exchange returned a different order without the exact trigger-parent linkage")
+    if (order.symbol && normalizeSymbol(order.symbol) !== normalizeSymbol(symbol)) throw new Error("Exchange order symbol did not match the requested symbol")
+    return order
   }
 
   async cancelOwnedOrder(symbol: string, clientOrderId: string, ownedVenueOrderId?: string, beforeWrite?: () => void): Promise<OrderOutcome> {
@@ -500,6 +534,7 @@ export class BingxVstClient {
     // it permits cancellation of conditional orders without a venue client ID.
     const order = ownedVenueOrderId ? await this.orderById(symbol, ownedVenueOrderId) : await this.orderByClientId(symbol, clientOrderId)
     if (!order) return { status: "rejected", clientOrderId, reason: "Owned order was not found" }
+    if (["FILLED","CANCELED","CANCELLED","EXPIRED","REJECTED"].includes(order.status.toUpperCase())) return {status:"accepted",clientOrderId,order,recovered:true}
     try {
       await this.request("/openApi/swap/v2/trade/order", { symbol: normalizeSymbol(symbol), orderId: order.orderId }, "DELETE", true, undefined, beforeWrite)
       const confirmed = ownedVenueOrderId ? await this.orderById(symbol, ownedVenueOrderId) : await this.orderByClientId(symbol, clientOrderId)

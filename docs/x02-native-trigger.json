@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "verifiedOn": "2026-11-10",
+  "runId": "trigger-7c85cc7f-2e10-4446-ad48-34be412b1f7b",
+  "connection": "bingx-x02",
+  "environment": "BingX VST",
+  "symbol": "XRP-USDT",
+  "direction": "LONG",
+  "scope": "Actual natural native stop-loss trigger and explicit parent-child fill attribution; direct diagnostic",
+  "entry": {
+    "filledQuantity": 2,
+    "averagePrice": 1.0657,
+    "signedCommission": -0.001066
+  },
+  "stopLoss": {
+    "parentOrderId": "2120171627236384768",
+    "childOrderId": "2120171672427302912",
+    "childTriggerOrderId": "2120171627236384768",
+    "parentChildMatch": true,
+    "status": "FILLED",
+    "filledQuantity": 2,
+    "averagePrice": 1.065,
+    "signedCommission": -0.001065,
+    "exchangeRealizedPnl": -0.0014
+  },
+  "takeProfit": {
+    "parentOrderId": "2120171647188688896",
+    "status": "CANCELLED",
+    "triggered": false
+  },
+  "preferredFillHistoryComplete": true,
+  "ancillaryAllFillOrdersErrorCode": "109500",
+  "finalResidualPositions": 0,
+  "finalResidualOrders": 0,
+  "baselineInventoryPreserved": true,
+  "nativeStopLossTriggerVerified": true,
+  "nativeTakeProfitTriggerVerified": false,
+  "executorTriggeredFillIntegrationVerified": false,
+  "automaticStrategyQualificationVerified": false,
+  "derivedTotals": {
+    "realizedGrossPnl": -0.0014,
+    "fees": 0.002131,
+    "realizedNetPnlExcludingFunding": -0.003531
+  },
+  "profitabilityVerified": false
+}

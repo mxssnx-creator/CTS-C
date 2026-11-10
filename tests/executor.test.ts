@@ -361,3 +361,73 @@ test("definite protection failure blocks more exposure but permits owned close",
   assert.equal(close.find(row=>row.id==="close-despite-gap")?.status,"acknowledged")
   assert.equal(executor.lots()[0].quantity,0)
 })
+
+
+test("unavailable position reads defer an unsubmitted add instead of rejecting it permanently", async (t) => {
+  const store = new StateStore(":memory:"); t.after(() => store.close())
+  const venue = new Venue(), executor = new DemoExecutor(store, venue)
+  await executor.process([intent()])
+  const original = venue.positionMode.bind(venue), before = venue.submitted.length
+  venue.positionMode = async () => { throw new Error("BingX rejected request (code 109400): timestamp expired") }
+  const add = intent({id:"read-recover-add",kind:"add"})
+  const result = await executor.process([add])
+  assert.equal(result.find(row=>row.id===add.id)?.status,"unknown")
+  assert.match(result.find(row=>row.id===add.id)?.error??"",/Position mode read unavailable/)
+  assert.equal(venue.submitted.length,before)
+  assert.equal(store.intent(stableClientOrderId("x02",add.id)),undefined)
+  venue.positionMode = original
+  assert.equal((await executor.process([add])).find(row=>row.id===add.id)?.status,"acknowledged")
+  assert.equal(executor.lots()[0].quantity,4)
+})
+
+test("paper closure during async preflight rejects the durable intent before POST", async (t) => {
+  const store = new StateStore(":memory:"); t.after(() => store.close())
+  const venue = new Venue()
+  let stillOpen = true
+  const positions = venue.positions.bind(venue)
+  venue.positions = async () => { const result = await positions(); stillOpen = false; return result }
+  const executor = new DemoExecutor(store,venue,{validateIntent:()=>{if(!stillOpen)throw new Error("Paper position already closed")}})
+  const result = await executor.process([intent()])
+  assert.equal(result.find(row=>row.id==='entry-1')?.status,'rejected')
+  assert.match(result.find(row=>row.id==='entry-1')?.error??'',/Canceled before exchange write: Paper position already closed/)
+  assert.equal(venue.submitted.length,0)
+  assert.equal(store.intent(stableClientOrderId('x02','entry-1'))?.status,'rejected')
+  await executor.process([intent()])
+  assert.equal(venue.submitted.length,0)
+})
+
+test("actual VST parent-to-filled-child fixture closes only its owned lot and books child fees", async (t) => {
+  const store=new StateStore(':memory:');t.after(()=>store.close())
+  const venue=new Venue(),executor=new DemoExecutor(store,venue)
+  const first=intent(),other=intent({id:'other-entry',positionId:'other-position',laneId:'other-lane'})
+  await executor.process([first,other])
+  const firstStop=venue.conditionals().find(row=>row.type==='STOP_MARKET')!
+  const parent=venue.orders.get(firstStop.clientOrderId)!,parentId=parent.orderId
+  const childId='2120171672427302912'
+  const child={...parent,orderId:childId,triggerOrderId:parentId,status:'FILLED',filledQuantity:2,averagePrice:99}
+  venue.orders.set(firstStop.clientOrderId,child)
+  const read=venue.orderById.bind(venue)
+  venue.orderById=async(symbol,id)=>id===parentId?structuredClone(child):read(symbol,id)
+  venue.fillOverride=(order)=>[{orderId:order.orderId,tradeId:order.orderId===childId?'270010148':`${order.orderId}1`,symbol:order.symbol,side:order.side,quantity:order.filledQuantity,price:order.averagePrice,fee:order.orderId===childId?-0.001065:-0.001066,realizedPnl:order.orderId===childId?-2:0,timestamp:Date.now()}]
+  await executor.process([])
+  const closed=executor.lots().find(row=>row.laneId===first.laneId)!,untouched=executor.lots().find(row=>row.laneId===other.laneId)!
+  assert.equal(closed.quantity,0)
+  assert.equal(closed.protection,'closed')
+  assert.equal(untouched.quantity,2)
+  assert.equal(untouched.protection,'active')
+  const journal=store.intents(100).find(row=>(row.result as any)?.outcome?.order?.orderId===childId)!
+  assert.equal((journal.result as any).feeQuantity,2)
+  assert.equal((journal.result as any).outcome.order.triggerOrderId,parentId)
+  const native=store.database.prepare('SELECT fee FROM execution_fill_ledger WHERE order_id=?').get(childId)as{fee:number}
+  assert.equal(native.fee,-0.001065)
+})
+
+test("mismatched native fill side cannot be assigned to an owned intent", async (t) => {
+  const store=new StateStore(':memory:');t.after(()=>store.close())
+  const venue=new Venue(),executor=new DemoExecutor(store,venue)
+  venue.submit=async input=>({status:'accepted',clientOrderId:input.clientOrderId,order:makeOrder(input,{side:'SELL'}),recovered:false})
+  const result=await executor.process([intent()])
+  assert.equal(result.find(row=>row.id==='entry-1')?.status,'unknown')
+  assert.equal(executor.lots().length,0)
+  assert.equal(store.intent(stableClientOrderId('x02','entry-1'))?.status,'reserved')
+})
