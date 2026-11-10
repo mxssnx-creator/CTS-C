@@ -31,6 +31,10 @@ export class TerminalRuntime {
   private bufferedEvents:EngineEvent[]=[]
   private sequence: Promise<unknown> = Promise.resolve()
   private executionTask?:Promise<void>
+  private accountTask?:Promise<void>
+  private accountRetryAt=0
+  private accountGeneration=0
+  private accountError:string|null=null
   private bars = new Map<string,Bar>()
   private warmJobs=new Map<string,HistoryJob>()
   private warmRetryAt=new Map<string,number>()
@@ -41,8 +45,8 @@ export class TerminalRuntime {
     connectionInfo(connectionId)
     this.client=this.createClient(connectionId)
     this.executor=new DemoExecutor(this.store,this.client,{connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:intent=>this.validateLiveIntent(intent)})
-    const restored = this.store.getRaw('engine')
-    this.engine = restored ? TradingEngine.fromSerialized(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId})
+    const restored = this.store.loadEngineState()
+    this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId})
     if(this.engine.settings.connectionId!==connectionId)throw new Error('Engine checkpoint belongs to another connection')
     this.control = { ...DEFAULT_CONTROL, ...this.store.get<Control>('control'), warmed: [] }
   }
@@ -56,8 +60,8 @@ export class TerminalRuntime {
     this.leased=true
     this.heartbeat=setInterval(()=>{try{this.ensureLease()}catch(error){this.control.lastError=error instanceof Error?error.message:'Ownership lost';clearInterval(this.heartbeat)}},5000)
     this.heartbeat.unref?.()
-    const restored=this.store.getRaw('engine')
-    if(restored)this.engine=TradingEngine.fromSerialized(restored)
+    const restored=this.store.loadEngineState()
+    if(restored)this.engine=TradingEngine.fromOwnedCheckpoint(restored)
     this.control={...this.control,...this.store.get<Control>('control'),warmed:[]}
   }
   shutdown(){clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false;this.leaseLost=true;this.control.running=false}
@@ -68,12 +72,16 @@ export class TerminalRuntime {
     const exposed=this.executor.lots?.().some(lot=>lot.quantity>1e-10)??false
     const interval=cold&&!exposed?30000:5000
     if(!force&&Date.now()-this.checkpointAt<interval&&!this.engine.pendingIntents().length)return
-    this.store.saveEngineJSON(this.engine.serializeState(),this.bufferedEvents,this.engine.settings);this.store.set('control',this.control)
+    const metadata=this.engine.checkpointMetadata(),settings=this.engine.settings
+    if(this.store.hasLaneCheckpoint())this.store.saveLaneCheckpoint(metadata,this.engine.checkpointLanes(),this.bufferedEvents,settings,()=>this.ensureLease())
+    else this.store.migrateLaneCheckpoint(metadata,this.engine.checkpointLanes(true),this.bufferedEvents,settings,()=>this.ensureLease())
+    this.engine.checkpointSaved();this.store.set('control',this.control)
     this.bufferedEvents=[];this.checkpointAt=Date.now()
   }
   async start() {
     this.ensureLease()
     if(!connectionCredentials(this.connectionId))throw new Error(`Dedicated ${connectionInfo(this.connectionId).name} credentials are unavailable on the server.`)
+    this.accountGeneration++;this.accountError=null;this.accountRetryAt=0
     this.client = this.createClient(this.connectionId)
     this.executor = new DemoExecutor(this.store,this.client,{connectionId:this.connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
     const [balance,contracts,quotes] = await Promise.all([this.client.balance(),this.client.contracts(),this.client.quotes()])
@@ -112,6 +120,19 @@ export class TerminalRuntime {
         else void closedHistory(this.client,symbol,plan.count,plan.cutoff).then(data=>{job.data=data}).catch(error=>{job.error=error instanceof Error?error.message:'History unavailable'})
       } catch(error){job.error=error instanceof Error?error.message:'History unavailable'}
     }
+  }
+  private refreshAccount(){
+    if(this.accountTask||Date.now()<this.accountRetryAt||Date.now()-(this.store.get<{updatedAt:number}>('account')?.updatedAt??0)<=30000)return
+    const generation=this.accountGeneration
+    this.accountTask=Promise.resolve().then(()=>this.client.balance()).then(balance=>this.serial(async()=>{
+      if(generation!==this.accountGeneration||this.leaseLost||!this.leased||!this.control.running)return
+      this.ensureLease()
+      this.store.set('account',{...balance,updatedAt:Date.now(),source:connectionInfo(this.connectionId).environment})
+      this.accountError=null
+    })).catch(error=>{
+      this.accountRetryAt=Date.now()+30000
+      if(!this.leaseLost&&this.control.running)this.accountError=`Account refresh: ${error instanceof Error?error.message:'unavailable'}`
+    }).finally(()=>{this.accountTask=undefined})
   }
   private schedule() { if(this.timer||!this.control.running)return; this.timer=setTimeout(()=>{this.timer=undefined;void this.serial(()=>this.tick()).finally(()=>this.schedule())},1000);this.timer.unref?.() }
   private async tick() {
@@ -193,7 +214,7 @@ export class TerminalRuntime {
         } catch(error) {this.warmJobs.delete(symbol);this.control.lastError=`${symbol}: ${error instanceof Error?error.message:'History unavailable'}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
       }
       if(warmed.length)this.persist(events.splice(0),false)
-      if(now-(this.store.get<{updatedAt:number}>('account')?.updatedAt??0)>30_000){ const balance=await this.client.balance();this.store.set('account',{...balance,updatedAt:Date.now(),source:connectionInfo(this.connectionId).environment}) }
+      this.refreshAccount()
     } catch(error) {this.control.lastError=error instanceof Error?error.message:'Exchange processing unavailable';if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner))this.store.set('control',this.control)}
   }
   saveFlatSettings(input:Record<string,unknown>) {
@@ -248,7 +269,7 @@ export class TerminalRuntime {
       closedPositions:trades.map(p=>({id:p.id,connectionId:s.settings.connectionId,symbol:p.symbol,direction:p.direction,entryPrice:p.entryPrice,quantity:p.quantity,status:'paper-closed',unrealizedPnl:0,realizedPnl:p.netPnl,fee:p.cost,createdAt:p.openedAt,closedAt:p.closedAt,source:'paper'})),
       stages,settings,connectionId:this.connectionId,connections:CONNECTIONS.map(c=>({...c,configured:Boolean(connectionCredentials(c.id)),enabled:c.id===this.connectionId&&this.control.running,liveEnabled:c.id===this.connectionId&&this.control.exchangeExecution})),
       events:this.store.events().map(e=>({timestamp:new Date(Number(e.timestamp)||Date.now()).toISOString(),level:e.status==='rejected'?'error':'info',phase:String(e.stage||'engine'),message:`${e.type}${e.status?' '+e.status:''}: ${e.reason||String(e.laneId||'').slice(0,240)}`,connectionId:this.connectionId})),
-      readiness:{x02Configured:Boolean(connectionCredentials('bingx-x02')),configured:Boolean(connectionCredentials(this.connectionId)),environment:connectionInfo(this.connectionId).environment,status:this.control.lastError||(this.control.running?warmedCount>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${warmedCount}/${s.symbolCount}`:connectionCredentials(this.connectionId)?`Configured; ready to verify ${connectionInfo(this.connectionId).environment}`:`Dedicated ${connectionInfo(this.connectionId).name} credentials required`),engineStatus:this.control.running?'running':'stopped',warmedSymbols:warmedCount,lastTick:this.control.lastTick},
+      readiness:{x02Configured:Boolean(connectionCredentials('bingx-x02')),configured:Boolean(connectionCredentials(this.connectionId)),environment:connectionInfo(this.connectionId).environment,status:this.control.lastError||this.accountError||(this.control.running?warmedCount>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${warmedCount}/${s.symbolCount}`:connectionCredentials(this.connectionId)?`Configured; ready to verify ${connectionInfo(this.connectionId).environment}`:`Dedicated ${connectionInfo(this.connectionId).name} credentials required`),engineStatus:this.control.running?'running':'stopped',warmedSymbols:warmedCount,lastTick:this.control.lastTick},
       positionCount:live.open,positionDisplayLimit:1000,metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
       coordinationStats:this.engine.coordinationStats(),
       engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory,symbolFees:s.settings.symbolFees??{},feeFallbackSymbols:s.settings.symbols.filter(symbol=>!s.settings.symbolFees?.[symbol])},

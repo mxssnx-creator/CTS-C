@@ -252,3 +252,31 @@ test('a malformed late history candle is rejected before any earlier slice mutat
   assert.match(runtime.control.lastError??'',/Invalid or unsorted/);assert.equal(runtime.control.warmed.includes(symbol),false)
  })
 })
+
+
+test("slow account reads cannot block quotes, duplicate refreshes, or history processing",async()=>{
+ await isolated(async runtime=>{
+  const internal=runtime as any,blocked=deferred<any>();let calls=0,quotes=0
+  getStore().set('account',{equity:1000,updatedAt:0})
+  internal.client.balance=()=>{calls++;return blocked.promise}
+  internal.executor={process:async()=>[]}
+  const tick=runtime.engine.processTick.bind(runtime.engine);runtime.engine.processTick=(...args)=>{quotes++;return tick(...args)}
+  await within(internal.tick());const task=internal.accountTask;assert.ok(task)
+  const seen=quotes;await within(internal.tick());assert.ok(quotes>seen);assert.equal(calls,1)
+  blocked.resolve({equity:1234});await task;assert.equal(getStore().get<any>('account').equity,1234);assert.equal(internal.accountTask,undefined)
+  getStore().set('account',{equity:1000,updatedAt:0});internal.client.balance=async()=>{calls++;throw Error('Temporary account read failure')}
+  await within(internal.tick());await internal.accountTask;const failedCalls=calls
+  await within(internal.tick());assert.equal(calls,failedCalls,'failed refresh observes its retry delay');assert.match(internal.accountError,/Account refresh/)
+ })
+})
+
+test("a delayed account response cannot write after shutdown and replacement ownership",async()=>{
+ await isolated(async runtime=>{
+  const internal=runtime as any,blocked=deferred<any>()
+  getStore().set('account',{equity:1000,updatedAt:0});internal.client.balance=()=>blocked.promise;internal.executor={process:async()=>[]}
+  await within(internal.tick());const task=internal.accountTask;assert.ok(task);runtime.shutdown()
+  const replacement=new TerminalRuntime(),next=replacement as any
+  try{next.ensureLease();getStore().set('account',{equity:2222,updatedAt:123});blocked.resolve({equity:9999});await task;assert.equal(getStore().get<any>('account').equity,2222);assert.equal(getStore().ownsLease(next.owner),true)}
+  finally{replacement.shutdown()}
+ })
+})

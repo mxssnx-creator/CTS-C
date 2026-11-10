@@ -38,6 +38,7 @@ export interface EntryFill { price: number; quantity: number; timestamp: number;
 export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number;pfState:ProfitFactorState;qualified:boolean;checkedAt:number}
 export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
+  activationOrder?:number
   executionEligible?: boolean
   parentPositionId?:string
   admission?:GateProof[]
@@ -91,6 +92,7 @@ export interface EngineState {
   version: 1; settings: EngineSettings; lanes: Record<string, LaneState>; signals: Record<string, SignalState>
   lastTimestamp: Record<string, number>; recentTrades: ClosedTrade[]; intents: ExecutionIntent[]
   recentLiveTrades?: ClosedTrade[]
+  nextActivationOrder?:number
   processedCandles: number; startedAt: number; updatedAt: number; equity: number; peakEquity: number; maxDrawdownPct: number
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]
 }

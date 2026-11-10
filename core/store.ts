@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite"
 import { mkdirSync, chmodSync } from "node:fs"
 import path from "node:path"
+import type {EngineState,StrategyConfig} from "./types"
 
 export interface Intent { id: string; status: "reserved" | "accepted" | "rejected" | "unknown"; payload: Record<string, unknown>; result: Record<string, unknown> | null; createdAt: number; updatedAt: number }
 export interface RuntimeLease { owner: string; expiresAt: number; fence: number }
@@ -16,11 +17,51 @@ export class StateStore {
       CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS intents(id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL, result TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS engine_lanes(id TEXT PRIMARY KEY,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runtime_lease(name TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL, fence INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS intents_status_created ON intents(status,created);
     `)
   }
-  getRaw(key: string): string | null { const row = this.database.prepare("SELECT data FROM records WHERE key=?").get(key) as { data: string } | undefined; return row?.data ?? null }
+  getRaw(key: string): string | null { const row = this.database.prepare("SELECT data FROM records WHERE key=?").get(key) as { data: string } | undefined; if(key==='engine'&&row?.data.startsWith('{"checkpointFormat":"lane-rows-v1"'))return JSON.stringify(this.loadEngineState())
+    return row?.data ?? null }
+  hasLaneCheckpoint():boolean{
+    const row=this.database.prepare("SELECT substr(data,1,80) AS prefix FROM records WHERE key='engine'").get() as {prefix:string}|undefined
+    return row?.prefix.startsWith('{"checkpointFormat":"lane-rows-v1"')??false
+  }
+  loadEngineState():EngineState|null{
+    const row=this.database.prepare("SELECT data FROM records WHERE key='engine'").get() as {data:string}|undefined
+    if(!row)return null
+    const decoded=JSON.parse(row.data),state:EngineState=decoded.checkpointFormat==='lane-rows-v1'?{...decoded.state,lanes:{}}:decoded
+    if(decoded.checkpointFormat==='lane-rows-v1')for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){const lane=JSON.parse(item.data);if(lane.id!==item.id)throw new Error('Checkpoint lane identity mismatch');state.lanes[item.id]=lane}
+    const configs=new Map<string,StrategyConfig>()
+    for(const lane of Object.values(state.lanes??{})){
+      const identity=JSON.stringify(lane.config),shared=configs.get(identity)
+      if(shared)lane.config=shared;else configs.set(identity,lane.config)
+    }
+    return state
+  }
+  /** Migration rows stay invisible until the final metadata transaction. No full-state rewrite. */
+  migrateLaneCheckpoint(metadata:string,lanes:Iterable<{id:string;data:string}>,events:unknown[],settings:unknown,guard:()=>void):void{
+    if(this.hasLaneCheckpoint())throw new Error('Checkpoint is already migrated')
+    guard();this.database.exec('DELETE FROM engine_lanes')
+    const insert=this.database.prepare('INSERT INTO engine_lanes VALUES(?,?)')
+    let batch:{id:string;data:string}[]=[]
+    const flush=()=>{if(!batch.length)return;guard();this.database.exec('BEGIN IMMEDIATE');try{for(const row of batch)insert.run(row.id,row.data);guard();this.database.exec('COMMIT')}catch(error){this.database.exec('ROLLBACK');throw error}batch=[]}
+    for(const lane of lanes){batch.push(lane);if(batch.length>=500)flush()}
+    flush();this.saveLaneCheckpoint(metadata,[],events,settings,guard)
+  }
+  saveLaneCheckpoint(metadata:string,lanes:Iterable<{id:string;data:string}>,events:unknown[],settings:unknown,guard:()=>void):void{
+    guard();this.database.exec('BEGIN IMMEDIATE')
+    try{
+      const insert=this.database.prepare('INSERT INTO engine_lanes VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data')
+      let count=0;for(const lane of lanes){insert.run(lane.id,lane.data);if(++count%500===0)guard()}
+      this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run('{"checkpointFormat":"lane-rows-v1","state":'+metadata+'}',Date.now())
+      this.set('engine-settings',settings)
+      const eventInsert=this.database.prepare('INSERT INTO events(data,created) VALUES(?,?)');for(const event of events)eventInsert.run(JSON.stringify(event),Date.now())
+      this.database.exec('DELETE FROM events WHERE id < (SELECT COALESCE(MAX(id),0)-5000 FROM events)')
+      guard();this.database.exec('COMMIT')
+    }catch(error){this.database.exec('ROLLBACK');throw error}
+  }
   get<T>(key: string): T | null { const data = this.getRaw(key); return data === null ? null : JSON.parse(data) as T }
   set(key: string, value: unknown) { this.database.prepare("INSERT INTO records VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run(key, JSON.stringify(value), Date.now()) }
   saveEngine(state: unknown, events: unknown[] = []) {
@@ -41,7 +82,7 @@ export class StateStore {
   engineSettings():import('./types').EngineSettings|null {
     const saved=this.get<import('./types').EngineSettings>('engine-settings')
     if(saved)return saved
-    const row=this.database.prepare("SELECT json_extract(data,'$.settings') AS data FROM records WHERE key='engine'").get() as {data:string|null}|undefined
+    const row=this.database.prepare("SELECT COALESCE(json_extract(data,'$.settings'),json_extract(data,'$.state.settings')) AS data FROM records WHERE key='engine'").get() as {data:string|null}|undefined
     return row?.data?JSON.parse(row.data):null
   }
   events(limit = 100): Record<string, unknown>[] { return (this.database.prepare("SELECT data FROM events ORDER BY id DESC LIMIT ?").all(Math.max(1, Math.min(1000, limit))) as { data: string }[]).map(row => JSON.parse(row.data)) }

@@ -98,6 +98,7 @@ export class TradingEngine {
   private currentLaneIds = new Set<string>()
   private contexts=new Map<string,Map<string,LaneContext>>()
   private validLineages=new Set<string>()
+  private dirtyLaneIds=new Set<string>()
   private readonly maxRecentTrades = 1000
   /** Parse an independently owned checkpoint without duplicating its entire ledger. */
   static fromSerialized(serialized: string): TradingEngine {
@@ -105,6 +106,14 @@ export class TradingEngine {
     if (!restored || typeof restored !== "object") throw new Error("Invalid engine state")
     return new TradingEngine(restored.settings, restored, OWN_PARSED_STATE)
   }
+  /** Store loaders construct a fresh, exclusively owned state without a second whole-ledger clone. */
+  static fromOwnedCheckpoint(restored:EngineState):TradingEngine{return new TradingEngine(restored.settings,restored,OWN_PARSED_STATE)}
+  checkpointMetadata():string{const {lanes,...metadata}=this.state;return JSON.stringify(metadata)}
+  *checkpointLanes(all=false):Generator<{id:string;data:string}>{
+    if(all){for(const id in this.state.lanes)yield {id,data:JSON.stringify(this.state.lanes[id])}}
+    else for(const id of this.dirtyLaneIds)yield {id,data:JSON.stringify(this.state.lanes[id])}
+  }
+  checkpointSaved():void{this.dirtyLaneIds.clear()}
   constructor(settings: Partial<EngineSettings> = {}, restored?: EngineState, ownership?: symbol) {
     const validated = validateEngineSettings({ ...restored?.settings, ...settings })
     if (restored && restored.version !== 1) throw new Error("Unsupported engine state")
@@ -119,10 +128,19 @@ export class TradingEngine {
     this.state.recentLiveTrades??=this.state.recentTrades.filter(trade=>trade.stage==="live")
     this.refreshCoordinationIds()
     this.refreshCurrentLaneIds()
+    this.state.nextActivationOrder??=0
+    const openLanes:LaneState[]=[],orders=new Set<number>()
     for (const lane of Object.values(this.state.lanes)) {
-      lane.samples.length = Math.min(lane.samples.length, this.sampleRetention(lane))
-      if (lane.open) this.activate(lane)
+      const retained=this.sampleRetention(lane);if(lane.samples.length>retained){lane.samples.length=retained;this.dirtyLaneIds.add(lane.id)}
+      if(lane.open){
+        const order=lane.open.activationOrder
+        if(order!==undefined){if(!Number.isSafeInteger(order)||order<1||orders.has(order))throw new Error('Invalid active position order');orders.add(order);this.state.nextActivationOrder=Math.max(this.state.nextActivationOrder,order)}
+        openLanes.push(lane)
+      }
     }
+    for(const lane of openLanes)if(lane.open!.activationOrder===undefined){lane.open!.activationOrder=++this.state.nextActivationOrder;this.dirtyLaneIds.add(lane.id)}
+    openLanes.sort((a,b)=>a.open!.activationOrder!-b.open!.activationOrder!)
+    for(const lane of openLanes)this.activate(lane)
   }
   get settings(): EngineSettings { return structuredClone(this.state.settings) }
   managedSymbols():string[]{return [...new Set([...this.state.settings.symbols,...[...this.active].filter(([,lanes])=>lanes.size>0).map(([symbol])=>symbol)])]}
@@ -139,7 +157,7 @@ export class TradingEngine {
     this.refreshSymbolCatalogs()
     this.refreshCoordinationIds()
     this.refreshCurrentLaneIds()
-    for (const lane of Object.values(this.state.lanes)) lane.samples.length = Math.min(lane.samples.length, this.sampleRetention(lane))
+    for (const lane of Object.values(this.state.lanes)){const retained=this.sampleRetention(lane);if(lane.samples.length>retained){lane.samples.length=retained;this.dirtyLaneIds.add(lane.id)}}
   }
   exportState(): EngineState { return structuredClone(this.state) }
   private refreshSymbolCatalogs(){
@@ -248,6 +266,7 @@ export class TradingEngine {
     return previousPF >= threshold && (axis.outcome === "any" || (axis.outcome === "positive" ? lastNet > 0 : lastNet < 0))
   }
   private open(lane: LaneState, candle: Candle): PaperPosition {
+    this.dirtyLaneIds.add(lane.id)
     const s = this.state.settings, block = s.coordinations.block
     const proof=(stage:Stage):GateProof=>{
       const source=stage as 'base'|'main'|'real',parent=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,stage),id=parent?.id??''
@@ -271,7 +290,7 @@ export class TradingEngine {
     const notional = lane.coordination === "block" && block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
     const quantity = notional / candle.close
     const position: PaperPosition = {
-      id: `${lane.id}@${candle.timestamp}`, openedAt: candle.timestamp, direction: lane.direction,...(admission?{admission}:{}),
+      id: `${lane.id}@${candle.timestamp}`, activationOrder:++this.state.nextActivationOrder!,openedAt: candle.timestamp, direction: lane.direction,...(admission?{admission}:{}),
       fills: [{ price: candle.close, quantity, timestamp: candle.timestamp, kind: "entry" }], quantity,
       sizing: { baseBudget: total, block: structuredClone(s.coordinations.block), dca: structuredClone(s.coordinations.dca) },
       entryPrice: candle.close, peak: candle.close, lastAddPrice: candle.close, addedSteps: 0,
@@ -286,6 +305,7 @@ export class TradingEngine {
     return position
   }
   private close(lane: LaneState, candle: Candle, reason: string): ClosedTrade {
+    this.dirtyLaneIds.add(lane.id)
     const open = lane.open!, sign = lane.direction === "long" ? 1 : -1
     const grossPnl = sign * (candle.close - open.entryPrice) * open.quantity
     // Expected fees+slippage at recorded entry notional. Exchange settlements remain separate.
@@ -317,6 +337,7 @@ export class TradingEngine {
   private mark(lane: LaneState, candle: Candle): EngineEvent | undefined {
     const open = lane.open
     if (!open || candle.timestamp <= Math.max(open.openedAt, lane.lastTimestamp)) return
+    this.dirtyLaneIds.add(lane.id)
     lane.lastTimestamp = candle.timestamp
     const sign = lane.direction === "long" ? 1 : -1
     const exit=observedExit({...open,price:candle.close,timestamp:candle.timestamp,trailingBasis:open.trailingBasis??((lane.config.catalogVersion??2)>=3?"peak":"entry")})

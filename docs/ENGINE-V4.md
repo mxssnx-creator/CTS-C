@@ -54,6 +54,14 @@ Block Shared divides one budget across entry and favorable additions. Additive u
 
 The exchange executor captures one actual entry quantity scale and uses it for subsequent additions. Entry normalization accounts for the smallest planned relative leg. A partially filled entry updates its scale from actual fills; an impossible sub-minimum addition is rejected before protection is canceled. A per-order notional cap also applies before protective cancellation. Protection and closes use only journaled native IDs and actual owned quantities. Tiny floating subtraction noise is clamped consistently with the ownership tolerance.
 
+## Incremental durable checkpoints
+
+Engine metadata and changed lanes commit atomically. Existing checkpoints migrate in guarded batches; partially copied rows remain invisible until the final metadata commit, and the original checkpoint stays readable after interruption. Ordinary saves update only dirty lanes, preserve all lifetime outcomes and native intent journals, and acknowledge dirty state only after success. Identical immutable configuration values share memory after restore.
+
+Open positions retain a monotonic activation order so restarts preserve event ordering, intermediate equity and drawdown traces as well as trades and PF. The public engine JSON export remains reconstructable. Row-format backups require this version of the storage adapter. A background account read cannot hold up quote/history work, duplicate itself while pending, or write after shutdown or a replacement owner.
+
+The dense 50-symbol test exposed a second lease timeout while writing the old monolithic checkpoint. The runtime stopped with zero owned lots; the timeout and failed attempt remain in the evidence. Incremental checkpoints address the write volume without relaxing lease expiry or writer fencing.
+
 ## Settings and connections
 
 The form, JSON imports and server saves share one strict editable schema. TP, SL, trail, hold and coordination budget factors are bounded and have separate meanings. Failed saves do not mutate the engine. New economics create new lanes; open positions retain their recorded exits and sizing.
