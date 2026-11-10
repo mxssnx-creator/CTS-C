@@ -112,7 +112,7 @@ export class TerminalRuntime {
     if(!this.control.running)return
     const latest=Math.floor(Date.now()/60000)*60000
     const needed=this.engine.managedSymbols().filter(symbol=>(!this.control.warmed.includes(symbol)||(this.engine.lastProcessedAt(symbol)??latest)<latest)&&!this.warmJobs.has(symbol)&&(this.warmRetryAt.get(symbol)??0)<=Date.now())
-    for(const symbol of needed.slice(0,Math.max(0,3-this.warmJobs.size))){
+    for(const symbol of needed.slice(0,Math.max(0,8-this.warmJobs.size))){
       const job:HistoryJob={};this.warmJobs.set(symbol,job)
       try {
         const plan=job.plan=planHistory(this.control.historyCandles,this.engine.lastProcessedAt(symbol))
@@ -135,8 +135,12 @@ export class TerminalRuntime {
       if(!this.leaseLost&&this.control.running)this.accountError=`Account refresh: ${error instanceof Error?error.message:'unavailable'}`
     }).finally(()=>{this.accountTask=undefined})
   }
-  private consumeHistory(events:EngineEvent[],coldOnly=false){
-      const warmed=[...this.warmJobs.entries()].filter(([,job])=>(job.data||job.error)&&(!coldOnly||!job.live)).slice(0,3)
+  private verifiedQuote(symbol:string,cutoff:number|undefined):boolean{
+    const mark=this.marks.get(symbol),now=Date.now()
+    return cutoff!==undefined&&Boolean(mark&&mark.timestamp>=cutoff&&mark.timestamp<=now+5000&&now-mark.timestamp<=15000)
+  }
+  private consumeHistory(events:EngineEvent[],overlapOnly=false){
+      const warmed=[...this.warmJobs.entries()].filter(([symbol,job])=>(job.data||job.error)&&(!overlapOnly||!job.live||this.verifiedQuote(symbol,job.plan?.cutoff))).slice(0,overlapOnly?3:8)
       for(const [symbol,job] of warmed){
         this.ensureLease()
         try {
@@ -157,7 +161,7 @@ export class TerminalRuntime {
             const began=performance.now(),offset=job.offset??0
             while((job.offset??0)<job.data.length&&(job.offset??0)-offset<128&&performance.now()-began<200){
               const chunk=job.data.slice(job.offset,(job.offset??0)+8)
-              const fresh=job.live===true&&job.data.length===1&&job.plan?.cutoff===Math.floor(Date.now()/60000)*60000
+              const fresh=job.live===true&&job.data.length===1&&job.plan?.cutoff===Math.floor(Date.now()/60000)*60000&&this.verifiedQuote(symbol,job.plan.cutoff)
               retainEvents(events,this.engine.processCandles(symbol,chunk,{allowExecution:fresh&&this.control.exchangeExecution,eventLimit:5000}))
               job.offset=(job.offset??0)+chunk.length;job.cursor=this.engine.lastProcessedAt(symbol)
             }
@@ -182,8 +186,8 @@ export class TerminalRuntime {
       void quoteRead.then(()=>{quoteReady=true},()=>{quoteReady=true})
       await Promise.resolve()
       while(!quoteReady&&this.control.running){
-        const cold=[...this.warmJobs.values()].some(job=>!job.live)
-        if(!cold)break
+        const pending=[...this.warmJobs.values()].length>0
+        if(!pending)break
         this.consumeHistory(events,true)
         this.prefetchHistory()
         await new Promise<void>(resolve=>setTimeout(resolve,25))

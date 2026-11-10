@@ -226,7 +226,7 @@ export class TradingEngine {
     const cached=this.cachedLane(symbol,config.id,direction,coordination,stage);if(cached)return cached
     const id = laneKey(this.state.settings.connectionId, symbol, config, direction, coordination, stage, this.coordinationIdentity(coordination,stage))
     if (!this.state.lanes[id]) {
-      this.state.lanes[id] = { id, symbol, configId: config.id, direction, coordination, stage, config: { ...config }, samples: [], closedCount: 0, wins: 0, netPnl: 0, grossProfit: 0, grossLoss: 0, lastTimestamp: 0, admissionCount: 0, costTotal:0,admittedClosed:0,admittedProfit:0,admittedLoss:0,admittedNetPnl:0 }
+      this.state.lanes[id] = { id, symbol, configId: config.id, direction, coordination, stage, config: Object.freeze(config), samples: [], closedCount: 0, wins: 0, netPnl: 0, grossProfit: 0, grossLoss: 0, lastTimestamp: 0, admissionCount: 0, costTotal:0,admittedClosed:0,admittedProfit:0,admittedLoss:0,admittedNetPnl:0 }
       this.currentLaneIds.add(id)
     }
     this.cacheLane(this.state.lanes[id])
