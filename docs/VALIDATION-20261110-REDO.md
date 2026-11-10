@@ -1,6 +1,6 @@
 # Repeat simulation — 10 November 2026
 
-These are retrospective paper results, not actual venue execution PF. The same six observed seven-day symbol series, per-symbol commission inputs and frozen training selections were reused. The first 65% supplies parameter selection and stage history. Training positions are discarded at the boundary; the remaining 35% starts fresh positions and retains all subsequent losses. No exchange orders were submitted by these scripts. Repeated study of this period limits its value as future validation.
+These are retrospective paper results, not actual venue execution PF. The same six observed seven-day symbol series, account commission values recorded in each symbol’s frozen fee map and frozen training selections were reused. The first 65% supplies parameter selection and stage history. Training positions are discarded at the boundary; the remaining 35% starts fresh positions and retains all subsequent losses. No exchange orders were submitted by these scripts. Repeated study of this period limits its value as future validation.
 
 | Frozen selection | Stage policy | Main closes / PF | Real closes / PF | Modeled execution closes / PF | Modeled execution actions |
 | --- | --- | --- | --- | --- | --- |
@@ -30,4 +30,14 @@ node --expose-gc --import tsx scripts/benchmark-engine.ts --candles /absolute/ca
 npm run check
 ```
 
-Omit `--variant core` when using the additions-only study. The benchmark replicates one observed series under synthetic symbol IDs solely to measure load; it is not market performance evidence. The evidence package preserves the complete JSON studies and public candle inputs.
+Omit `--variant core` when using the additions-only study. The benchmark replicates one observed series under synthetic symbol IDs solely to measure load; it is not market performance evidence. Exact reproduction requires the frozen study JSON and public candle inputs. The latest full evidence ZIP and SQLite recovery snapshot were not archived before the workspace became unavailable; older backups must not be treated as the current ownership journal.
+
+## Final verification and interruption
+
+All 188 Node regression tests, type checking, production build, authenticated runtime smoke, browser UI, 9 Python contract tests, Docker build and container lifecycle passed for code release `63b6ed37c8baf189365346c5f918d6e3bf62d56b`. [Verified CI](https://github.com/mxssnx-creator/CTS-C/actions/runs/42914172494).
+
+The final six-symbol load fixture retained matching normalized full-state hashes. Processing time fell from 12.6568s to 5.8106s (54.1% lower), while peak process RSS rose from 316.49 MiB to 365.14 MiB (15.4% higher). This fixture includes whole-JSON export and comparison work and does not establish lower memory usage or systemwide optimum performance. The separate paused-journal migration preserved 85,462 lanes, with 1.36 MB metadata and a 60.3ms unchanged save replacing a roughly 153 MB rewrite.
+
+Account-level commission verification populated all 50 selected symbol fee maps from one account request with no failures, no fallbacks and no order submissions. x01 passed a read-only USDT/hedge-mode check; funded x01 execution was not tested.
+
+The last observed x02 runtime status at 22:36:00 UTC on 10 November 2026 was 39/50 symbols warmed, 69,921 candles processed and zero owned exchange lots open. The last detailed execution snapshot at 22:11:38 UTC had zero complete closed strategy lots, so actual execution PF was unavailable. The workspace then disconnected. Later exchange activity, completion of the fifty-symbol check and continuous hosted operation remain unverified. The higher-volume PF target has not been established; losing configurations remain unpromoted.
