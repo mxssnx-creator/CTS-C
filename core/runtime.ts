@@ -35,7 +35,7 @@ export class TerminalRuntime {
     this.control = { ...DEFAULT_CONTROL, ...getStore().get<Control>('control'), warmed: [] }
   }
   private validateLiveIntent(intent:import('./types').ExecutionIntent){
-    if(!this.control.exchangeExecution||!this.engine.activePositionIds().has(intent.positionId))throw new Error('Entry/add signal is no longer active; no exchange order submitted')
+    if(!this.control.exchangeExecution||!this.engine.isLiveIntentEligible(intent.positionId))throw new Error('Entry/add signal is no longer active or its qualification changed; no exchange order submitted')
   }
   private ensureLease() {
     if(this.leaseLost)throw new Error('Execution ownership was lost; restart this process to reload durable state')
@@ -54,7 +54,7 @@ export class TerminalRuntime {
     this.ensureLease();this.bufferedEvents.push(...events)
     if(this.bufferedEvents.length>5000)this.bufferedEvents=this.bufferedEvents.slice(-5000)
     if(!force&&Date.now()-this.checkpointAt<5000&&!this.engine.pendingIntents().length)return
-    getStore().saveEngineJSON(this.engine.serializeState(),this.bufferedEvents);getStore().set('control',this.control)
+    getStore().saveEngineJSON(this.engine.serializeState(),this.bufferedEvents,this.engine.settings);getStore().set('control',this.control)
     this.bufferedEvents=[];this.checkpointAt=Date.now()
   }
   async start() {
@@ -70,11 +70,10 @@ export class TerminalRuntime {
     if(!symbols.length)throw new Error('No tradable VST contracts returned')
     this.ensureLease()
     const settings=this.engine.settings
-    // Never lose ownership/cursors when resuming existing positions.
-    const hasPositions=this.engine.hasOpenPositions()
-    if(!hasPositions)this.engine.updateSettings({...settings,symbols})
+    // Removed symbols remain managed until their owned paper positions close.
+    this.engine.updateSettings({...settings,symbols})
     const fee=await this.client.commission(symbols[0]).catch(()=>null)
-    if(fee&&!hasPositions)this.engine.updateSettings({...this.engine.settings,catalog:{...settings.catalog,makerFeePct:fee.maker*100,takerFeePct:fee.taker*100}})
+    if(fee)this.engine.updateSettings({...this.engine.settings,catalog:{...settings.catalog,makerFeePct:Math.max(0,fee.maker*100),takerFeePct:fee.taker*100}})
     this.control={...this.control,running:true,exchangeExecution:true,lastError:null}
     this.persist()
     this.schedule()
@@ -84,7 +83,7 @@ export class TerminalRuntime {
   resume() { if(this.control.running){try{this.ensureLease();if(demoCredentials())this.schedule();else{this.control.running=false;this.control.lastError='x02 credentials unavailable after restart';this.persist()}}catch(error){this.control.running=false;this.control.lastError=error instanceof Error?error.message:'Runtime ownership unavailable'}} }
   private prefetchHistory() {
     if(!this.control.running)return
-    const needed=this.engine.settings.symbols.filter(symbol=>!this.control.warmed.includes(symbol)&&!this.warmJobs.has(symbol)&&(this.warmRetryAt.get(symbol)??0)<=Date.now())
+    const needed=this.engine.managedSymbols().filter(symbol=>!this.control.warmed.includes(symbol)&&!this.warmJobs.has(symbol)&&(this.warmRetryAt.get(symbol)??0)<=Date.now())
     for(const symbol of needed.slice(0,Math.max(0,3-this.warmJobs.size))){
       const job:{data?:Candle[];error?:string;plan?:HistoryPlan}={};this.warmJobs.set(symbol,job)
       try {
@@ -101,10 +100,11 @@ export class TerminalRuntime {
       this.ensureLease()
       const quotes=await this.client.quotes()
       const now=Date.now(), settings=this.engine.settings, events:EngineEvent[]=[]
+      const managed=new Set(this.engine.managedSymbols())
       let dataGap=false
       this.ensureLease()
       for(const quote of quotes) {
-        if(!this.control.warmed.includes(quote.symbol)||!settings.symbols.includes(quote.symbol))continue
+        if(!this.control.warmed.includes(quote.symbol)||!managed.has(quote.symbol))continue
         if(!Number.isFinite(quote.price)||quote.price<=0||Date.now()-quote.timestamp>15_000||quote.timestamp>Date.now()+5000)continue
         this.marks.set(quote.symbol,{price:quote.price,timestamp:quote.timestamp})
         const bucket=Math.floor(quote.timestamp/60_000)*60_000
@@ -193,19 +193,20 @@ export class TerminalRuntime {
   }
   snapshot() {
     const s=this.engine.snapshot({laneLimit:500,positionLimit:1000,positionStage:'live'}), account=getStore().get<{equity:number;updatedAt:number}>('account')
-    const stages=Object.fromEntries(s.stages.map(stage=>[stage.stage,{sets:stage.lanes,eligible:stage.qualified,enoughSamples:stage.enoughSamples,samplesPercent:stage.lanes?stage.enoughSamplesPct:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState}]))
+    const stages=Object.fromEntries(s.stages.map(stage=>[stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:stage.currentEnoughSamples,samplesPercent:stage.currentLanes?100*stage.currentEnoughSamples/stage.currentLanes:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:stage.currentProfitFactor,windowPfState:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,required:s.settings.stageLastN[stage.stage==='live'?'real':stage.stage]}]))
     const settings:Record<string,string>={...Object.fromEntries(Object.entries(s.settings.catalog).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)])),symbolCount:String(this.control.symbolCount),historyCandles:String(this.control.historyCandles),volumeFactor:String(s.settings.volumeFactor),baseNotional:String(s.settings.baseNotional),prevPosWindow:String(s.settings.stageLastN.base),prevPosMinCount:String(s.settings.stageLastN.base),mainEvalPosCount:String(s.settings.stageLastN.main),realEvalPosCount:String(s.settings.stageLastN.real),baseProfitFactor:String(s.settings.stageMinPF.base),mainProfitFactor:String(s.settings.stageMinPF.main),realProfitFactor:String(s.settings.stageMinPF.real),liveProfitFactor:String(s.settings.stageMinPF.real),variantBlockEnabled:String(s.settings.coordinations.block.enabled),variantDcaEnabled:String(s.settings.coordinations.dca.enabled),axisPrevEnabled:String(s.settings.coordinations.axis.enabled),axisLastEnabled:String(s.settings.coordinations.axis.enabled),axisContEnabled:String(s.settings.coordinations.axis.enabled),axisPauseEnabled:'false',variantTrailingEnabled:'true',variantPauseEnabled:'false',blockVolumeRatio:String(s.settings.coordinations.block.ratio),axisPrevious:String(s.settings.coordinations.axis.previous),axisLast:String(s.settings.coordinations.axis.last),axisOutcome:s.settings.coordinations.axis.outcome,blockSteps:String(s.settings.coordinations.block.steps),blockMode:s.settings.coordinations.block.mode,dcaSteps:String(s.settings.coordinations.dca.steps),dcaDistancePct:String(s.settings.coordinations.dca.distancePct),dcaMultiplier:String(s.settings.coordinations.dca.multiplier)}
     const positions=s.positions.filter(p=>p.stage==='live')
-    const trades=s.trades.filter(t=>t.stage==='live')
+    const trades=s.liveTrades, live=s.stages.find(stage=>stage.stage==='live')!
+    const warmedCount=this.control.warmed.filter(symbol=>s.settings.symbols.includes(symbol)).length
     const unrealized=(p:typeof positions[number])=>{const mark=this.marks.get(p.symbol);return mark&&Date.now()-mark.timestamp<=15_000?(mark.price-p.entryPrice)*p.quantity*(p.direction==='long'?1:-1):null}
     return {updatedAt:Date.now(),equity:account&&Date.now()-account.updatedAt<60_000?account.equity:null,paperEquity:s.equity,
-      realizedPnl:trades.reduce((sum,t)=>sum+t.netPnl,0),fees:trades.reduce((sum,t)=>sum+t.cost,0),
+      realizedPnl:live.netPnl,fees:live.fees,paperTotals:{closed:live.closed,wins:live.wins,winRate:live.closed?100*live.wins/live.closed:null,longOpen:live.longOpen,shortOpen:live.shortOpen,retainedCloses:trades.length},
       openPositions:positions.map(p=>({id:p.id,connectionId:s.settings.connectionId,symbol:p.symbol,direction:p.direction,entryPrice:p.entryPrice,quantity:p.quantity,status:'paper-open',unrealizedPnl:unrealized(p),realizedPnl:0,fee:null,createdAt:p.openedAt,closedAt:null,source:'paper'})),
       closedPositions:trades.map(p=>({id:p.id,connectionId:s.settings.connectionId,symbol:p.symbol,direction:p.direction,entryPrice:p.entryPrice,quantity:p.quantity,status:'paper-closed',unrealizedPnl:0,realizedPnl:p.netPnl,fee:p.cost,createdAt:p.openedAt,closedAt:p.closedAt,source:'paper'})),
       stages,settings,connections:[{id:'bingx-x02',name:'X02',exchange:'bingx',demo:true,configured:Boolean(demoCredentials()),enabled:this.control.running,liveEnabled:this.control.exchangeExecution}],
       events:getStore().events().map(e=>({timestamp:new Date(Number(e.timestamp)||Date.now()).toISOString(),level:e.status==='rejected'?'error':'info',phase:String(e.stage||'engine'),message:`${e.type}${e.status?' '+e.status:''}: ${e.reason||String(e.laneId||'').slice(0,240)}`,connectionId:'bingx-x02'})),
-      readiness:{x02Configured:Boolean(demoCredentials()),status:this.control.lastError||(this.control.running?this.control.warmed.length>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${this.control.warmed.length}/${s.symbolCount}`:demoCredentials()?'Configured; ready to verify VST':'Dedicated x02 credentials required'),engineStatus:this.control.running?'running':'stopped',warmedSymbols:this.control.warmed.length,lastTick:this.control.lastTick},
-      positionCount:s.stages.find(stage=>stage.stage==='live')?.open??0,positionDisplayLimit:1000,metricScope:'Lane counts are paper forward evaluations. PnL/fees cover Live-stage trades within the latest 1,000 closes across all stages; they are estimates including slippage. Account equity is separately read from BingX VST. No simulated value is presented as exchange equity.',
+      readiness:{x02Configured:Boolean(demoCredentials()),status:this.control.lastError||(this.control.running?warmedCount>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${warmedCount}/${s.symbolCount}`:demoCredentials()?'Configured; ready to verify VST':'Dedicated x02 credentials required'),engineStatus:this.control.running?'running':'stopped',warmedSymbols:warmedCount,lastTick:this.control.lastTick},
+      positionCount:live.open,positionDisplayLimit:1000,metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
       engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory},
       execution:{lots:this.executor.lots(),intents:getStore().intents(100),summary:this.executor.summary()},lastReplay:getStore().get('lastReplay')}
   }

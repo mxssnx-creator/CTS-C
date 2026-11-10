@@ -1,5 +1,7 @@
 import type { PseudoPosition, SignalState } from "./types"
 import { calculatePriceMovePct, POSITION_COST_PCT_DEFAULT } from "./metrics"
+import { observedExit } from "./exits"
+import { INDICATIONS } from "./indications"
 
 export interface ReplayStrategyConfig {
   type: string
@@ -13,6 +15,7 @@ export interface ReplayStrategyConfig {
   /** Percentage points, e.g. 0.176 = 0.176%. Already includes both execution legs. */
   roundTripCostPct?: number
   maxHoldMinutes?: number
+  catalogVersion?: number
 }
 
 export interface ReplayPosition extends PseudoPosition {
@@ -20,7 +23,7 @@ export interface ReplayPosition extends PseudoPosition {
 }
 
 type Direction = "long" | "short"
-const TACTICS = new Set(["MA_Cross", "RSI_Band", "MACD_Signal", "Bollinger_Bounce"])
+const TACTICS = new Set<string>(INDICATIONS)
 
 function timestampMs(value: unknown): number {
   if (typeof value === "number") return value
@@ -38,6 +41,7 @@ const mean = (values: number[]) => values.length ? values.reduce((a, b) => a + b
 /** Serializable, causal indicator accumulator shared by batch replay and the live engine. */
 export function advanceSignal(state: SignalState, price: number, type: string, step: number): Direction | undefined {
   const priorMean = mean(state.prices), priorReady = state.prices.length >= step * 2
+  const priorFast=state.emaFast, priorSlow=state.emaSlow
   const priorWidth = 2 * Math.sqrt(mean(state.prices.map(value => (value - priorMean) ** 2)))
   state.prices.push(price)
   if (state.prices.length > step * 2) state.prices.shift()
@@ -57,12 +61,24 @@ export function advanceSignal(state: SignalState, price: number, type: string, s
   }
   let signal: Direction | undefined
   if (ready && state.previousPrice !== undefined) {
-    if (type === "MA_Cross" && state.previousSmaDiff !== undefined) { if (state.previousSmaDiff <= 0 && diff > 0) signal = "long"; if (state.previousSmaDiff >= 0 && diff < 0) signal = "short" }
+    if ((type === "MA_Cross"||type==="MA_Inverse") && state.previousSmaDiff !== undefined) { if (state.previousSmaDiff <= 0 && diff > 0) signal = type==="MA_Inverse"?"short":"long"; if (state.previousSmaDiff >= 0 && diff < 0) signal = type==="MA_Inverse"?"long":"short" }
     else if (type === "MACD_Signal" && state.previousHistogram !== undefined) { if (state.previousHistogram <= 0 && histogram > 0) signal = "long"; if (state.previousHistogram >= 0 && histogram < 0) signal = "short" }
     else if (type === "RSI_Band" && rsi !== undefined && state.previousRsi !== undefined) { if (state.previousRsi <= 30 && rsi > 30) signal = "long"; if (state.previousRsi >= 70 && rsi < 70) signal = "short" }
     else if (type === "Bollinger_Bounce" && priorReady) {
       if (price >= priorMean - priorWidth && price <= priorMean + priorWidth) { if (state.bandExcursion === "below") signal = "long"; if (state.bandExcursion === "above") signal = "short"; state.bandExcursion = undefined }
       else state.bandExcursion = price < priorMean - priorWidth ? "below" : "above"
+    }
+    else if(type==="Trend_Pullback"){
+      if(state.emaFast>state.emaSlow&&state.emaSlow>priorSlow&&state.previousPrice<=priorFast&&price>state.emaFast)signal="long"
+      if(state.emaFast<state.emaSlow&&state.emaSlow<priorSlow&&state.previousPrice>=priorFast&&price<state.emaFast)signal="short"
+    }
+    else if(type==="RSI_Momentum"&&rsi!==undefined&&state.previousRsi!==undefined){
+      if(state.previousRsi<=50&&rsi>50&&state.emaFast>state.emaSlow)signal="long"
+      if(state.previousRsi>=50&&rsi<50&&state.emaFast<state.emaSlow)signal="short"
+    }
+    else if(type==="Bollinger_Breakout"&&priorReady&&priorWidth>0){
+      if(state.previousPrice<=priorMean+priorWidth&&price>priorMean+priorWidth&&state.emaFast>state.emaSlow)signal="long"
+      if(state.previousPrice>=priorMean-priorWidth&&price<priorMean-priorWidth&&state.emaFast<state.emaSlow)signal="short"
     }
   }
   state.count++; state.previousPrice = price; state.previousSmaDiff = ready ? diff : undefined; state.previousHistogram = ready ? histogram : undefined; state.previousRsi = rsi
@@ -108,6 +124,7 @@ export function replayStrategy(
   candles: any[],
   config: ReplayStrategyConfig,
   maxPositions = 250,
+  prehistory: any[] = [],
 ): PseudoPosition[] {
   if (!TACTICS.has(config.type)) throw new Error(`Unsupported replay tactic: ${config.type}`)
   const step = config.position_cost_step
@@ -124,10 +141,12 @@ export function replayStrategy(
   if (!["fixed", "trailing", "trailing-only"].includes(mode)) throw new Error("Invalid exit mode")
   const nextSignal = createSignalEvaluator(config.type, step)
   let previousTime = -Infinity
-  let position: ReplayPosition | undefined
-  let entryTime = 0
-  let favorablePrice = 0
-  let trailingActive = false
+  for(const row of prehistory){
+    const price=Number(row?.close??row?.price), time=timestampMs(row?.timestamp??row?.time)
+    if(!Number.isFinite(price)||price<=0||!Number.isFinite(time)||time<=0||time<=previousTime)throw new Error("Invalid replay prehistory")
+    previousTime=time;nextSignal(price)
+  }
+  const positions = new Map<Direction,{position:ReplayPosition;entryTime:number;peak:number}>()
   const closed: ReplayPosition[] = []
   let closedCount = 0
 
@@ -140,44 +159,36 @@ export function replayStrategy(
     previousTime = time
     const signal = nextSignal(price)
 
-    if (position) {
-      const isLong = position.direction === "long"
+    const justClosed=new Set<Direction>()
+    for (const [direction,open] of positions) {
+      const {position,entryTime}=open
       const grossFraction = calculatePriceMovePct(position.entry_price, price, position.direction ?? "long") / 100
-      if (isLong) favorablePrice = Math.max(favorablePrice, price)
-      else favorablePrice = Math.min(favorablePrice, price)
-      if (mode !== "fixed" && (mode === "trailing-only" || grossFraction >= config.takeprofit)) trailingActive = true
-      if (trailingActive) {
-        const proposed = favorablePrice * (isLong ? 1 - config.stoploss : 1 + config.stoploss)
-        position.stop_loss = isLong ? Math.max(position.stop_loss, proposed) : Math.min(position.stop_loss, proposed)
-      }
-      const hitStop = isLong ? price <= position.stop_loss : price >= position.stop_loss
-      const hitTp = mode === "fixed" && grossFraction >= config.takeprofit
-      const timedOut = !!config.maxHoldMinutes && time - entryTime >= config.maxHoldMinutes * 60_000
-      if (hitStop || hitTp || timedOut) {
+      const exit=observedExit({direction,entryPrice:position.entry_price,peak:open.peak,price,takeProfitPct:config.takeprofit*100,stopLossPct:config.stoploss*100,exitMode:mode,openedAt:entryTime,timestamp:time,maxHoldMinutes:config.maxHoldMinutes??0,trailingBasis:config.catalogVersion!==undefined&&config.catalogVersion<3?"entry":"peak"})
+      open.peak=exit.peak;position.stop_loss=exit.stop
+      if (exit.reason) {
         position.status = "closed"
         position.exit_time = new Date(time).toISOString()
         position.exit_price = price
         position.result = grossFraction * 100 - cost
-        position.exit_reason = hitStop ? (trailingActive ? "trailing_stop" : "stop_loss") : hitTp ? "take_profit" : "max_hold"
+        position.exit_reason = exit.reason
         closed[closedCount % maxPositions] = position
         closedCount++
-        position = undefined
+        positions.delete(direction);justClosed.add(direction)
       }
-    } else if (signal) {
+    }
+    if (signal&&!positions.has(signal)&&!justClosed.has(signal)) {
       const isLong = signal === "long"
-      position = {
+      const position:ReplayPosition = {
         entry_time: new Date(time).toISOString(), symbol, entry_price: price,
         take_profit: price * (isLong ? 1 + config.takeprofit : 1 - config.takeprofit),
         stop_loss: price * (isLong ? 1 - config.stoploss : 1 + config.stoploss),
         status: "open", direction: signal, indication_type: config.type,
       }
-      entryTime = time
-      favorablePrice = price
-      trailingActive = mode === "trailing-only"
+      positions.set(signal,{position,entryTime:time,peak:price})
     }
 
   }
   const offset = closedCount >= maxPositions ? closedCount % maxPositions : 0
   const chronological = [...closed.slice(offset), ...closed.slice(0, offset)]
-  return position ? [...chronological, position].slice(-maxPositions) : chronological
+  return [...chronological,...[...positions.values()].map(x=>x.position)].slice(-maxPositions)
 }

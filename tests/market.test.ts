@@ -1,10 +1,26 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { marketSymbol, marketVenue, normalizeCandles, getMarketQuotes } from "../core/market"
+import { marketSymbol, marketVenue, normalizeCandles, getMarketQuotes,getResearchCandles } from "../core/market"
 test("market identifiers reject paths and unsupported venues", () => {
   assert.equal(marketSymbol("BTC/USDT"), "BTC-USDT")
   assert.throws(() => marketSymbol("../../admin"))
   assert.throws(() => marketVenue("https://localhost"))
+})
+test("research pages completed bars and refuses gaps instead of silently shortening a series",async()=>{
+  const previous=globalThis.fetch,cutoff=1800000000000
+  const data=Array.from({length:1301},(_,i)=>({time:cutoff-(1300-i)*60000,open:100,high:101,low:99,close:100,volume:1}))
+  let calls=0
+  globalThis.fetch=async(input)=>{
+    calls++;const url=new URL(String(input)),end=Number(url.searchParams.get('endTime')),limit=Number(url.searchParams.get('limit'))
+    assert.ok(end<cutoff)
+    return Response.json({code:0,data:data.filter(c=>c.time<=end).slice(-Math.min(limit,1000)).reverse()})
+  }
+  try{
+    const candles=await getResearchCandles('bingx','PAGE-USDT','1m',true,1200,cutoff)
+    assert.equal(candles.length,1200);assert.equal(candles.at(-1)!.time*1000+60000,cutoff);assert.equal(calls,2)
+    globalThis.fetch=async()=>Response.json({code:0,data:data.filter((_,i)=>i!==1250).slice(-201,-1)})
+    await assert.rejects(()=>getResearchCandles('bingx','GAP-USDT','1m',true,200,cutoff),/missing candles/)
+  }finally{globalThis.fetch=previous}
 })
 test("candles preserve OHLC and are unique chronological seconds", () => {
   const candles = normalizeCandles([

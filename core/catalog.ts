@@ -1,9 +1,10 @@
 import type { StrategyConfig } from "./types"
 import { createHash } from "node:crypto"
 import { resolveTradingCostPct } from "./metrics"
+import { CORE_INDICATIONS, INDICATIONS } from "./indications"
 
 export const STRATEGY_RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide"] as const
-export const STRATEGY_TYPES = ["MA_Cross", "RSI_Band", "MACD_Signal", "Bollinger_Bounce"] as const
+export const STRATEGY_TYPES = INDICATIONS
 export const EXIT_MODES = ["fixed", "trailing", "trailing-only"] as const
 export type StrategyRange = typeof STRATEGY_RANGES[number]
 export type ExitMode = typeof EXIT_MODES[number]
@@ -20,15 +21,15 @@ function values(settings: Record<string, unknown>, name: string, defaults: reado
   if (!Array.isArray(parsed)) throw new Error(`${name} must be an array`)
   return [...new Set(parsed)]
 }
-function selected<T extends string>(settings: Record<string, unknown>, name: string, allowed: readonly T[]): T[] {
-  const parsed = values(settings, name, allowed)
+function selected<T extends string>(settings: Record<string, unknown>, name: string, allowed: readonly T[], defaults: readonly T[] = allowed): T[] {
+  const parsed = values(settings, name, defaults)
   if (parsed.some(value => !allowed.includes(value as T))) throw new Error(`Unsupported ${name}`)
   return parsed as T[]
 }
 /** Complete, deterministic Cartesian catalog. No head truncation can silently omit a tactic or range. */
 export function generateStrategyCatalog(connectionId: string, settings: Record<string, unknown> = {}, now = new Date().toISOString()): StrategyConfig[] {
   const ranges = selected(settings, "strategyEnabledRanges", STRATEGY_RANGES)
-  const types = selected(settings, "strategyIndicationTypes", STRATEGY_TYPES)
+  const types = selected(settings, "strategyIndicationTypes", STRATEGY_TYPES, CORE_INDICATIONS)
   const modes = selected(settings, "strategyExitModes", EXIT_MODES)
   const steps = [...new Set(values(settings, "strategyTpSteps", Array.from({length: 28}, (_, i) => i + 3)).map(Number))]
   if (steps.some(step => !Number.isInteger(step) || step < 3 || step > 30)) throw new Error("strategyTpSteps must contain integers 3..30")
@@ -48,9 +49,9 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
       const stoploss = takeprofit * ratio
       const lookback = type === "RSI_Band" ? 14 : 20
       const maxHoldMinutes = holdMinutes[STRATEGY_RANGES.indexOf(range)]
-      const economics = createHash("sha256").update(JSON.stringify([type, takeprofit, stoploss, cost, maxHoldMinutes, lookback, exitMode])).digest("hex").slice(0, 20)
-      const id = `v2_${type}_${range}_tp${step}_sl${Math.round(ratio * 5)}_${exitMode}_${economics}`
-      configs.push({ id, connectionId, createdAt: now, enabled: true, catalogVersion: 2,
+      const economics = createHash("sha256").update(JSON.stringify([type, takeprofit, stoploss, cost, maxHoldMinutes, lookback, exitMode, "peak-trailing-v1"])).digest("hex").slice(0, 20)
+      const id = `v3_${type}_${range}_tp${step}_sl${Math.round(ratio * 5)}_${exitMode}_${economics}`
+      configs.push({ id, connectionId, createdAt: now, enabled: true, catalogVersion: 3,
         type, range, tpStep: step, slRatio: ratio, exitMode,
         // Indicator lookback is separate from the cost-distance step.
         position_cost_step: lookback,

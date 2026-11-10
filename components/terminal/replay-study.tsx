@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Download, FlaskConical, Play } from "lucide-react"
 import { formatProfitFactor, profitFactorRank, type ProfitFactorState } from "./profit-factor"
 
@@ -15,6 +15,9 @@ export function ReplayStudy() {
   const [interval, setInterval] = useState("5m")
   const [exchange, setExchange] = useState<"bingx" | "bybit">("bingx")
   const [demo, setDemo] = useState(true)
+  const [candleCount,setCandleCount]=useState(1440)
+  const requestController=useRef<AbortController|null>(null)
+  useEffect(()=>()=>requestController.current?.abort(),[])
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ReplayResult | null>(null)
@@ -34,14 +37,16 @@ export function ReplayStudy() {
     const normalized = symbol.trim().toUpperCase()
     if (!/^[A-Z0-9]{2,20}-USDT$/.test(normalized)) { setError("Use a symbol such as BTC-USDT."); return }
     setRunning(true); setError(null)
+    const abort=new AbortController();requestController.current=abort
+    const timeout=setTimeout(()=>abort.abort(),120_000)
     try {
-      const response = await fetch("/api/terminal/replay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: normalized, interval, exchange, demo }) })
+      const response = await fetch("/api/terminal/replay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: normalized, interval, exchange, demo,candles:candleCount }),signal:abort.signal })
       const body = await response.json()
       if (!response.ok || body.success !== true || !Array.isArray(body.rows)) throw new Error(body.error || "Replay did not return a valid result.")
       setResult(body as ReplayResult); setRunIdentity(`${normalized} · ${interval} · ${exchange}${demo ? " demo" : " public"}`)
       setRange("all"); setTactic("all"); setQualifiedOnly(false); setPage(0)
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Replay request failed.") }
-    finally { setRunning(false) }
+    finally { clearTimeout(timeout);setRunning(false) }
   }
   const download = () => {
     if (!result) return
@@ -59,6 +64,7 @@ export function ReplayStudy() {
         <fieldset disabled={running} className="flex min-w-0 flex-wrap items-end gap-3">
           <label className="space-y-2 text-xs"><span className="terminal-muted block">Symbol</span><input className="terminal-input w-36" value={symbol} onChange={event => setSymbol(event.target.value)} required placeholder="BTC-USDT" /></label>
           <label className="space-y-2 text-xs"><span className="terminal-muted block">Candle interval</span><select className="terminal-input" value={interval} onChange={event => setInterval(event.target.value)}>{["1m", "5m", "15m", "1h"].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label className="space-y-2 text-xs"><span className="terminal-muted block">Completed candles</span><select className="terminal-input" value={candleCount} onChange={event=>setCandleCount(Number(event.target.value))}>{[500,1000,1440,3000,5000].map(value=><option key={value} value={value}>{value.toLocaleString()}</option>)}</select></label>
           <label className="space-y-2 text-xs"><span className="terminal-muted block">Market source</span><select className="terminal-input" value={exchange} onChange={event => { const value = event.target.value as "bingx" | "bybit"; setExchange(value); if (value === "bybit") setDemo(false) }}><option value="bingx">BingX</option><option value="bybit">Bybit</option></select></label>
           <label className="flex h-10 items-center gap-2 text-xs terminal-muted"><input type="checkbox" className="accent-cyan-400" checked={demo} disabled={exchange !== "bingx"} onChange={event => setDemo(event.target.checked)} />VST demo market feed</label>
           <button type="submit" className="terminal-button border-violet-400/40 bg-violet-400/10 text-[var(--terminal-accent)]" disabled={running}><Play className="mr-2 inline h-4 w-4" />{running ? "Running replay…" : "Run replay"}</button>

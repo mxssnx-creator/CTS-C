@@ -81,12 +81,12 @@ test("runtime write callbacks recheck paused and closed paper positions for entr
   await isolated(async (runtime) => {
     const internal = runtime as any
     const validate = internal.executor.options.validateIntent as (intent: ExecutionIntent) => void
-    runtime.engine.activePositionIds = () => new Set(["position-a"])
+    runtime.engine.isLiveIntentEligible = id => id==='position-a'
     for (const kind of ["entry", "add"] as const) assert.doesNotThrow(() => validate(intent(kind)))
     runtime.pause()
     for (const kind of ["entry", "add"] as const) assert.throws(() => validate(intent(kind)), /no longer active/)
     runtime.control.exchangeExecution = true
-    runtime.engine.activePositionIds = () => new Set()
+    runtime.engine.isLiveIntentEligible = () => false
     for (const kind of ["entry", "add"] as const) assert.throws(() => validate(intent(kind)), /no longer active/)
   })
 })
