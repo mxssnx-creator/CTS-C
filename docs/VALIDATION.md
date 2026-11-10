@@ -2,6 +2,33 @@
 
 Validation date: **10 November 2026**. This record concerns the fresh, independent CTS-C application in this repository. It distinguishes synthetic tests, local installed-library checks, an actual built server, and exchange observations. Passing tests do not establish trading performance.
 
+## Engine and terminal consistency release
+
+The updated application passed **144 Node tests**, type checking, the production build, and standalone lifecycle checks. CI also passed its actual Chromium browser test: six views, saved settings, unsaved-draft preservation during polling, rejected credential import, JSON download, the replay UI→API→fixture-market→results path, mobile width, session persistence and logout, with zero page errors. The browser test uses explicitly isolated synthetic data and an exchange transport that forbids writes. Local Chromium launch was blocked by the authoring workspace's socket restriction; browser execution evidence comes from CI.
+
+A separate built-server test fetched actual BingX VST quotes and 200 chart candles and completed a 252-configuration research replay. It used public reads, blank execution credentials and submitted zero orders. The test is separate from browser fixture evidence and from the previously documented x02 order diagnostics.
+
+Correctness changes include common replay/engine exits, independent replay directions, fresh holdout positions with retained indicator prehistory, complete outcome counting beyond the former 250-trade cap, full ancestor qualification and a new-risk pre-submit recheck. Catalog version 3 gives the corrected peak-based trailing model a new identity. Historical cohorts and old position exits remain attributable. Current-cohort metrics are separate from lifetime evidence, Live-paper closes have a dedicated display history, and missing legacy fee totals remain unavailable. Removed symbols keep exit monitoring, while startup can update the active universe and fee terms without waiting for every research position to close.
+
+### Frozen observed-market studies
+
+Six symbols—BTC, ETH, SOL, XRP, BCH and DOGE USDT perpetuals—were fetched from VST at the fixed cutoff **2026-11-10 17:00 UTC**. Each dataset was checked for completed, continuous candles and hashed. All candidate sets and gates were declared in the script. The first 65% ranked candidates; up to three training-qualified configurations per range were frozen before evaluating the final 35%. Training qualification required 20 closes and PF 1.1. All selected holdout losses were retained. The script did not alter runtime settings or instantiate an exchange writer.
+
+The first 5,000-bar test with fallback costs produced held-out PF 0.7446 for both catalogs. Repeating it with per-symbol account commission reads (maker 0.02%, taker 0.05%) and modeled slippage of 10% of fees produced PF 0.5790 for the core catalog and 0.5924 for the expanded catalog. Those are unsuccessful selected-candidate results, not discarded attempts.
+
+The longer study used **10,080 bars per symbol: 60,480 observed bars**, comprising 39,312 training and 21,168 held-out bars. The four-core-indication catalog's training-frozen candidates had direct holdout PF **0.7160** across 1,090 closes; the expanded catalog had **0.7059** across 1,205 closes. Optional indications therefore did not justify replacing the balanced defaults.
+
+The same selected configurations also ran through the actual engine with Axis, Block and DCA enabled, unchanged 20/8/8 gates and PF 1.1. Training initialized each lane's own evidence, simulated training positions were removed at the boundary, and holdout positions began fresh. The following are held-out **paper** closes, grouped by the engine stage:
+
+| Catalog | Base closes / PF | Main closes / PF | Real closes / PF | Live-paper closes / PF |
+|---|---|---|---|---|
+| Core | 3,491 / 0.7416 | 342 / 1.5202 | 111 / 2.3997 | 11 / 15.3127 |
+| Expanded | 3,873 / 0.7485 | 368 / 1.4493 | 111 / 2.3997 | 11 / 15.3127 |
+
+For the core selected-candidate engines, the end-of-replay shares of current lanes with sufficient own samples were 68.62% Base, 80.53% Main, 71.67% Real and 2.86% Live. The 11 Live-paper closes are a small, correlated sample; the large PF does not establish stable execution profitability. These results verify observed-data progression and selective forward outcomes, while broader strategy performance remains negative. They do not establish an exchange-traded portfolio return, funding-adjusted account NAV, or sustained live operation.
+
+Reproduce the frozen study with `node --env-file=.env.local --import tsx scripts/profitability-study.ts --account-fees --bars 10080 --data /private/observed-candles --output /private/study.json`; use the documented proxy flag if required. It records the source hashes, fee snapshot, unsuccessful outcomes and per-stage/coordination aggregates. Account fee reads can change over time; retain the output's fee values when reproducing economics. Methodology references: [Freqtrade lookahead analysis](https://www.freqtrade.io/en/stable/lookahead-analysis/) and [Bailey et al., The Probability of Backtest Overfitting](https://www.davidhbailey.com/dhbpapers/backtest-prob.pdf). No overfitting probability estimate is claimed for these studies.
+
 ## Follow-up: recovery and shared-account isolation
 
 The follow-up release check passed 136 Node tests, type checking, the production build, and standalone lifecycle smoke; all nine Python contract tests passed. The added checks cover chronological multi-chunk recovery, missing/stale candle rejection, live quote-gap recovery, malformed inventory responses, and isolation from unrelated same-side positions and orders. A fresh x02 read-only preflight saw zero positions and open orders. An isolated, minimum-size XRP-USDT diagnostic then completed long and short entry, add, native-protection resize, exact close, and fee reconciliation; final inventory matched the initial inventory with no residual positions or orders. The diagnostic bypassed strategy qualification and is not a strategy return.
