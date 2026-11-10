@@ -2,10 +2,27 @@ import type { Candle as VenueCandle } from './bingx'
 import type { Candle } from './types'
 
 interface HistorySource { candles(symbol:string,interval:string,limit:number,endTime?:number):Promise<VenueCandle[]> }
-/** Restored indicators already own their prefix; fetch only the missing tail. */
-export function resumeHistoryCount(configuredCount:number,lastClosedAt:number|null,now=Date.now()):number {
-  if(lastClosedAt===null)return configuredCount
-  return Math.min(configuredCount,Math.max(100,Math.ceil((now-lastClosedAt)/60_000)+1))
+const MINUTE = 60_000
+export interface HistoryPlan { count:number; cutoff:number; cursor:number|null }
+/** Fetch the oldest missing chunk first, even when the interruption exceeds the configured history size. */
+export function planHistory(configuredCount:number,cursor:number|null,now=Date.now()):HistoryPlan {
+  if(!Number.isInteger(configuredCount)||configuredCount<100||configuredCount>1440)throw new Error('History count must be 100..1440')
+  const latest=Math.floor(now/MINUTE)*MINUTE
+  if(cursor===null)return {count:configuredCount,cutoff:latest,cursor}
+  if(!Number.isSafeInteger(cursor)||cursor<=0||cursor%MINUTE!==0||cursor>latest)throw new Error('Invalid or future history cursor')
+  const cutoff=Math.min(latest,cursor+configuredCount*MINUTE)
+  return {count:Math.min(configuredCount,Math.max(100,Math.ceil((cutoff-cursor)/MINUTE)+1)),cutoff,cursor}
+}
+/** Reject gaps before mutating the indicator, stage or position ledger. */
+export function validateHistory(symbol:string,candles:Candle[],plan:HistoryPlan):void {
+  const unseen=plan.cursor===null?candles:candles.filter(c=>c.timestamp>plan.cursor!)
+  if(plan.cursor===plan.cutoff&&unseen.length===0)return
+  if(!unseen.length||unseen.at(-1)!.timestamp!==plan.cutoff)throw new Error(`Incomplete observed history for ${symbol}`)
+  let previous=plan.cursor??unseen[0].timestamp-MINUTE
+  for(const candle of unseen){
+    if(candle.timestamp!==previous+MINUTE)throw new Error(`Missing observed history for ${symbol}`)
+    previous=candle.timestamp
+  }
 }
 /** Backfill observed closed minutes; BingX VST may cap a page at 1,000. */
 export async function closedHistory(source:HistorySource,symbol:string,count:number,cutoff=Date.now()):Promise<Candle[]> {

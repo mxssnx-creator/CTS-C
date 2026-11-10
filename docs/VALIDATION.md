@@ -2,6 +2,20 @@
 
 Validation date: **10 November 2026**. This record concerns the fresh, independent CTS-C application in this repository. It distinguishes synthetic tests, local installed-library checks, an actual built server, and exchange observations. Passing tests do not establish trading performance.
 
+## Follow-up: recovery and shared-account isolation
+
+The follow-up release check passed 136 Node tests, type checking, the production build, and standalone lifecycle smoke; all nine Python contract tests passed. The added checks cover chronological multi-chunk recovery, missing/stale candle rejection, live quote-gap recovery, malformed inventory responses, and isolation from unrelated same-side positions and orders. A fresh x02 read-only preflight saw zero positions and open orders. An isolated, minimum-size XRP-USDT diagnostic then completed long and short entry, add, native-protection resize, exact close, and fee reconciliation; final inventory matched the initial inventory with no residual positions or orders. The diagnostic bypassed strategy qualification and is not a strategy return.
+
+The saved 100-symbol checkpoint was replayed through observed VST candles with execution disabled. The first fixed-cutoff pass completed all 100 symbols and 9,811 missing bars without creating a pending execution intent or submitting any order. Across the entire saved plus replayed paper history, Base PF was 0.5942, Main 0.6126, and Real 0.7269; the eight Live-paper closes had no losses and are too few to establish a reliable result. At that cutoff, the shares of lanes with enough samples were 28.55% Base, 5.29% Main, 6.67% Real, and 0% Live. These are modeled, cost-adjusted paper results, not exchange performance.
+
+Repeating the same cutoff produced identical per-symbol counts and stage aggregates. The newly replayed period alone produced Base PF 0.9876 across 153,420 closes, Main PF 0.7850 across 3,933 closes, and Real PF 1.5038 across 95 closes. Its six Live-paper closes had no losses. These overlapping configuration lanes are correlated and cannot be treated as independent portfolio trades or evidence of sustained profitability.
+
+To repeat a fixed-cutoff catch-up from a private, consistent SQLite checkpoint, use `node --import tsx scripts/observed-catchup.ts --db /private/cts-c.sqlite --end 2026-11-10T17:26:00Z --output /private/catchup.json`. Add Node's `--use-env-proxy` when the environment requires proxy routing. The script opens the checkpoint read-only, uses only public VST market reads, creates no executor, and writes an aggregate report separately; keep the checkpoint and report private.
+
+The inventory check cannot lock the exchange account against a separate process. Since hedge-side positions are aggregated, an external actor changing the same side between a read and write remains an unresolved concurrency risk. This test does not establish isolated multi-process trading on a shared side or sustained 24/7 operation.
+
+A separate minimum-size executor trigger test recorded its own entry filled, its native stop filled with an exact parent-child link, and its sibling take-profit canceled. Its journal reported the owned lot closed and fees reconciled; a subsequent read-only account check showed zero positions and open orders. The diagnostic nevertheless exited unsuccessfully because the whole-account inventory differed from its starting snapshot. The aggregate comparison cannot establish the cause; no claim is made that the whole-account baseline was preserved in that run.
+
 ## Application evidence
 
 | Check | Evidence and scope |

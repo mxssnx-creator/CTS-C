@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings } from './engine'
 import { BingxVstClient, demoCredentials, stableClientOrderId } from './bingx'
 import { planExecutionIntents } from './runtime-policy'
-import { closedHistory, resumeHistoryCount } from './history'
+import { closedHistory, planHistory, validateHistory, type HistoryPlan } from './history'
 import { DemoExecutor } from './executor'
 import { getStore } from './store'
 import type { Candle, EngineSettings, EngineEvent } from './types'
@@ -24,7 +24,7 @@ export class TerminalRuntime {
   private sequence: Promise<unknown> = Promise.resolve()
   private executionTask?:Promise<void>
   private bars = new Map<string,Bar>()
-  private warmJobs=new Map<string,{data?:Candle[];error?:string}>()
+  private warmJobs=new Map<string,{data?:Candle[];error?:string;plan?:HistoryPlan}>()
   private warmRetryAt=new Map<string,number>()
   private marks = new Map<string,{price:number;timestamp:number}>()
   private client = new BingxVstClient()
@@ -86,9 +86,12 @@ export class TerminalRuntime {
     if(!this.control.running)return
     const needed=this.engine.settings.symbols.filter(symbol=>!this.control.warmed.includes(symbol)&&!this.warmJobs.has(symbol)&&(this.warmRetryAt.get(symbol)??0)<=Date.now())
     for(const symbol of needed.slice(0,Math.max(0,3-this.warmJobs.size))){
-      const job:{data?:Candle[];error?:string}={};this.warmJobs.set(symbol,job)
-      const count=resumeHistoryCount(this.control.historyCandles,this.engine.lastProcessedAt(symbol))
-      void closedHistory(this.client,symbol,count).then(data=>{job.data=data}).catch(error=>{job.error=error instanceof Error?error.message:'History unavailable'})
+      const job:{data?:Candle[];error?:string;plan?:HistoryPlan}={};this.warmJobs.set(symbol,job)
+      try {
+        const plan=job.plan=planHistory(this.control.historyCandles,this.engine.lastProcessedAt(symbol))
+        if(plan.cursor===plan.cutoff)job.data=[]
+        else void closedHistory(this.client,symbol,plan.count,plan.cutoff).then(data=>{job.data=data}).catch(error=>{job.error=error instanceof Error?error.message:'History unavailable'})
+      } catch(error){job.error=error instanceof Error?error.message:'History unavailable'}
     }
   }
   private schedule() { if(this.timer||!this.control.running)return; this.timer=setTimeout(()=>{this.timer=undefined;void this.serial(()=>this.tick()).finally(()=>this.schedule())},1000);this.timer.unref?.() }
@@ -98,6 +101,7 @@ export class TerminalRuntime {
       this.ensureLease()
       const quotes=await this.client.quotes()
       const now=Date.now(), settings=this.engine.settings, events:EngineEvent[]=[]
+      let dataGap=false
       this.ensureLease()
       for(const quote of quotes) {
         if(!this.control.warmed.includes(quote.symbol)||!settings.symbols.includes(quote.symbol))continue
@@ -106,7 +110,14 @@ export class TerminalRuntime {
         const bucket=Math.floor(quote.timestamp/60_000)*60_000
         const previous=this.bars.get(quote.symbol)
         if(previous&&bucket>previous.bucket) {
-          if(bucket-previous.bucket===60_000&&quote.timestamp-previous.lastObservation<90_000) events.push(...this.engine.processCandles(quote.symbol,[{...previous.candle,timestamp:previous.bucket+60_000}],{allowExecution:this.control.exchangeExecution}))
+          if(bucket-previous.bucket!==60_000||quote.timestamp-previous.lastObservation>=90_000){
+            this.bars.delete(quote.symbol)
+            this.control.warmed=this.control.warmed.filter(symbol=>symbol!==quote.symbol)
+            this.control.lastError=`${quote.symbol}: market-data gap; recovering closed history`
+            dataGap=true
+            continue
+          }
+          events.push(...this.engine.processCandles(quote.symbol,[{...previous.candle,timestamp:previous.bucket+60_000}],{allowExecution:this.control.exchangeExecution}))
           this.bars.delete(quote.symbol)
         }
         const bar=this.bars.get(quote.symbol)
@@ -114,7 +125,7 @@ export class TerminalRuntime {
         else if(quote.timestamp>bar.lastObservation){bar.candle.high=Math.max(bar.candle.high,quote.price);bar.candle.low=Math.min(bar.candle.low,quote.price);bar.candle.close=quote.price;bar.lastObservation=quote.timestamp}
         events.push(...this.engine.processTick(quote.symbol,quote.price,quote.timestamp))
       }
-      this.control.lastTick=now;this.control.lastError=null
+      this.control.lastTick=now;if(!dataGap)this.control.lastError=null
       this.persist(events.splice(0),false)
       if(!this.executionTask){
         const pending=this.engine.pendingIntents().filter(i=>this.control.exchangeExecution||i.kind==='close')
@@ -134,7 +145,14 @@ export class TerminalRuntime {
         this.ensureLease();this.warmJobs.delete(symbol)
         try {
           if(job.error)throw new Error(job.error)
-          if(job.data){events.push(...this.engine.processCandles(symbol,job.data,{allowExecution:false}));if(!this.control.warmed.includes(symbol))this.control.warmed.push(symbol)}
+          if(job.data){
+            if(job.plan){
+              if(this.engine.lastProcessedAt(symbol)!==job.plan.cursor)throw new Error('History cursor changed during recovery')
+              validateHistory(symbol,job.data,job.plan)
+            }
+            events.push(...this.engine.processCandles(symbol,job.data,{allowExecution:false}))
+            if((!job.plan||job.plan.cutoff>=Math.floor(Date.now()/60_000)*60_000)&&!this.control.warmed.includes(symbol))this.control.warmed.push(symbol)
+          }
         } catch(error) {this.control.lastError=`${symbol}: ${error instanceof Error?error.message:'History unavailable'}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
       }
       if(warmed.length)this.persist(events.splice(0),false)

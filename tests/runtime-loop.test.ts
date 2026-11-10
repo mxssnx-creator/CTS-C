@@ -168,3 +168,42 @@ test("history batch keeps failed-symbol retry separate and leaves unfinished job
     assert.equal(runtime.engine.pendingIntents().length, 0)
   })
 })
+
+test("a quote gap pauses that symbol before a later bar or trade can be processed", async () => {
+  await isolated(async runtime=>{
+    const internal=runtime as any, symbol=runtime.engine.settings.symbols[0]
+    internal.prefetchHistory=()=>{}
+    internal.executor={process:async()=>[]}
+    const bucket=Math.floor(Date.now()/60_000)*60_000
+    internal.bars.set(symbol,{bucket:bucket-120_000,candle:{timestamp:bucket-120_000,open:100,high:100,low:100,close:100,volume:0},lastObservation:bucket-60_001})
+    let seen=0
+    const tick=runtime.engine.processTick.bind(runtime.engine)
+    runtime.engine.processTick=(s,p,t)=>{if(s===symbol)seen++;return tick(s,p,t)}
+    await within(internal.tick())
+    if(internal.executionTask)await internal.executionTask
+    assert.equal(runtime.control.warmed.includes(symbol),false)
+    assert.equal(internal.bars.has(symbol),false)
+    assert.equal(seen,0)
+    assert.match(runtime.control.lastError??"",/market-data gap/)
+  })
+})
+
+test("history catch-up does not mark a symbol warm before reaching the current closed minute", async () => {
+  await isolated(async runtime=>{
+    const internal=runtime as any, symbol=runtime.engine.settings.symbols[0]
+    internal.prefetchHistory=()=>{}
+    internal.executor={process:async()=>[]}
+    runtime.control.warmed=[]
+    const now=Math.floor(Date.now()/60_000)*60_000, start=now-180_000
+    const candle=(timestamp:number)=>({timestamp,open:100,high:100,low:100,close:100,volume:1})
+    runtime.engine.processCandles(symbol,[candle(start)])
+    internal.warmJobs.set(symbol,{data:[candle(start+60_000)],plan:{count:100,cursor:start,cutoff:start+60_000}})
+    await within(internal.tick());if(internal.executionTask)await internal.executionTask
+    assert.equal(runtime.engine.lastProcessedAt(symbol),start+60_000)
+    assert.equal(runtime.control.warmed.includes(symbol),false)
+    internal.warmJobs.set(symbol,{data:[candle(start+120_000),candle(now)],plan:{count:100,cursor:start+60_000,cutoff:now}})
+    await within(internal.tick());if(internal.executionTask)await internal.executionTask
+    assert.equal(runtime.engine.lastProcessedAt(symbol),now)
+    assert.equal(runtime.control.warmed.includes(symbol),true)
+  })
+})

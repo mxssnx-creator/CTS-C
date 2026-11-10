@@ -208,10 +208,19 @@ export class DemoExecutor {
     const ambiguous = this.rows().some((row) => payload(row).order.symbol === symbol && payload(row).intent.direction === intent.direction && (!receipt(row) || receipt(row)?.outcome.status === "unknown"))
     if (ambiguous) throw new ExecutionDeferred("An order for this symbol/direction remains unknown; reconcile it before another write")
     const tracked = lots.filter((lot) => lot.connectionId === intent.connectionId && lot.symbol === symbol && lot.direction === intent.direction).reduce((sum, lot) => sum + lot.quantity, 0)
-    let positions: VenuePosition[]
-    try { positions = await this.venue.positions(symbol) } catch (error) { throw new ExecutionDeferred(`Position inventory read unavailable: ${error instanceof Error ? error.message : "unknown error"}`) }
+    let positions: VenuePosition[], orders: VenueOrder[]
+    try { [positions, orders] = await Promise.all([this.venue.positions(symbol), this.venue.openOrders(symbol)]) }
+    catch (error) { throw new ExecutionDeferred(`Position/order inventory read unavailable: ${error instanceof Error ? error.message : "unknown error"}`) }
     const actual = positions.filter((row) => row.symbol === symbol && row.direction === intent.direction.toUpperCase()).reduce((sum, row) => sum + row.quantity, 0)
-    if (actual + EPSILON < tracked) throw new ExecutionDeferred("Exchange quantity is below owned lot totals; unresolved external/protective fills block new writes")
+    const tolerance = Math.max(EPSILON, Math.abs(tracked) * 1e-9)
+    if (Math.abs(actual - tracked) > tolerance) throw new ExecutionDeferred("Exchange quantity differs from owned lots; this symbol and direction are isolated until reconciled")
+    const ownedIds = new Set(this.rows().flatMap(row => { const out=receipt(row)?.outcome; return out?.status === "accepted" ? [out.order.orderId] : [] }))
+    const external = orders.some(order => {
+      if (order.symbol && order.symbol !== symbol) return false
+      const side = order.positionSide.toUpperCase()
+      return (!side || side === "BOTH" || side === intent.direction.toUpperCase() || (side !== "LONG" && side !== "SHORT")) && !ownedIds.has(order.orderId)
+    })
+    if (external) throw new ExecutionDeferred("An unrelated open order shares this symbol and direction; no position-changing write was sent")
   }
   private async prepare(intent: ExecutionIntent, clientId: string): Promise<OrderInput> {
     if (intent.source !== "real-qualified" || !intent.positionId || !intent.laneId || !intent.connectionId) throw new Error("A qualified, lane-owned execution intent is required")
@@ -234,6 +243,7 @@ export class DemoExecutor {
     if (intent.kind !== "entry") {
       if (!owned) throw new Error("No filled CTS-C lot exists for this position")
       if (owned.quantity <= EPSILON) { if (intent.kind === "close") throw new AlreadyClosed(); throw new Error("Cannot add to a closed owned lot") }
+      await this.assertInventory(intent)
       await this.cancelProtection(intent)
       owned = this.lot(intent)
       if (!owned || owned.quantity <= EPSILON) { if (intent.kind === "close") throw new AlreadyClosed(); throw new Error("Protection closed this lot before the add") }
@@ -282,7 +292,10 @@ export class DemoExecutor {
     const inputs = protectionOrders({ symbol: lot.symbol, direction: lot.direction === "long" ? "LONG" : "SHORT", quantity: lot.quantity.toFixed(contract.quantityPrecision), clientOrderId: generation,
       stopLoss: Number((lot.averageEntry * (1 - sign * configuration.stopLossPct / 100)).toFixed(contract.pricePrecision)),
       takeProfit: configuration.exitMode === "fixed" && configuration.takeProfitPct > 0 ? Number((lot.averageEntry * (1 + sign * configuration.takeProfitPct / 100)).toFixed(contract.pricePrecision)) : undefined })
-    if (inputs.some((order) => !this.findRow(order.clientOrderId))) this.protectionState(lot.id, "pending")
+    if (inputs.some((order) => !this.findRow(order.clientOrderId))) {
+      await this.assertInventory(intent)
+      this.protectionState(lot.id, "pending")
+    }
     for (const order of inputs) {
       const synthetic: ExecutionIntent = { ...configuration, kind: "close", id: order.clientOrderId }
       await this.send({ intent: synthetic, order, role: "protection", generation })
@@ -302,6 +315,7 @@ export class DemoExecutor {
       if (out?.status !== "accepted" || !terminal(out.order) || !lot || lot.quantity <= EPSILON) continue
       if (this.related(intent).some((row) => payload(row).role !== "protection" && this.active(row))) continue
       try {
+        await this.assertInventory(intent)
         await this.cancelProtection(intent); lot = this.lot(intent)!
         if (lot.quantity <= EPSILON) continue
         await this.assertInventory(intent)

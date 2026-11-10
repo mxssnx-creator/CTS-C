@@ -31,7 +31,20 @@ class Venue implements ExecutorVenue {
   conditionals() { return this.submitted.filter((row) => row.type === "STOP_MARKET" || row.type === "TAKE_PROFIT_MARKET") }
   async positionMode() { return "hedge" as const }
   async contracts() { return [{ symbol: "BTC-USDT", quantityPrecision: 3, pricePrecision: 2, minQuantity: 0.001, minNotional: 1, maxLongLeverage: 100, maxShortLeverage: 100, status: "1" }] }
-  async positions() { return [{ positionId: "venue-1", symbol: "BTC-USDT", direction: "LONG" as const, quantity: 1000, entryPrice: 100, markPrice: 100, unrealizedPnl: 0, leverage: 1 }] }
+  async positions() {
+    const quantities = new Map<string,number>()
+    for(const order of this.orders.values()){
+      const direction=order.positionSide as "LONG"|"SHORT"
+      if(direction!=="LONG"&&direction!=="SHORT")continue
+      const opening=(direction==="LONG"&&order.side==="BUY")||(direction==="SHORT"&&order.side==="SELL")
+      const key=`${order.symbol}:${direction}`
+      quantities.set(key,(quantities.get(key)??0)+(opening?1:-1)*order.filledQuantity)
+    }
+    return [...quantities].filter(([,quantity])=>quantity>1e-10).map(([key,quantity])=>{
+      const [symbol,direction]=key.split(":")
+      return {positionId:`venue-${direction}`,symbol,direction:direction as "LONG"|"SHORT",quantity,entryPrice:100,markPrice:100,unrealizedPnl:0,leverage:1}
+    })
+  }
   async openOrders(): Promise<VenueOrder[]> {
     this.reads.openOrders++
     return structuredClone([...this.orders.values()].filter((order) => !["FILLED", "CANCELED", "CANCELLED", "REJECTED", "EXPIRED"].includes(order.status)))
@@ -181,6 +194,46 @@ test("unexplained venue reduction defers closes and new entries", async (t) => {
   assert.equal(status(await executor.process([intent({ id: "close-1", kind: "close" })]), "close-1"), "unknown")
   assert.equal(status(await executor.process([intent({ id: "entry-2", positionId: "position-2", laneId: "lane-2" })]), "entry-2"), "unknown")
   assert.equal(venue.markets().length, 1)
+})
+
+test("foreign same-side inventory is left untouched while the other hedge side can trade", async (t) => {
+  const store = new StateStore(":memory:"); t.after(() => store.close())
+  const venue = new Venue(), ownPositions = venue.positions.bind(venue), executor = new DemoExecutor(store, venue)
+  venue.positions = async () => [...await ownPositions(), {positionId:"foreign",symbol:"BTC-USDT",direction:"LONG",quantity:7,entryPrice:100,markPrice:100,unrealizedPnl:0,leverage:1}]
+  const blocked = await executor.process([intent()])
+  assert.equal(status(blocked,"entry-1"),"unknown")
+  assert.match(blocked.find(row=>row.id==="entry-1")?.error??"",/differs from owned lots/)
+  assert.equal(venue.submitted.length,0)
+  const short=intent({id:"short",direction:"short",laneId:"short-lane",positionId:"short-position"})
+  assert.equal(status(await executor.process([short]),"short"),"acknowledged")
+  assert.equal(venue.markets().length,1)
+  assert.equal(venue.markets()[0].positionSide,"SHORT")
+})
+
+test("unrelated same-side orders, including a copied CTS-C prefix, cannot be canceled or traded against", async (t) => {
+  const store = new StateStore(":memory:"); t.after(() => store.close())
+  const venue = new Venue(), executor = new DemoExecutor(store, venue)
+  const unrelated=makeOrder({symbol:"BTC-USDT",side:"BUY",positionSide:"LONG",quantity:2,type:"LIMIT",clientOrderId:stableClientOrderId("external","order")},{status:"NEW",filledQuantity:0})
+  venue.orders.set(unrelated.clientOrderId,unrelated)
+  const result=await executor.process([intent()])
+  assert.equal(status(result,"entry-1"),"unknown")
+  assert.match(result.find(row=>row.id==="entry-1")?.error??"",/unrelated open order/)
+  assert.equal(venue.submitted.length,0)
+  assert.deepEqual(venue.canceled,[])
+  assert.equal(venue.orders.get(unrelated.clientOrderId)?.status,"NEW")
+})
+
+test("a new foreign position does not cause cancellation of owned protection", async (t) => {
+  const store = new StateStore(":memory:"); t.after(() => store.close())
+  const venue = new Venue(), executor = new DemoExecutor(store, venue)
+  assert.equal(status(await executor.process([intent()]),"entry-1"),"acknowledged")
+  const ownPositions=venue.positions.bind(venue)
+  venue.positions=async()=>[...await ownPositions(),{positionId:"foreign",symbol:"BTC-USDT",direction:"LONG",quantity:1,entryPrice:100,markPrice:100,unrealizedPnl:0,leverage:1}]
+  const close=intent({id:"close-with-foreign",kind:"close"})
+  assert.equal(status(await executor.process([close]),close.id),"unknown")
+  assert.equal(venue.markets().length,1)
+  assert.deepEqual(venue.canceled,[])
+  assert.equal(executor.lots()[0].protection,"active")
 })
 
 test("all unresolved intents remain visible beyond the former 1000-row window", (t) => {

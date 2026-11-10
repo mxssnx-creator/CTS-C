@@ -314,17 +314,25 @@ export class BingxVstClient {
   }
 
   async positions(symbol?: string): Promise<VenuePosition[]> {
-    return rows(await this.read("/openApi/swap/v2/user/positions", symbol ? { symbol: normalizeSymbol(symbol) } : {}, true)).map((raw) => {
+    const data = await this.read("/openApi/swap/v2/user/positions", symbol ? { symbol: normalizeSymbol(symbol) } : {}, true)
+    if (!Array.isArray(data)) throw new Error("Exchange position inventory was not an array")
+    return data.map((raw) => {
       const value = object(raw)
-      return { positionId: text(value.positionId), symbol: text(value.symbol), direction: (text(value.positionSide).toUpperCase() === "SHORT" || number(value.positionAmt) < 0 ? "SHORT" : "LONG") as Direction,
-        quantity: Math.abs(number(value.positionAmt ?? value.quantity)), entryPrice: number(value.avgPrice ?? value.entryPrice), markPrice: number(value.markPrice),
+      const rawQuantity = value.positionAmt ?? value.quantity, amount = Number(rawQuantity)
+      if (rawQuantity === undefined || rawQuantity === null || rawQuantity === "" || !Number.isFinite(amount)) throw new Error("Exchange position quantity was invalid")
+      const side = text(value.positionSide).toUpperCase()
+      if (amount !== 0 && side !== "LONG" && side !== "SHORT") throw new Error("Exchange position side was unavailable")
+      return { positionId: text(value.positionId), symbol: amount === 0 ? text(value.symbol) : normalizeSymbol(text(value.symbol)), direction: side as Direction,
+        quantity: Math.abs(amount), entryPrice: number(value.avgPrice ?? value.entryPrice), markPrice: number(value.markPrice),
         unrealizedPnl: number(value.unrealizedProfit ?? value.unrealizedPnl), leverage: number(value.leverage) }
     }).filter((position) => position.quantity > 0)
   }
 
   async openOrders(symbol?: string): Promise<VenueOrder[]> {
     const data = await this.read("/openApi/swap/v2/trade/openOrders", symbol ? { symbol: normalizeSymbol(symbol) } : {}, true)
-    return rows(Array.isArray(data) ? data : object(data).orders).map(parseOrder)
+    const orders = Array.isArray(data) ? data : object(data).orders
+    if (!Array.isArray(orders)) throw new Error("Exchange open-order inventory was not an array")
+    return orders.map(parseOrder)
   }
 
   async positionMode(): Promise<"hedge" | "one-way"> {
