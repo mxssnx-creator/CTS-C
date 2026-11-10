@@ -1,5 +1,5 @@
 import { generateStrategyCatalog, STRATEGY_RANGES } from "./catalog"
-import { replayStrategy } from "./replay"
+import { replayStrategy,strategySignalTrace } from "./replay"
 import { aggregateCostNormalizedResults } from "./metrics"
 import type { MarketCandle } from "./market"
 import type { StrategyConfig, PseudoPosition } from "./types"
@@ -26,8 +26,14 @@ function* replaySteps(symbol: string, candles: MarketCandle[], settings: Record<
   const minSamples = Math.max(1, Math.min(200, Number(settings.mainEvalPosCount) || 8))
   const minPf = Math.max(1, Number(settings.baseProfitFactor) || 1.05)
   const evaluated = [] as {config:StrategyConfig;score:ReturnType<typeof metrics>;enough:boolean;passed:boolean}[]
+  const trainTraces=new Map<string,ReturnType<typeof strategySignalTrace>>(),testTraces=new Map<string,ReturnType<typeof strategySignalTrace>>()
+  const trace=(config:StrategyConfig,holdout=false)=>{
+    const key=JSON.stringify([config.type,config.position_cost_step,config.signalTimeframeMinutes??1]),cache=holdout?testTraces:trainTraces
+    let value=cache.get(key)
+    if(!value){value=strategySignalTrace(holdout?test:train,config,holdout?train:[]);cache.set(key,value)}return value
+  }
   for(const config of configs){
-    const score = metrics(replayStrategy(symbol, train, config,train.length*2))
+    const score = metrics(replayStrategy(symbol, train, config,train.length*2,[],trace(config)))
     evaluated.push({ config, score, enough: score.trades >= minSamples, passed: score.trades >= minSamples && (score.pf ?? 0) >= minPf })
     yield
   }
@@ -36,10 +42,10 @@ function* replaySteps(symbol: string, candles: MarketCandle[], settings: Record<
     const candidates = evaluated.filter(v => v.config.range === range).sort((a, b) => Number(b.passed) - Number(a.passed) || Number(b.enough) - Number(a.enough) || (b.score.pf ?? -1) - (a.score.pf ?? -1) || b.score.netReturnSumPct - a.score.netReturnSumPct || a.config.id.localeCompare(b.config.id))
     selected.push(...candidates.slice(0, 3))
   }
-  const rows=[] as {id:string;range:StrategyConfig['range'];tactic:string;tpStep:StrategyConfig['tpStep'];slRatio:StrategyConfig['slRatio'];exitMode:StrategyConfig['exitMode'];training:ReturnType<typeof metrics>;trainingPassed:boolean;holdout:ReturnType<typeof metrics>}[]
+  const rows=[] as {id:string;range:StrategyConfig['range'];tactic:string;tpStep:StrategyConfig['tpStep'];slRatio:StrategyConfig['slRatio'];exitMode:StrategyConfig['exitMode'];lookback:number;signalTimeframeMinutes:number;training:ReturnType<typeof metrics>;trainingPassed:boolean;holdout:ReturnType<typeof metrics>}[]
   for(const {config,score,passed} of selected){rows.push({
-    id: config.id, range: config.range, tactic: config.type, tpStep: config.tpStep, slRatio: config.slRatio, exitMode: config.exitMode,
-    training: score, trainingPassed: passed, holdout: metrics(replayStrategy(symbol, test, config,test.length*2,train)),
+    id: config.id, range: config.range, tactic: config.type, tpStep: config.tpStep, slRatio: config.slRatio, exitMode: config.exitMode,lookback:config.position_cost_step,signalTimeframeMinutes:config.signalTimeframeMinutes??1,
+    training: score, trainingPassed: passed, holdout: metrics(replayStrategy(symbol, test, config,test.length*2,train,trace(config,true))),
   });yield}
   return {
     symbol, mode: "research-replay", costModel: "net after maker/taker fallback plus fee-relative slippage once", candleExecution: "Observed candle closes only; gaps fill at observed price; no intrabar assumptions",

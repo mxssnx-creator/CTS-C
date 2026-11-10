@@ -1,7 +1,8 @@
-import type { PseudoPosition, SignalState } from "./types"
+import type { Candle, PseudoPosition, SignalState } from "./types"
 import { calculatePriceMovePct, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { observedExit } from "./exits"
-import { INDICATIONS } from "./indications"
+import { INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
+import {technicalSignal} from './technical-signals'
 
 export interface ReplayStrategyConfig {
   type: string
@@ -16,6 +17,8 @@ export interface ReplayStrategyConfig {
   roundTripCostPct?: number
   maxHoldMinutes?: number
   catalogVersion?: number
+  trailDistancePct?:number
+  signalTimeframeMinutes?:number
 }
 
 export interface ReplayPosition extends PseudoPosition {
@@ -39,7 +42,8 @@ export function newSignalState(): SignalState {
 }
 const mean = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
 /** Serializable, causal indicator accumulator shared by batch replay and the live engine. */
-export function advanceSignal(state: SignalState, price: number, type: string, step: number): Direction | undefined {
+export function advanceSignal(state: SignalState, price: number, type: string, step: number,bar?:Candle): Direction | undefined {
+  if((TECHNICAL_INDICATIONS as readonly string[]).includes(type))return technicalSignal(state,bar??{timestamp:state.count+1,open:price,high:price,low:price,close:price,volume:0},type,step)
   const priorMean = mean(state.prices), priorReady = state.prices.length >= step * 2
   const priorFast=state.emaFast, priorSlow=state.emaSlow
   const priorWidth = 2 * Math.sqrt(mean(state.prices.map(value => (value - priorMean) ** 2)))
@@ -84,9 +88,43 @@ export function advanceSignal(state: SignalState, price: number, type: string, s
   state.count++; state.previousPrice = price; state.previousSmaDiff = ready ? diff : undefined; state.previousHistogram = ready ? histogram : undefined; state.previousRsi = rsi
   return signal
 }
-export function createSignalEvaluator(type: string, step: number): (price: number) => Direction | undefined {
+export function createSignalEvaluator(type: string, step: number): (price: number,bar?:Candle) => Direction | undefined {
   const state = newSignalState()
-  return price => advanceSignal(state, price, type, step)
+  return (price,bar) => advanceSignal(state, price, type, step,bar)
+}
+
+/** Only complete, contiguous, UTC-aligned one-minute source bars form a higher-timeframe signal. */
+export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'>):Direction|undefined{
+  const minutes=config.signalTimeframeMinutes??1
+  if(minutes===1)return advanceSignal(state,bar.close,config.type,config.position_cost_step,bar)
+  const span=minutes*60000,bucket=Math.floor((bar.timestamp-1)/span)*span
+  if(!state.frame||state.frame.bucket!==bucket)state.frame={bucket,candle:{...bar},count:1,lastTimestamp:bar.timestamp,complete:bar.timestamp===bucket+60000}
+  else{
+    const f=state.frame;if(bar.timestamp<=f.lastTimestamp)return
+    f.complete&&=bar.timestamp===f.lastTimestamp+60000;f.lastTimestamp=bar.timestamp;f.count++
+    f.candle={...f.candle,timestamp:bar.timestamp,high:Math.max(f.candle.high,bar.high),low:Math.min(f.candle.low,bar.low),close:bar.close,volume:f.candle.volume+bar.volume}
+  }
+  const f=state.frame
+  if(bar.timestamp!==bucket+span||!f.complete||f.count!==minutes)return
+  return advanceSignal(state,f.candle.close,config.type,config.position_cost_step,f.candle)
+}
+
+function observedBar(row:any,price:number,time:number):Candle{
+  const bar={timestamp:time,open:Number(row.open??price),high:Number(row.high??price),low:Number(row.low??price),close:price,volume:Number(row.volume??0)}
+  if(![bar.open,bar.high,bar.low,bar.volume].every(Number.isFinite)||bar.open<=0||bar.low<=0||bar.high<Math.max(bar.open,bar.close,bar.low)||bar.low>Math.min(bar.open,bar.close)||bar.volume<0)throw new Error('Invalid observed OHLCV candle')
+  return bar
+}
+
+/** One causal trace can serve many distance/exit configurations without recomputing indicators. */
+export function strategySignalTrace(candles:any[],config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'>,prehistory:any[]=[]):(Direction|undefined)[]{
+  const state=newSignalState();let previous=-Infinity
+  const observe=(row:any)=>{
+    const price=Number(row?.close??row?.price),time=timestampMs(row?.timestamp??row?.time)
+    if(!Number.isFinite(price)||price<=0||!Number.isFinite(time)||time<=0||time<=previous)throw new Error('Invalid signal trace candles')
+    previous=time;return advanceConfiguredSignal(state,observedBar(row,price,time),config)
+  }
+  for(const row of prehistory)observe(row)
+  return candles.map(observe)
 }
 
 /** Last-bar indication, sharing exactly the same causal indicators as replay. */
@@ -104,7 +142,7 @@ export function currentStrategySignal(candles: any[], type: string, lookback: nu
       throw new Error("Strategy signals require positive observed closes and strictly increasing timestamps")
     }
     previousTime = time
-    signal = next(price)
+    signal = next(price,observedBar(row,price,time))
   }
   return signal ?? null
 }
@@ -125,9 +163,11 @@ export function replayStrategy(
   config: ReplayStrategyConfig,
   maxPositions = 250,
   prehistory: any[] = [],
+  signalTrace?:readonly (Direction|undefined)[],
 ): PseudoPosition[] {
   if (!TACTICS.has(config.type)) throw new Error(`Unsupported replay tactic: ${config.type}`)
   const step = config.position_cost_step
+  if(config.signalTimeframeMinutes!==undefined&&![1,5,15,30].includes(config.signalTimeframeMinutes))throw new Error('Unsupported signal timeframe')
   if (!Number.isInteger(step) || step < 2 || step > 10_000 ||
       !Number.isFinite(config.takeprofit) || config.takeprofit <= 0 ||
       !Number.isFinite(config.stoploss) || config.stoploss <= 0 || config.stoploss >= 1 ||
@@ -139,32 +179,36 @@ export function replayStrategy(
   }
   const mode = config.exitMode ?? (config.trailing ? "trailing" : "fixed")
   if (!["fixed", "trailing", "trailing-only"].includes(mode)) throw new Error("Invalid exit mode")
-  const nextSignal = createSignalEvaluator(config.type, step)
+  const signalState=newSignalState()
+  if(signalTrace&&signalTrace.length!==candles.length)throw new Error('Signal trace length does not match candles')
   let previousTime = -Infinity
   for(const row of prehistory){
     const price=Number(row?.close??row?.price), time=timestampMs(row?.timestamp??row?.time)
     if(!Number.isFinite(price)||price<=0||!Number.isFinite(time)||time<=0||time<=previousTime)throw new Error("Invalid replay prehistory")
-    previousTime=time;nextSignal(price)
+    previousTime=time;if(!signalTrace)advanceConfiguredSignal(signalState,observedBar(row,price,time),config)
   }
-  const positions = new Map<Direction,{position:ReplayPosition;entryTime:number;peak:number}>()
+  const positions = new Map<Direction,{position:ReplayPosition;entryTime:number;peak:number;trailingActive?:boolean;trailingStopPrice?:number}>()
   const closed: ReplayPosition[] = []
   let closedCount = 0
 
-  for (const row of candles) {
+  for (const [index,row] of candles.entries()) {
     const price = Number(row?.close ?? row?.price)
     const time = timestampMs(row?.timestamp ?? row?.time)
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(time) || time <= 0 || time <= previousTime) {
       throw new Error("Replay requires positive observed closes and strictly increasing timestamps")
     }
     previousTime = time
-    const signal = nextSignal(price)
+    const candle=observedBar(row,price,time)
+    const signal = signalTrace?signalTrace[index]:advanceConfiguredSignal(signalState,candle,config)
+    if(signal!==undefined&&signal!=='long'&&signal!=='short')throw new Error('Invalid precomputed signal')
 
     const justClosed=new Set<Direction>()
     for (const [direction,open] of positions) {
       const {position,entryTime}=open
       const grossFraction = calculatePriceMovePct(position.entry_price, price, position.direction ?? "long") / 100
-      const exit=observedExit({direction,entryPrice:position.entry_price,peak:open.peak,price,takeProfitPct:config.takeprofit*100,stopLossPct:config.stoploss*100,exitMode:mode,openedAt:entryTime,timestamp:time,maxHoldMinutes:config.maxHoldMinutes??0,trailingBasis:config.catalogVersion!==undefined&&config.catalogVersion<3?"entry":"peak"})
+      const exit=observedExit({...open,direction,entryPrice:position.entry_price,peak:open.peak,price,takeProfitPct:config.takeprofit*100,stopLossPct:config.stoploss*100,trailDistancePct:config.trailDistancePct,exitMode:mode,openedAt:entryTime,timestamp:time,maxHoldMinutes:config.maxHoldMinutes??0,trailingBasis:config.catalogVersion!==undefined&&config.catalogVersion<3?"entry":"peak"})
       open.peak=exit.peak;position.stop_loss=exit.stop
+      open.trailingActive=exit.trailingActive;open.trailingStopPrice=exit.stop
       if (exit.reason) {
         position.status = "closed"
         position.exit_time = new Date(time).toISOString()

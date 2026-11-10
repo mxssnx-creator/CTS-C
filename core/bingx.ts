@@ -1,7 +1,8 @@
 import { createHash, createHmac } from "node:crypto"
 
-/** This module deliberately has no mainnet host or environment switch. */
+/** Fixed account-specific clients. Credentials never fall back across environments. */
 export const BINGX_VST_HOST = "https://open-api-vst.bingx.com"
+export const BINGX_MAINNET_HOST = "https://open-api.bingx.com"
 export type DemoCredentials = { apiKey: string; apiSecret: string }
 export type Direction = "LONG" | "SHORT"
 export type PositionSide = Direction | "BOTH"
@@ -78,6 +79,15 @@ export function demoCredentials(env: Record<string, string | undefined> = proces
   const apiKey = (env.BINGX_X02_KEY || env.BINGX_X02_API_KEY || "").trim()
   const apiSecret = (env.BINGX_X02_SECRET || env.BINGX_X02_API_SECRET || "").trim()
   return apiKey && apiSecret ? { apiKey, apiSecret } : null
+}
+export function mainnetCredentials(env:Record<string,string|undefined>=process.env):DemoCredentials|null{
+ const apiKey=(env.BINGX_X01_KEY||env.BINGX_X01_API_KEY||'').trim(),apiSecret=(env.BINGX_X01_SECRET||env.BINGX_X01_API_SECRET||'').trim()
+ return apiKey&&apiSecret?{apiKey,apiSecret}:null
+}
+export function connectionCredentials(connectionId:string,env:Record<string,string|undefined>=process.env):DemoCredentials|null{
+ if(connectionId==='bingx-x02')return demoCredentials(env)
+ if(connectionId==='bingx-x01')return mainnetCredentials(env)
+ throw new Error('Unknown connection')
 }
 
 export function stableClientOrderId(connection: string, candidate: string): string {
@@ -161,7 +171,7 @@ export function protectionOrders(input: ProtectionInput): OrderInput[] {
   return orders
 }
 
-export class BingxVstClient {
+export class BingxClient {
   private readonly fetcher: typeof globalThis.fetch
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
@@ -176,7 +186,8 @@ export class BingxVstClient {
   // belongs to the executor's SQLite intent journal, not this transport class.
   private inFlight = new Map<string, Promise<OrderOutcome>>()
 
-  constructor(private readonly credentials: DemoCredentials | null = demoCredentials(), options: ClientOptions = {}) {
+  constructor(private readonly credentials: DemoCredentials | null, options: ClientOptions = {},readonly network:'vst'|'mainnet'='vst') {
+    if(network!=='vst'&&network!=='mainnet')throw new Error('Unknown exchange environment')
     this.fetcher = options.fetch ?? globalThis.fetch
     this.now = options.now ?? Date.now
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
@@ -186,6 +197,7 @@ export class BingxVstClient {
   }
 
   get configured(): boolean { return !!(this.credentials?.apiKey && this.credentials?.apiSecret) }
+  get environment(){return this.network==='vst'?'BingX VST':'BingX mainnet'}
 
   private async reserveStart(): Promise<() => void> {
     let release!: () => void
@@ -211,7 +223,7 @@ export class BingxVstClient {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeout)
     try {
-      const pending = this.fetcher(`${BINGX_VST_HOST}${path}${query ? `?${query}` : ""}`, {
+      const pending = this.fetcher(`${this.network==='vst'?BINGX_VST_HOST:BINGX_MAINNET_HOST}${path}${query ? `?${query}` : ""}`, {
         method, headers: authenticated ? { "X-BX-APIKEY": this.credentials!.apiKey } : {}, signal: controller.signal,
       })
       release()
@@ -304,7 +316,7 @@ export class BingxVstClient {
       const outer = object(item)
       return Object.keys(object(outer.balance)).length ? object(outer.balance) : outer
     })
-    const value = candidates.find((row) => text(row.asset).toUpperCase() === "VST")
+    const value = this.network==='mainnet'?candidates.find(row=>text(row.asset).toUpperCase()==='USDT'):candidates.find((row) => text(row.asset).toUpperCase() === "VST")
       || candidates.find((row) => text(row.asset).toUpperCase() === "USDT")
     if (!value) throw new Error("Exchange returned no VST/USDT balance")
     const balance = Number(value.balance), availableMargin = Number(value.availableMargin)
@@ -566,4 +578,16 @@ export class BingxVstClient {
     for (const order of protectionOrders(input)) outcomes.push(await this.submitOrder(order))
     return outcomes
   }
+}
+
+export class BingxVstClient extends BingxClient{
+ constructor(credentials:DemoCredentials|null=demoCredentials(),options:ClientOptions={}){super(credentials,options,'vst')}
+}
+export class BingxMainnetClient extends BingxClient{
+ constructor(credentials:DemoCredentials|null=mainnetCredentials(),options:ClientOptions={}){super(credentials,options,'mainnet')}
+}
+export function connectionClient(connectionId:string):BingxClient{
+ if(connectionId==='bingx-x02')return new BingxVstClient()
+ if(connectionId==='bingx-x01')return new BingxMainnetClient()
+ throw new Error('Unknown connection')
 }

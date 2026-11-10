@@ -5,16 +5,16 @@ import { Download, FlaskConical, Play } from "lucide-react"
 import { formatProfitFactor, profitFactorRank, type ProfitFactorState } from "./profit-factor"
 
 type ReplayMetrics = { trades: number; pf: number | null; pfState?: ProfitFactorState; netReturnSumPct: number; maxDrawdownPct: number; winRate: number; long: number; short: number; open: number }
-type ReplayRow = { id: string; range: string; tactic: string; tpStep: number; slRatio: number; exitMode: string; training: ReplayMetrics; trainingPassed: boolean; holdout: ReplayMetrics }
+type ReplayRow = {lookback?:number;signalTimeframeMinutes?:number; id: string; range: string; tactic: string; tpStep: number; slRatio: number; exitMode: string; training: ReplayMetrics; trainingPassed: boolean; holdout: ReplayMetrics }
 type ReplayResult = { success: boolean; source: string; createdAt: string | number; configurations: number; enoughSamples: number; samplesPercent: number; eligible: number; minSamples?: number; minPf?: number; trainingCandles: number; holdoutCandles: number; rows: ReplayRow[]; executionEligible: false; note: string }
 const decimal = (value: number | null | undefined, places = 2) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(places) : "—"
 const stat = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "—"
 
-export function ReplayStudy() {
+export function ReplayStudy({connectionId="bingx-x02"}:{connectionId?:string}) {
   const [symbol, setSymbol] = useState("BTC-USDT")
-  const [interval, setInterval] = useState("5m")
+  const [interval, setInterval] = useState("1m")
   const [exchange, setExchange] = useState<"bingx" | "bybit">("bingx")
-  const [demo, setDemo] = useState(true)
+  const [demo, setDemo] = useState(connectionId!=="bingx-x01")
   const [candleCount,setCandleCount]=useState(1440)
   const requestController=useRef<AbortController|null>(null)
   useEffect(()=>()=>requestController.current?.abort(),[])
@@ -40,7 +40,7 @@ export function ReplayStudy() {
     const abort=new AbortController();requestController.current=abort
     const timeout=setTimeout(()=>abort.abort(),120_000)
     try {
-      const response = await fetch("/api/terminal/replay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: normalized, interval, exchange, demo,candles:candleCount }),signal:abort.signal })
+      const response = await fetch("/api/terminal/replay", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol: normalized, interval, exchange, demo,connectionId,candles:candleCount }),signal:abort.signal })
       const body = await response.json()
       if (!response.ok || body.success !== true || !Array.isArray(body.rows)) throw new Error(body.error || "Replay did not return a valid result.")
       setResult(body as ReplayResult); setRunIdentity(`${normalized} · ${interval} · ${exchange}${demo ? " demo" : " public"}`)
@@ -89,7 +89,7 @@ export function ReplayStudy() {
           <span className="terminal-muted ml-auto">Ranked by training qualification, then training PF</span>
         </div>
         <div className="overflow-x-auto rounded-lg border border-[var(--terminal-border)]">
-          <table className="w-full min-w-[950px] text-left text-xs"><thead className="border-b border-[var(--terminal-border)] bg-[var(--terminal-raised)] terminal-muted"><tr><th scope="col" rowSpan={2} className="px-3 py-3">Configuration</th><th scope="colgroup" colSpan={4} className="border-l border-[var(--terminal-border)] px-3 py-2 text-center text-[var(--terminal-accent)]">Training</th><th scope="colgroup" colSpan={4} className="border-l border-[var(--terminal-border)] px-3 py-2 text-center text-[var(--terminal-blue)]">Holdout</th></tr><tr>{["Trades / L:S", "PF", "Net Σ%", "Max DD%", "Trades / L:S", "PF", "Net Σ%", "Max DD%"].map((title, index) => <th scope="col" key={index} className={`px-3 pb-3 text-right font-medium ${index === 0 || index === 4 ? "border-l border-[var(--terminal-border)]" : ""}`}>{title}</th>)}</tr></thead><tbody>{visible.map(row => <tr key={row.id} className="border-b border-[var(--terminal-border)] last:border-0"><td className="px-3 py-3"><div className="font-medium">{row.range} · {row.tactic.replaceAll("_", " ")}</div><div className="terminal-muted mt-1 font-mono text-[10px]">TP {row.tpStep} · SL {decimal(row.slRatio, 1)}× · {row.exitMode}</div><span className={`mt-1 inline-block text-[10px] ${row.trainingPassed ? "text-[var(--terminal-green)]" : "terminal-muted"}`}>{row.trainingPassed ? "Training qualified" : "Training below gate"}</span></td>{[row.training, row.holdout].map((metrics, index) => <MetricsCells key={index} metrics={metrics} />)}</tr>)}</tbody></table>
+          <table className="w-full min-w-[950px] text-left text-xs"><thead className="border-b border-[var(--terminal-border)] bg-[var(--terminal-raised)] terminal-muted"><tr><th scope="col" rowSpan={2} className="px-3 py-3">Configuration</th><th scope="colgroup" colSpan={4} className="border-l border-[var(--terminal-border)] px-3 py-2 text-center text-[var(--terminal-accent)]">Training</th><th scope="colgroup" colSpan={4} className="border-l border-[var(--terminal-border)] px-3 py-2 text-center text-[var(--terminal-blue)]">Holdout</th></tr><tr>{["Trades / L:S", "PF", "Net Σ%", "Max DD%", "Trades / L:S", "PF", "Net Σ%", "Max DD%"].map((title, index) => <th scope="col" key={index} className={`px-3 pb-3 text-right font-medium ${index === 0 || index === 4 ? "border-l border-[var(--terminal-border)]" : ""}`}>{title}</th>)}</tr></thead><tbody>{visible.map(row => <tr key={row.id} className="border-b border-[var(--terminal-border)] last:border-0"><td className="px-3 py-3"><div className="font-medium">{row.range} · {row.tactic.replaceAll("_", " ")}</div><div className="terminal-muted mt-1 font-mono text-[10px]">TP {row.tpStep} · SL {decimal(row.slRatio, 1)}× · {row.exitMode}{row.lookback?` · period ${row.lookback}`:""}{row.signalTimeframeMinutes?` · ${row.signalTimeframeMinutes}m`:""}</div><span className={`mt-1 inline-block text-[10px] ${row.trainingPassed ? "text-[var(--terminal-green)]" : "terminal-muted"}`}>{row.trainingPassed ? "Training qualified" : "Training below gate"}</span></td>{[row.training, row.holdout].map((metrics, index) => <MetricsCells key={index} metrics={metrics} />)}</tr>)}</tbody></table>
           {visible.length === 0 && <p className="terminal-muted p-6 text-center text-sm">No configurations match these filters.</p>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs"><p className="terminal-muted">{filtered.length.toLocaleString()} matching rows · net Σ% is the sum of net trade returns, not account equity.</p><div className="flex items-center gap-3"><button type="button" className="terminal-button" disabled={page === 0} onClick={() => setPage(value => value - 1)}>Previous</button><span className="terminal-muted">{page + 1} / {pageCount}</span><button type="button" className="terminal-button" disabled={page + 1 >= pageCount} onClick={() => setPage(value => value + 1)}>Next</button></div></div>

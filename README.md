@@ -1,6 +1,6 @@
 # CTS-C
 
-CTS-C is an independent trading research and BingX VST demo application built with Next.js, React, TypeScript, Tailwind CSS, and Node.js. It runs a persistent strategy engine, separates paper evaluation from exchange fills, and includes optional adapters for all ten projects in the [reference post](https://x.com/Corki_0x/status/2117534398648098965).
+CTS-C is an independent trading research and BingX trading application with isolated x02 VST and x01 mainnet accounts built with Next.js, React, TypeScript, Tailwind CSS, and Node.js. It runs a persistent strategy engine, separates paper evaluation from exchange fills, and includes optional adapters for all ten projects in the [reference post](https://x.com/Corki_0x/status/2117534398648098965).
 
 The default workspace starts empty. It imports no earlier application's positions, history, balances, or secrets. Account values appear only after successful exchange requests. Synthetic fixtures are explicitly labeled and confined to research and tests.
 
@@ -25,12 +25,13 @@ Open `http://127.0.0.1:3001` and sign in. Without x02 credentials, authenticatio
 |---|---|
 | `CTS_ADMIN_PASSWORD` | Required administrator password, minimum 12 characters; server only. |
 | `BINGX_X02_KEY`, `BINGX_X02_SECRET` | Dedicated x02 VST credentials; optional until starting x02. |
+| `BINGX_X01_KEY`, `BINGX_X01_SECRET` | Dedicated x01 mainnet credentials; optional until explicitly starting x01. |
 | `CTS_DATA_DIR` | SQLite directory; defaults to `.data`. The start wrapper resolves it before loading Next; an absolute persistent deployment path is recommended. |
 | `CTS_COOKIE_SECURE` | `true` for browser HTTPS; `false` for local HTTP. |
 | `CTS_TRUSTED_ORIGINS` | Optional comma-separated complete origins for an explicitly trusted reverse proxy, for example `https://terminal.example.com`. |
 | `CTS_HOST`, `PORT` | `npm start` listening address and port; defaults to `127.0.0.1:3001`. Development overrides use CLI flags. |
 
-Credential aliases `BINGX_X02_API_KEY` and `BINGX_X02_API_SECRET` are accepted. Generic BingX credential names are ignored. Credentials belong in server configuration, never strategy exports or browser code.
+Credential aliases `BINGX_X02_API_KEY` / `BINGX_X02_API_SECRET` and the corresponding explicit `X01` aliases are accepted. Accounts never inherit one another’s keys. Mainnet stays stopped until explicitly started. Generic BingX credential names are ignored. Credentials belong in server configuration, never strategy exports or browser code.
 
 Override development listening options with `npm run dev -- --hostname 127.0.0.1 --port 3002`. For production, `npm start` loads local `.env.local`/`.env` configuration while preserving already supplied process variables:
 
@@ -71,7 +72,7 @@ Charts support BingX and Bybit public/demo endpoints and intervals `1m`, `5m`, `
 
 Each evaluation lane is isolated by connection, symbol, configuration, direction, coordination, and stage. Signals use completed observed bars. Existing positions also react to observed quote ticks. Duplicate candles are ignored and malformed batches fail before mutation. Warmup initializes paper evaluation without submitting historical orders.
 
-Four indications—moving-average cross, RSI band, MACD signal, and Bollinger bounce—combine with take-profit steps, stop-loss ratios, and fixed, trailing-after-target, or trailing-only exits.
+The original moving-average cross, RSI band, MACD signal and Bollinger bounce indications combine with take-profit steps, stop-loss ratios, and fixed, trailing-after-target, or trailing-only exits.
 
 | Range | TP steps | Maximum hold |
 |---|---:|---:|
@@ -82,15 +83,15 @@ Four indications—moving-average cross, RSI band, MACD signal, and Bollinger bo
 | Long | 19–24 | 720 minutes |
 | Wide | 25–30 | 1,440 minutes |
 
-TP distance is estimated round-trip position cost multiplied by the selected step. SL distance is TP distance multiplied by the selected ratio. Fee inputs use percent units: `0.08` means `0.08%`. Slippage is a percentage of estimated fees. On x02 startup without open paper positions, the runtime attempts to read exchange commission before updating catalog costs.
+TP distance is estimated round-trip position cost multiplied by the selected step. SL distance is TP distance multiplied by the selected ratio. Fee inputs use percent units: `0.08` means `0.08%`. Slippage is a percentage of estimated fees. On connection startup the runtime reads commissions for each symbol. Their own fee estimates take precedence over configured fallbacks. New fee economics create new cohorts; open positions keep captured costs.
 
-The balanced default uses seven TP steps (`3, 5, 8, 12, 18, 24, 30`), three SL ratios (`0.6, 1, 1.4`), four core indications, and three exits: **252 configurations per symbol**. The original four indications cover 3,696 complete combinations. Four additional research indications—MA inverse, trend pullback, RSI momentum, and Bollinger breakout—expand the selectable full catalog to **7,392 combinations**. They remain optional; a wider catalog does not establish an economic edge. Directions, coordinations, and stages create separate lanes; these are not simultaneous order counts.
+The balanced default uses seven TP steps (`3, 5, 8, 12, 18, 24, 30`), three SL ratios (`0.6, 1, 1.4`), four core indications, and three exits: **252 configurations per symbol**. The original four indications cover 3,696 complete combinations. Four additional research indications—MA inverse, trend pullback, RSI momentum, and Bollinger breakout—remain available. Nine additional Trend/Break tactics bring the selectable single-period, single-timeframe catalog to **15,708 combinations**. Trend/Break periods and UTC timeframes form additional independent lanes. They remain optional; a wider catalog does not establish an economic edge. Directions, coordinations, and stages create separate lanes; these are not simultaneous order counts.
 
 Progression is **Base → Main → Real → Live**. A child stage begins only while all matching preceding lanes meet their independent sample and PF gates. Each child records its own subsequent results; parent samples are never copied forward. Defaults are 20 Base closes, 8 Main closes, 8 Real closes, and PF 1.1 at each gate. The runtime rechecks current qualification after asynchronous preflight before entry/add submission. Rolling qualification can decline as results change.
 
-Replay and the engine share observed-price exits and independent long/short position handling. New catalog version 3 uses a trailing distance proportional to the favorable peak. Its economic identity is separate from prior cohorts. Restored older positions retain their earlier exit basis, historical losses and ownership; disabled symbols remain monitored through closure. Changing the symbol universe or refreshing fees on startup no longer waits for every research position to close.
+Replay and the engine share observed-price exits and independent long/short position handling. Catalog version 4 uses a peak-proportional trailing distance, persists activation and ratchets the stop across weighted-entry additions. Its economic identity is separate from prior cohorts. Restored older positions retain their earlier exit basis, historical losses and ownership; disabled symbols remain monitored through closure. Changing the symbol universe or refreshing fees on startup no longer waits for every research position to close.
 
-The dashboard distinguishes current cohorts, current last-N windows, parent-gate holds and lifetime PF. Lifetime Live-paper P&L and win rate are independent of the display limit; Live-paper history retains its own latest 1,000 closes. Old checkpoints without complete fee totals display those costs as unavailable.
+The dashboard distinguishes currently validated windows, admitted forward outcomes with immutable parent-gate evidence, exchange execution PF, current cohorts, parent-gate holds and lifetime PF. Validated windows are a current selection statistic; admitted and exchange PF retain subsequent losses. Lifetime Live-paper P&L and win rate are independent of the display limit; Live-paper history retains its own latest 1,000 closes. Old checkpoints without complete fee totals display those costs as unavailable.
 
 PF divides positive net percentage outcomes by the absolute sum of negative outcomes. Positive windows with no losses use internal sentinel 999; empty/flat windows use 1 internally. Explicit `pfState` metadata lets the UI distinguish no-loss windows (`∞`) from a finite PF of 999 and from empty or flat results. Neither a sentinel nor a qualification gate predicts returns.
 
@@ -103,11 +104,11 @@ PF divides positive net percentage outcomes by the absolute sum of negative outc
 
 The studio exposes range, step, ratio, exit, indication, gate, sizing, cost, Axis, Block, and DCA settings. Validated settings JSON can be exported and imported; an import updates the draft and requires the normal Save action. Changes generate new economic identities where needed, so incompatible configurations cannot borrow historical samples. Open positions retain their captured sizing and exit terms.
 
-Initial paper sizing is `baseNotional × volumeFactor`: by default `100 × 0.01 = 1 USDT`, before coordination adjustments. Exchange minimums can raise submitted quantity; confirmed receipts determine actual fills. The default universe targets 100 available contracts with a fixed initial symbol priority, not a volatility ranking or guaranteed selection of the best markets.
+Initial paper sizing is `baseNotional × volumeFactor × coordination ratio`: by default `100 × 0.01 = 1 USDT`, before coordination adjustments. The executor normalizes the entry so that its smallest planned relative add can meet exchange minimums, then applies the same actual-entry scale to adds. Invalid small adds and orders above the notional cap are rejected before canceling existing protection. Confirmed receipts determine actual fills. The default universe targets 100 available contracts with a fixed initial symbol priority, not a volatility ranking or guaranteed selection of the best markets.
 
 ## x02 execution
 
-The exchange writer is fixed to `https://open-api-vst.bingx.com`; it has no mainnet switch. Dedicated x02 keys and hedge position mode are required. Account mode is checked, not silently changed.
+The x02 client is fixed to `https://open-api-vst.bingx.com`; the x01 client is fixed to `https://open-api.bingx.com`. Each has dedicated credentials, engine, lease and journal. Authentication stays in the root store; x01 state is in its `x01` subdirectory. The UI and API select a whitelisted connection, never an arbitrary exchange host. Dedicated keys and hedge position mode are required. Account mode is checked, not silently changed.
 
 With variables exported into the process, run the read-only preflight:
 
@@ -132,7 +133,7 @@ npm run build
 node scripts/run-x02.mjs --execute
 ```
 
-The supervisor launches its own production server on `127.0.0.1`, signs in, saves **100 symbols, 1,440 warmup candles, and volume factor 0.01**, then enables x02 VST execution through the normal qualification gates. Other saved strategy settings remain in use. Run one server for that port/state directory.
+The supervisor launches its own production server on `127.0.0.1`, signs in, saves **50 symbols, 1,440 warmup candles, volume factor 0.01, and a 10 USDT per-order cap** (`--symbols N` overrides the count), then enables x02 VST execution through the normal qualification gates. Other saved strategy settings remain in use. Run one server for that port/state directory.
 
 Large saved states can take longer to initialize: startup requests allow 120 seconds. A known ownership conflict before settings are changed may wait up to 60 seconds for the previous lease to expire; ambiguous trading actions are never blindly retried. Restored symbols recover the oldest missing closed candles first in chunks up to the configured history size, even after a longer interruption. A gap, stale response, or changed cursor prevents that symbol from being marked warm until the missing data are available. A detected live quote gap also sends that symbol back through recovery; historical replay does not submit new entries.
 
@@ -234,3 +235,5 @@ npm run test:runtime
 `npm run test:browser` checks the built terminal with an isolated deterministic fixture, blank exchange keys, and a transport that rejects exchange writes. It exercises all six views, saved and unsaved settings, import/export, the replay UI→API→data→results flow, mobile layout and logout. Install Chromium with `npx playwright-core install --with-deps chromium`, or set `CTS_CHROMIUM_PATH` to an existing Chromium executable. Research accepts 100–5,000 completed candles, rejects gaps/stale data, carries training indicator prehistory into fresh holdout positions, and yields between candidates to keep the event loop responsive.
 
 The application currently has one x02 executor and no portfolio-wide capital reservation, risk optimizer, or verified multi-host worker coordination. Independent candidate exposure does not imply available exchange margin. Replay does not model funding, liquidation, depth, queue priority, or exchange latency. Verification does not establish profitability or universally best configurations.
+
+See [engine v4 contracts and research](docs/ENGINE-V4.md) for Trend/Break methods, PF scopes, entry provenance, ratio preservation, and verification boundaries.

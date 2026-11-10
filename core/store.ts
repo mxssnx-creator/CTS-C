@@ -93,8 +93,9 @@ export class StateStore {
   close() { this.database.close() }
 }
 const globalStores = globalThis as typeof globalThis & { __ctscStores?: Map<string, StateStore> }
-export function getStore(): StateStore {
-  const filename = path.resolve(process.env.CTS_DATA_DIR || ".data", "cts-c.sqlite")
+export function getStore(connectionId='bingx-x02'): StateStore {
+  if(!['bingx-x02','bingx-x01'].includes(connectionId))throw new Error('Unknown connection')
+  const filename = path.resolve(process.env.CTS_DATA_DIR || ".data", ...(connectionId==='bingx-x01'?['x01']:[]),"cts-c.sqlite")
   const stores = globalStores.__ctscStores ??= new Map()
   let instance = stores.get(filename)
   if (!instance) { instance = new StateStore(filename); stores.set(filename, instance) }

@@ -21,7 +21,7 @@ const transport=join(directory,'fixture-market.mjs')
 await writeFile(transport,`const original=globalThis.fetch;globalThis.fetch=async(input,options={})=>{const u=new URL(String(input));if(!u.hostname.endsWith('bingx.com'))return original(input,options);if((options.method||'GET')!=='GET')throw Error('Exchange writes forbidden in UI test');if(u.pathname.endsWith('/quote/klines')){const interval=u.searchParams.get('interval')||'5m';const ms=Number(interval.slice(0,-1))*({m:60000,h:3600000,d:86400000}[interval.slice(-1)]);const end=Number(u.searchParams.get('endTime')||Date.now());const last=Math.floor(end/ms)*ms;const n=Number(u.searchParams.get('limit')||200);const data=Array.from({length:n},(_,i)=>{const time=last-(n-1-i)*ms;const close=100+8*Math.sin(time/ms/9);return {time,open:close,high:close+.2,low:close-.2,close,volume:100}});return Response.json({code:0,data})}if(u.pathname.includes('/quote/'))return Response.json({code:0,data:['BTC','ETH','SOL','XRP','BCH'].map(s=>({symbol:s+'-USDT',price:'100',time:Date.now()}))});throw Error('Private exchange request forbidden in UI test')};`)
 let child,browser,logs=''
 try{
- child=spawn(process.execPath,['scripts/start-server.mjs'],{env:{...process.env,NODE_OPTIONS:`--import=${transport}`,HOSTNAME:'127.0.0.1',CTS_HOST:'127.0.0.1',PORT:String(port),NODE_ENV:'production',CTS_DATA_DIR:directory,CTS_ADMIN_PASSWORD:password,BINGX_X02_KEY:'',BINGX_X02_SECRET:'',BINGX_X02_API_KEY:'',BINGX_X02_API_SECRET:''},stdio:['ignore','pipe','pipe']})
+ child=spawn(process.execPath,['scripts/start-server.mjs'],{env:{...process.env,NODE_OPTIONS:`--import=${transport}`,HOSTNAME:'127.0.0.1',CTS_HOST:'127.0.0.1',PORT:String(port),NODE_ENV:'production',CTS_DATA_DIR:directory,CTS_ADMIN_PASSWORD:password,BINGX_X02_KEY:'',BINGX_X02_SECRET:'',BINGX_X02_API_KEY:'',BINGX_X02_API_SECRET:'',BINGX_X01_KEY:'',BINGX_X01_SECRET:'',BINGX_X01_API_KEY:'',BINGX_X01_API_SECRET:''},stdio:['ignore','pipe','pipe']})
  child.stdout.on('data',b=>logs=(logs+b).slice(-10000));child.stderr.on('data',b=>logs=(logs+b).slice(-10000))
  for(let i=0;i<200;i++){if(child.exitCode!==null)throw Error(logs);try{if((await fetch(origin+'/api/health')).ok)break}catch{}if(i===199)throw Error('Browser server startup timeout');await new Promise(r=>setTimeout(r,100))}
  const executablePath=process.env.CTS_CHROMIUM_PATH||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined)
@@ -34,9 +34,9 @@ try{
  assert.ok(await page.getByRole('heading',{name:'Paper equity by close sequence'}).isVisible())
  await page.getByRole('button',{name:'Strategy lab',exact:true}).click()
  const main=page.getByLabel('Main completed samples',{exact:true})
- await main.fill('7');await page.getByRole('button',{name:'Save configuration',exact:true}).click()
+ await main.fill('7');await page.getByLabel('Axis budget ratio',{exact:true}).fill('1.5');await page.getByLabel('TP distance factor',{exact:true}).fill('1.2');await page.getByRole('button',{name:'Save configuration',exact:true}).click()
  await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
- assert.equal((await (await page.request.get(origin+'/api/terminal')).json()).settings.mainEvalPosCount,'7')
+ const saved=(await (await page.request.get(origin+'/api/terminal')).json()).settings;assert.equal(saved.mainEvalPosCount,'7');assert.equal(saved.axisVolumeRatio,'1.5');assert.equal(saved.strategyTpFactor,'1.2');await page.getByRole('heading',{name:'Coordination versus Normal'}).waitFor()
  await main.fill('9');await page.waitForTimeout(5500);assert.equal(await main.inputValue(),'9')
  await page.getByRole('button',{name:'Discard unsaved strategy changes'}).click();assert.equal(await main.inputValue(),'7')
  await page.getByLabel('Import strategy configuration JSON').setInputFiles({name:'invalid.json',mimeType:'application/json',buffer:Buffer.from('{"apiSecret":"forbidden"}')})
@@ -49,6 +49,12 @@ try{
  await page.getByRole('button',{name:'Positions',exact:true}).click();await page.getByRole('heading',{name:'Position ledger'}).waitFor()
  await page.getByRole('button',{name:'Activity',exact:true}).click();await page.getByRole('heading',{name:'Event stream'}).waitFor()
  await page.getByRole('button',{name:'Connections',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Verify & start x02'}).isEnabled(),false)
+ await page.getByLabel('Trading connection',{exact:true}).selectOption('bingx-x01');await page.getByRole('heading',{name:'X01 execution control',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Verify & start x01 mainnet'}).isEnabled(),false)
+ await page.getByRole('button',{name:'Strategy lab',exact:true}).click();await page.getByLabel('Main completed samples',{exact:true}).fill('6');await page.getByRole('button',{name:'Save configuration',exact:true}).click();await page.getByText('Strategy configuration saved to x01.',{exact:true}).waitFor()
+ assert.equal((await (await page.request.get(origin+'/api/terminal?connection=bingx-x01')).json()).settings.mainEvalPosCount,'6')
+ assert.equal((await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings.mainEvalPosCount,'7')
+ await page.getByLabel('Trading connection',{exact:true}).selectOption('bingx-x02');await page.getByLabel('Main completed samples',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelector('input[type=number]')!==null)
+
  await page.getByRole('button',{name:'Integrations',exact:true}).click();await page.getByLabel('Search integrations').fill('unmatched');await page.getByText('No integration matches this search.').waitFor()
  await page.getByRole('button',{name:'Command center',exact:true}).click()
  if(process.env.CTS_UI_OUTPUT){await mkdir(process.env.CTS_UI_OUTPUT,{recursive:true});await page.screenshot({path:join(process.env.CTS_UI_OUTPUT,'desktop.png'),fullPage:true})}
@@ -58,7 +64,7 @@ try{
  await page.reload();await page.getByRole('heading',{name:'Stage diagnostics'}).waitFor()
  await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByLabel('Workspace password').waitFor()
  assert.deepEqual(errors,[])
- console.log(JSON.stringify({browserPassed:true,views:6,settingsSave:true,unsavedDraft:true,importExport:true,replayUiApiData:true,mobileWidth:390,errors,syntheticFixture:true,exchangeWrites:0}))
+ console.log(JSON.stringify({browserPassed:true,views:6,settingsSave:true,connectionIsolation:true,factorsRoundTrip:true,unsavedDraft:true,importExport:true,replayUiApiData:true,mobileWidth:390,errors,syntheticFixture:true,exchangeWrites:0}))
 }finally{
  await browser?.close()
  if(child&&child.exitCode===null){const exit=once(child,'exit');child.kill('SIGTERM');await exit}
