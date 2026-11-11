@@ -1,7 +1,7 @@
 export type Direction = "long" | "short"
 export type Stage = "base" | "main" | "real" | "live"
 export type Coordination = "normal" | "axis" | "block" | "dca"
-export type StrategyRange = "Micro" | "Minimal" | "Short" | "Normal" | "Long" | "Wide"
+export type StrategyRange = "Micro" | "Minimal" | "Short" | "Normal" | "Long" | "Wide" | "Low-Range"
 export type ExitMode = "fixed" | "trailing" | "trailing-only"
 export type ProfitFactorState = "empty" | "flat" | "no-losses" | "finite"
 export interface Candle { timestamp: number; open: number; high: number; low: number; close: number; volume: number }
@@ -11,6 +11,7 @@ export interface StrategyConfig {
   range?: StrategyRange; tpStep?: number; slRatio?: number; exitMode?: ExitMode
   roundTripCostPct?: number; maxHoldMinutes?: number; trailDistancePct?:number
   indicationSourceId?:string
+  autoPfFloor?:number
   signalTimeframeMinutes?:number
 }
 export interface PseudoPosition {
@@ -29,7 +30,7 @@ export interface EngineSettings {
   catalog: Record<string, unknown>
   coordinations: {
     axis: { enabled: boolean; previous: number; last: number; outcome: "positive" | "negative" | "any";reference?:'base'|'same-stage' }
-    block: { enabled: boolean; steps: number; ratio: number; mode: "shared" | "additive" }
+    block: { enabled: boolean; steps: number; ratio: number; mode: "shared" | "additive"; behavior?: "pyramid" | "rounds"; size?:number; pauseRounds?:number; maxMultiplier?:number }
     dca: { enabled: boolean; steps: number; distancePct: number; multiplier: number }
   }
   /** Retention ceiling; each lane keeps only the samples its stage/Axis windows need. Lifetime metrics are retained separately. */
@@ -60,6 +61,7 @@ export interface ClosedTrade {
 export interface LaneState {
   /** Internal Normal reference, never funded or counted as active Live execution. */
   calculationOnly?: boolean;
+  blockRound?: { closed:number; sum:number; net:number; level:number; pauseRemaining:number; rounds:number };
   id: string; symbol: string; configId: string; direction: Direction; stage: Stage; coordination: Coordination
   config: StrategyConfig; samples: number[]; closedCount: number; wins: number; netPnl: number; grossProfit: number; grossLoss: number
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
@@ -69,6 +71,7 @@ export interface LaneState {
 }
 export interface SignalState {
   portedBars?: Candle[];
+  lastSourceTimestamp?:number;
   count: number; prices: number[]; gains: number[]; losses: number[]; previousPrice?: number
   emaFast: number; emaSlow: number; emaSignal: number; avgGain: number; avgLoss: number
   previousSmaDiff?: number; previousHistogram?: number; previousRsi?: number; bandExcursion?: "below" | "above"
@@ -94,6 +97,7 @@ export interface ExecutionIntent {
 export interface EngineEvent { type: "opened" | "added" | "closed" | "qualified" | "execution"; status?:string; reason?:string; laneId: string; timestamp: number; stage: Stage; trade?: ClosedTrade }
 export interface EngineState {
   version: 1; settings: EngineSettings; lanes: Record<string, LaneState>; signals: Record<string, SignalState>
+  lastMicroTimestamp?: Record<string, number>;
   lastTimestamp: Record<string, number>; recentTrades: ClosedTrade[]; intents: ExecutionIntent[]
   recentLiveTrades?: ClosedTrade[]
   nextActivationOrder?:number

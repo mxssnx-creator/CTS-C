@@ -57,6 +57,20 @@ try{
  assert.equal((await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings.mainEvalPosCount,'7')
  await page.getByLabel('Trading connection',{exact:true}).selectOption('bingx-x02');await page.getByLabel('Main completed samples',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelector('input[type=number]')!==null)
 
+ await page.getByRole('button',{name:'Micro + Low-Range',exact:true}).click()
+ assert.equal(await page.getByLabel('Auto PF by configuration TP distance',{exact:true}).isChecked(),true)
+ assert.equal(await page.getByLabel('Record trades and 10-second history',{exact:true}).isChecked(),true)
+ assert.equal(await page.getByLabel('Micro / Low-Range trail width factor',{exact:true}).inputValue(),'0.5')
+ await page.getByLabel('Positions per Block round',{exact:true}).fill('4')
+ await page.getByRole('button',{name:'Save configuration',exact:true}).click()
+ await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
+ const micro=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
+ assert.deepEqual(JSON.parse(micro.strategyEnabledRanges),['Micro','Low-Range'])
+ assert.deepEqual(JSON.parse(micro.strategyTpSteps),[2,3,4,5])
+ assert.deepEqual(JSON.parse(micro.strategySlRatios),Array.from({length:15},(_,i)=>(i+2)/10))
+ assert.deepEqual(JSON.parse(micro.strategySignalTimeframes),[1/6,1])
+ assert.equal(micro.blockBehavior,'rounds');assert.equal(micro.blockSize,'4');assert.equal(micro.autoPfEnabled,'true')
+
  await page.getByRole('button',{name:'Integrations',exact:true}).click();await page.getByLabel('Search integrations').fill('unmatched');await page.getByText('No integration matches this search.').waitFor()
  await page.getByRole('button',{name:'Command center',exact:true}).click()
  if(process.env.CTS_UI_OUTPUT){await mkdir(process.env.CTS_UI_OUTPUT,{recursive:true});await page.screenshot({path:join(process.env.CTS_UI_OUTPUT,'desktop.png'),fullPage:true})}
@@ -66,7 +80,7 @@ try{
  await page.reload();await page.getByRole('heading',{name:'Stage diagnostics'}).waitFor()
  await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByLabel('Workspace password').waitFor()
  assert.deepEqual(errors,[])
- console.log(JSON.stringify({browserPassed:true,views:6,settingsSave:true,connectionIsolation:true,factorsRoundTrip:true,relationalVolumeSliders:true,unsavedDraft:true,importExport:true,replayUiApiData:true,mobileWidth:390,errors,syntheticFixture:true,exchangeWrites:0}))
+ console.log(JSON.stringify({browserPassed:true,views:6,settingsSave:true,connectionIsolation:true,factorsRoundTrip:true,relationalVolumeSliders:true,microPresetRoundTrip:true,unsavedDraft:true,importExport:true,replayUiApiData:true,mobileWidth:390,errors,syntheticFixture:true,exchangeWrites:0}))
 }finally{
  await browser?.close()
  if(child&&child.exitCode===null){const exit=once(child,'exit');child.kill('SIGTERM');await exit}

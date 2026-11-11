@@ -76,16 +76,25 @@ The original moving-average cross, RSI band, MACD signal and Bollinger bounce in
 
 | Range | TP steps | Maximum hold |
 |---|---:|---:|
-| Micro | 3–5 | 15 minutes |
+| Micro | 2–5 | 15 minutes |
+| Low-Range | 2–8, independent overlapping configurations | 15 minutes |
 | Minimal | 6–8 | 30 minutes |
 | Short | 9–12 | 60 minutes |
 | Normal | 13–18 | 240 minutes |
 | Long | 19–24 | 720 minutes |
 | Wide | 25–30 | 1,440 minutes |
 
-TP distance is estimated round-trip position cost multiplied by the selected step. SL distance is TP distance multiplied by the selected ratio. Fee inputs use percent units: `0.08` means `0.08%`. Slippage is a percentage of estimated fees. On connection startup the runtime reads commissions for each symbol. Their own fee estimates take precedence over configured fallbacks. New fee economics create new cohorts; open positions keep captured costs.
+TP distance is estimated round-trip position cost multiplied by the selected step. SL distance is TP distance multiplied by the selected ratio. Micro and Low-Range accept **0.2–1.6 in increments of 0.1**. Fee inputs use percent units: `0.05` means `0.05%`. Defaults are maker 0.02%, taker 0.05% per side, and slippage equal to 10% of those fees. Market entry plus market exit therefore model **0.11% total**, not 0.22%. On connection startup one account commission read supplies each selected symbol's verified fee economics, which take precedence over fallbacks. Actual fills use signed exchange commissions, without an additional modeled fee deduction. New fee economics create new cohorts; open positions keep captured costs.
 
-The balanced default uses seven TP steps (`3, 5, 8, 12, 18, 24, 30`), three SL ratios (`0.6, 1, 1.4`), four core indications, and three exits: **252 configurations per symbol**. The original four indications cover 3,696 complete combinations. Four additional research indications—MA inverse, trend pullback, RSI momentum, and Bollinger breakout—remain available. Nine additional Trend/Break tactics bring the selectable single-period, single-timeframe catalog to **15,708 combinations**. Trend/Break periods and UTC timeframes form additional independent lanes. They remain optional; a wider catalog does not establish an economic edge. Directions, coordinations, and stages create separate lanes; these are not simultaneous order counts.
+The balanced default retains seven TP steps (`3, 5, 8, 12, 18, 24, 30`), three SL ratios (`0.6, 1, 1.4`), four core indications, and three exits: **252 configurations per symbol**. All 29 steps with 15 ratios and those four indications produce 5,220 configurations before optional Low-Range overlaps. The Micro + Low-Range preset selects steps 2–5, all 15 ratios, three exits and both 10-second and one-minute signals: 2,880 configurations per symbol with four core indications. Other tactics, periods and timeframes remain independently selectable. Directions, coordinations, and stages create separate lanes; these are not simultaneous order counts.
+
+Micro and Low-Range trailing width defaults to half the selected SL distance (adjustable), with the existing dynamic peak ratchet and fixed initial stop. Auto PF is optional and computes each configuration's floor once: `max(stage floor, 1.01, min(cap, 1 + floor(TP_percent × 10) / 10 × slope))`. It changes qualification thresholds, never samples or reported returns. The Micro preset enables Auto PF and processed-set progression; a child retains its admission proof and learns from its own subsequent trades, while Real remains the current execution gate.
+
+### Observed 10-second history
+
+The optional trade stream uses the exchange's compressed `@trade` WebSocket feed and builds 10-second OHLCV from observed trades. x02 uses the VST WebSocket host. Fifty symbols use three sockets, with per-socket heartbeat checks, bounded queues and reconnect handling. Trade IDs are deduplicated when supplied; VST messages observed during verification omit IDs, which remain explicitly unavailable. The partial first bucket and gaps are excluded from signal history; reconnects reset continuity. No sub-minute candles are invented from one-minute data.
+
+Complete and incomplete recorded bars persist for three days in SQLite. Ten-second and minute signals have independent timestamps and evidence. During minute warmup, present-time ticks only affect sub-minute lanes; they cannot close historical minute positions. REST reads run in the background, and history work yields in bounded batches so the trade loop can continue. The 100ms timer is a scheduling target, not a measured exchange execution latency guarantee. See [Micro verification](docs/MICRO-20261111.md) for results and limitations.
 
 Progression is **Base → Main → Real → Live**. A child stage begins only while all matching preceding lanes meet their independent sample and PF gates. Each child records its own subsequent results; parent samples are never copied forward. Defaults are 20 Base closes, 8 Main closes, 8 Real closes, and PF 1.1 at each gate. The runtime rechecks current qualification after asynchronous preflight before entry/add submission. Rolling qualification can decline as results change.
 
@@ -99,7 +108,7 @@ PF divides positive net percentage outcomes by the absolute sum of negative outc
 |---|---|
 | Normal | Initial fill with the selected exit rules. |
 | Axis | Requires disjoint previous/recent Normal-lane windows; checks previous PF and the selected recent-outcome condition before starting its own evaluation. |
-| Block | Adds after favorable movement. Shared mode distributes a fixed budget; additive mode increases it. |
+| Block | Configurable completed-position rounds or favorable-move pyramiding. Rounds evaluate N net closes independently per lane, increase the next round's base budget after a loss, retain the increase until net recovery, then pause complete rounds of eligible signals. Steps and multiplier cap bound the increase. Shared/additive applies to pyramiding. |
 | DCA | Adds after a configured adverse movement with bounded additions and a sizing multiplier; updates weighted entry and costs. |
 
 The studio exposes range, step, ratio, exit, indication, gate, sizing, cost, Axis, Block, and DCA settings. Validated settings JSON can be exported and imported; an import updates the draft and requires the normal Save action. Changes generate new economic identities where needed, so incompatible configurations cannot borrow historical samples. Open positions retain their captured sizing and exit terms.

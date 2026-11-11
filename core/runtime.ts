@@ -1,3 +1,4 @@
+import {BingxTradeStream,TradeBarBuilder} from './trade-stream'
 import { randomUUID } from 'node:crypto'
 import { TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings,validateObservedCandles } from './engine'
 import { connectionClient, connectionCredentials, stableClientOrderId,type BingxClient } from './bingx'
@@ -22,15 +23,26 @@ function retainEvents(target:EngineEvent[],source:readonly EngineEvent[],limit=5
 export class TerminalRuntime {
   engine: TradingEngine
   control: Control
+  private tradeStream?:BingxTradeStream
+  private tradeBars=new TradeBarBuilder()
+  private tradeGeneration=0
+  private tradeTimer?:ReturnType<typeof setTimeout>
+  private tradeSerialPending=false
+  private tradeBarsRecorded=0
   private timer?: ReturnType<typeof setTimeout>
   private readonly owner=randomUUID()
   private leased=false
+  private leaseRenewedAt=0
   private leaseLost=false
   private heartbeat?:ReturnType<typeof setInterval>
   private checkpointAt=0
   private bufferedEvents:EngineEvent[]=[]
   private sequence: Promise<unknown> = Promise.resolve()
   private executionTask?:Promise<void>
+  private quoteTask?:Promise<void>
+  private quoteResult?:Awaited<ReturnType<BingxClient["quotes"]>>
+  private quoteError:Error|null=null
+  private quoteGeneration=0
   private accountTask?:Promise<void>
   private accountRetryAt=0
   private accountGeneration=0
@@ -55,16 +67,26 @@ export class TerminalRuntime {
   }
   private ensureLease() {
     if(this.leaseLost)throw new Error('Execution ownership was lost; restart this process to reload durable state')
-    if(this.leased){if(this.store.renewLease(this.owner))return;this.leaseLost=true;this.control.running=false;clearTimeout(this.timer);throw new Error('Another runtime owns execution or this runtime lease expired')}
+    if(this.leased){
+      const now=Date.now(),renew=now-this.leaseRenewedAt>=1000
+      if(renew?this.store.renewLease(this.owner):this.store.ownsLease(this.owner)){if(renew)this.leaseRenewedAt=now;return}
+      this.leaseLost=true;this.control.running=false;clearTimeout(this.timer);throw new Error('Another runtime owns execution or this runtime lease expired')
+    }
     if(!this.store.acquireLease(this.owner))throw new Error('Another CTS-C process owns this data directory')
     this.leased=true
+    this.leaseRenewedAt=Date.now()
     this.heartbeat=setInterval(()=>{try{this.ensureLease()}catch(error){this.control.lastError=error instanceof Error?error.message:'Ownership lost';clearInterval(this.heartbeat)}},5000)
     this.heartbeat.unref?.()
     const restored=this.store.loadEngineState()
     if(restored)this.engine=TradingEngine.fromOwnedCheckpoint(restored)
     this.control={...this.control,...this.store.get<Control>('control'),warmed:[]}
   }
-  shutdown(){clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false;this.leaseLost=true;this.control.running=false}
+  async quiesce(){
+    await this.serial(async()=>this.stop())
+    await this.executionTask
+    await this.serial(async()=>{})
+  }
+  shutdown(){this.tradeStream?.stop();clearTimeout(this.tradeTimer);clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false;this.leaseLost=true;this.control.running=false}
   serial<T>(operation:()=>Promise<T>): Promise<T> { const next=this.sequence.catch(()=>{}).then(operation); this.sequence=next; return next }
   private persist(events: EngineEvent[] = [],force=true) {
     this.ensureLease();retainEvents(this.bufferedEvents,events)
@@ -81,6 +103,7 @@ export class TerminalRuntime {
   async start() {
     this.ensureLease()
     if(!connectionCredentials(this.connectionId))throw new Error(`Dedicated ${connectionInfo(this.connectionId).name} credentials are unavailable on the server.`)
+    this.quoteGeneration++;this.quoteResult=undefined;this.quoteError=null
     this.accountGeneration++;this.accountError=null;this.accountRetryAt=0
     this.client = this.createClient(this.connectionId)
     this.executor = new DemoExecutor(this.store,this.client,{connectionId:this.connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
@@ -103,11 +126,51 @@ export class TerminalRuntime {
     this.engine.updateSettings({symbolFees})
     this.control={...this.control,running:true,exchangeExecution:true,lastError:null,feeReadFailures,feeCheckedAt:Date.now()}
     this.persist()
+    this.startTradeStream()
     this.schedule()
   }
   pause() { this.ensureLease();this.control.exchangeExecution=false; this.persist() }
-  stop() { this.ensureLease();this.control.running=false;this.control.exchangeExecution=false;clearTimeout(this.timer);this.timer=undefined;this.persist() }
-  resume() { if(this.control.running){try{this.ensureLease();if(connectionCredentials(this.connectionId))this.schedule();else{this.control.running=false;this.control.lastError=`${connectionInfo(this.connectionId).name} credentials unavailable after restart`;this.persist()}}catch(error){this.control.running=false;this.control.lastError=error instanceof Error?error.message:'Runtime ownership unavailable'}} }
+  stop() { this.ensureLease();this.tradeStream?.stop();clearTimeout(this.tradeTimer);this.control.running=false;this.control.exchangeExecution=false;clearTimeout(this.timer);this.timer=undefined;this.persist() }
+  resume() { if(this.control.running){try{this.ensureLease();if(connectionCredentials(this.connectionId)){this.startTradeStream();this.schedule();}else{this.control.running=false;this.control.lastError=`${connectionInfo(this.connectionId).name} credentials unavailable after restart`;this.persist()}}catch(error){this.control.running=false;this.control.lastError=error instanceof Error?error.message:'Runtime ownership unavailable'}} }
+  private startTradeStream(){
+    this.tradeStream?.stop();clearTimeout(this.tradeTimer)
+    if(this.engine.settings.catalog.microTradeStream!==true)return
+    this.tradeStream=new BingxTradeStream(this.connectionId)
+    this.tradeStream.start(this.engine.managedSymbols())
+    this.scheduleTrades()
+  }
+  private scheduleTrades(){
+    if(!this.control.running||!this.tradeStream)return
+    this.tradeTimer=setTimeout(()=>{
+      if(!this.tradeSerialPending){
+        this.tradeSerialPending=true
+        void this.serial(async()=>this.consumeTrades()).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Trade processing failed'}).finally(()=>{this.tradeSerialPending=false;this.scheduleTrades()})
+      }
+    },100)
+    this.tradeTimer.unref?.()
+  }
+  private consumeTrades(){
+    if(!this.control.running||!this.tradeStream)return
+    this.ensureLease()
+    if(this.tradeGeneration!==this.tradeStream.status.generation){this.tradeGeneration=this.tradeStream.status.generation;this.tradeBars.reset()}
+    const events:EngineEvent[]=[]
+    for(const trade of this.tradeStream.drain()){
+      const observed=this.tradeBars.ingest(trade)
+      if(!observed.accepted)continue
+      if(observed.bar){
+        this.store.saveTradeBar(trade.symbol,observed.bar);this.tradeBarsRecorded++
+        if(observed.bar.complete){
+          // Each micro lane warms on its own observed bars and stage proofs;
+          // unrelated minute-history recovery must not block a qualified lane.
+          const fresh=Date.now()-trade.timestamp<=15000
+          retainEvents(events,this.engine.processCandles(trade.symbol,[observed.bar],{barSeconds:10,allowExecution:fresh&&this.control.exchangeExecution,eventLimit:fresh?5000:0}))
+        }
+      }
+      this.marks.set(trade.symbol,{price:trade.price,timestamp:trade.timestamp})
+      retainEvents(events,this.engine.processTick(trade.symbol,trade.price,trade.timestamp,true,this.control.warmed.includes(trade.symbol)?"all":"micro"))
+    }
+    if(events.length)this.persist(events,false)
+  }
   private prefetchHistory() {
     if(!this.control.running)return
     const latest=Math.floor(Date.now()/60000)*60000
@@ -140,8 +203,10 @@ export class TerminalRuntime {
     return cutoff!==undefined&&Boolean(mark&&mark.timestamp>=cutoff&&mark.timestamp<=now+5000&&now-mark.timestamp<=15000)
   }
   private consumeHistory(events:EngineEvent[],overlapOnly=false){
-      const warmed=[...this.warmJobs.entries()].filter(([symbol,job])=>(job.data||job.error)&&(!overlapOnly||!job.live||this.verifiedQuote(symbol,job.plan?.cutoff))).slice(0,overlapOnly?3:8)
+      const warmed=[...this.warmJobs.entries()].filter(([symbol,job])=>(job.data||job.error)&&(!job.live||this.verifiedQuote(symbol,job.plan?.cutoff))).slice(0,overlapOnly?3:8)
+      const batchBegan=performance.now()
       for(const [symbol,job] of warmed){
+        if(performance.now()-batchBegan>=100)break
         this.ensureLease()
         try {
           if(job.error)throw new Error(job.error)
@@ -158,41 +223,38 @@ export class TerminalRuntime {
               job.offset=0;job.validated=true
             }
             if(this.engine.lastProcessedAt(symbol)!==job.cursor)throw new Error('History cursor changed during a partial recovery')
-            const began=performance.now(),offset=job.offset??0
-            while((job.offset??0)<job.data.length&&(job.offset??0)-offset<128&&performance.now()-began<200){
+            const offset=job.offset??0
+            while((job.offset??0)<job.data.length&&(job.offset??0)-offset<128&&performance.now()-batchBegan<100){
               const chunk=job.data.slice(job.offset,(job.offset??0)+8)
               const fresh=job.live===true&&job.data.length===1&&job.plan?.cutoff===Math.floor(Date.now()/60000)*60000&&this.verifiedQuote(symbol,job.plan.cutoff)
-              retainEvents(events,this.engine.processCandles(symbol,chunk,{allowExecution:fresh&&this.control.exchangeExecution,eventLimit:5000}))
+              retainEvents(events,this.engine.processCandles(symbol,chunk,{allowExecution:fresh&&this.control.exchangeExecution,eventLimit:fresh?5000:0}))
               job.offset=(job.offset??0)+chunk.length;job.cursor=this.engine.lastProcessedAt(symbol)
             }
             if((job.offset??0)>=job.data.length){
               this.warmJobs.delete(symbol)
               if((!job.plan||job.plan.cutoff>=Math.floor(Date.now()/60_000)*60_000)&&!this.control.warmed.includes(symbol))this.control.warmed.push(symbol)
-            }
+            }else{this.warmJobs.delete(symbol);this.warmJobs.set(symbol,job)}
           }
         } catch(error) {this.warmJobs.delete(symbol);this.control.lastError=`${symbol}: ${error instanceof Error?error.message:'History unavailable'}`;this.warmRetryAt.set(symbol,Date.now()+30000)}
       }
       if(warmed.length)this.persist(events.splice(0),false)
   }
-  private schedule() { if(this.timer||!this.control.running)return; this.timer=setTimeout(()=>{this.timer=undefined;void this.serial(()=>this.tick()).finally(()=>this.schedule())},1000);this.timer.unref?.() }
+  private schedule() { if(this.timer||!this.control.running)return; const warming=this.control.warmed.length<this.engine.managedSymbols().length;this.timer=setTimeout(()=>{this.timer=undefined;void this.serial(()=>this.tick()).finally(()=>this.schedule())},warming?100:1000);this.timer.unref?.() }
   private async tick() {
     if(!this.control.running)return
     try {
       this.ensureLease()
       const events:EngineEvent[]=[]
       this.prefetchHistory()
-      let quoteReady=false
-      const quoteRead=this.client.quotes()
-      void quoteRead.then(()=>{quoteReady=true},()=>{quoteReady=true})
-      await Promise.resolve()
-      while(!quoteReady&&this.control.running){
-        const pending=[...this.warmJobs.values()].length>0
-        if(!pending)break
-        this.consumeHistory(events,true)
-        this.prefetchHistory()
-        await new Promise<void>(resolve=>setTimeout(resolve,25))
+      if(!this.quoteTask){
+        const generation=this.quoteGeneration
+        this.quoteTask=this.client.quotes().then(quotes=>{
+          if(generation===this.quoteGeneration){this.quoteResult=quotes;this.quoteError=null}
+        }).catch(error=>{if(generation===this.quoteGeneration)this.quoteError=error instanceof Error?error:new Error('Quotes unavailable')}).finally(()=>{this.quoteTask=undefined})
       }
-      const quotes=await quoteRead
+      await Promise.resolve()
+      this.consumeTrades()
+      const quotes=this.quoteResult??[];this.quoteResult=undefined
       const now=Date.now(), settings=this.engine.settings
       const managed=new Set(this.engine.managedSymbols())
       let dataGap=false
@@ -200,7 +262,7 @@ export class TerminalRuntime {
       for(const quote of quotes) {
         if(!this.control.warmed.includes(quote.symbol)||!managed.has(quote.symbol))continue
         if(!Number.isFinite(quote.price)||quote.price<=0||Date.now()-quote.timestamp>15_000||quote.timestamp>Date.now()+5000)continue
-        this.marks.set(quote.symbol,{price:quote.price,timestamp:quote.timestamp})
+        if((this.marks.get(quote.symbol)?.timestamp??0)<=quote.timestamp)this.marks.set(quote.symbol,{price:quote.price,timestamp:quote.timestamp})
         const bucket=Math.floor(quote.timestamp/60_000)*60_000
         const previous=this.bars.get(quote.symbol)
         if(previous&&bucket>previous.bucket) {
@@ -219,7 +281,7 @@ export class TerminalRuntime {
         else if(quote.timestamp>bar.lastObservation){bar.candle.high=Math.max(bar.candle.high,quote.price);bar.candle.low=Math.min(bar.candle.low,quote.price);bar.candle.close=quote.price;bar.lastObservation=quote.timestamp}
         retainEvents(events,this.engine.processTick(quote.symbol,quote.price,quote.timestamp))
       }
-      this.control.lastTick=now;if(!dataGap)this.control.lastError=null
+      if(quotes.length)this.control.lastTick=now;if(!dataGap)this.control.lastError=this.quoteError?.message??null
       this.persist(events.splice(0),false)
       if(!this.executionTask){
         const pending=this.engine.pendingIntents().filter(i=>this.control.exchangeExecution||i.kind==='close')
@@ -243,7 +305,7 @@ export class TerminalRuntime {
     input=validateConfiguration(input,{partial:true})
     validateConfiguration({...flatEngineSettings(this.engine.settings,this.control),...input})
     const current=this.engine.settings, next=structuredClone(current)
-    const catalogKeys=['relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
+    const catalogKeys=['microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
     for(const [key,value] of Object.entries(input)) {
       if(key==='stageGateMode'){next.stageGateMode=value as EngineSettings['stageGateMode'];continue}
@@ -262,6 +324,10 @@ export class TerminalRuntime {
       if(key==='axisLast'){next.coordinations.axis.last=Number(value);continue}
       if(key==='axisOutcome'){next.coordinations.axis.outcome=value as EngineSettings['coordinations']['axis']['outcome'];continue}
       if(key==='axisReferenceStage'){next.coordinations.axis.reference=value as 'base'|'same-stage';continue}
+      if(key==='blockBehavior'){next.coordinations.block.behavior=value as 'pyramid'|'rounds';continue}
+      if(key==='blockSize'){next.coordinations.block.size=Number(value);continue}
+      if(key==='blockPauseRounds'){next.coordinations.block.pauseRounds=Number(value);continue}
+      if(key==='blockMaxMultiplier'){next.coordinations.block.maxMultiplier=Number(value);continue}
       if(key==='blockSteps'){next.coordinations.block.steps=Number(value);continue}
       if(key==='blockMode'){next.coordinations.block.mode=value as EngineSettings['coordinations']['block']['mode'];continue}
       if(key==='dcaSteps'){next.coordinations.dca.steps=Number(value);continue}
@@ -275,6 +341,7 @@ export class TerminalRuntime {
     if(input.symbolCount!==undefined)this.control.symbolCount=Number(input.symbolCount)
     if(input.historyCandles!==undefined)this.control.historyCandles=Number(input.historyCandles)
     this.persist()
+    if(this.control.running&&input.microTradeStream!==undefined)this.startTradeStream()
   }
   snapshot() {
     const s=this.engine.snapshot({laneLimit:500,positionLimit:1000,positionStage:'live'}), account=this.store.get<{equity:number;updatedAt:number}>('account')
@@ -291,7 +358,7 @@ export class TerminalRuntime {
       stages,settings,connectionId:this.connectionId,connections:CONNECTIONS.map(c=>({...c,configured:Boolean(connectionCredentials(c.id)),enabled:c.id===this.connectionId&&this.control.running,liveEnabled:c.id===this.connectionId&&this.control.exchangeExecution})),
       events:this.store.events().map(e=>({timestamp:new Date(Number(e.timestamp)||Date.now()).toISOString(),level:e.status==='rejected'?'error':'info',phase:String(e.stage||'engine'),message:`${e.type}${e.status?' '+e.status:''}: ${e.reason||String(e.laneId||'').slice(0,240)}`,connectionId:this.connectionId})),
       readiness:{x02Configured:Boolean(connectionCredentials('bingx-x02')),configured:Boolean(connectionCredentials(this.connectionId)),environment:connectionInfo(this.connectionId).environment,status:this.control.lastError||this.accountError||(this.control.running?warmedCount>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${warmedCount}/${s.symbolCount}`:connectionCredentials(this.connectionId)?`Configured; ready to verify ${connectionInfo(this.connectionId).environment}`:`Dedicated ${connectionInfo(this.connectionId).name} credentials required`),engineStatus:this.control.running?'running':'stopped',warmedSymbols:warmedCount,lastTick:this.control.lastTick},
-      positionCount:live.open,positionDisplayLimit:1000,metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
+      positionCount:live.open,positionDisplayLimit:1000,microMarketData:{...this.tradeStream?.status,barsRecorded:this.tradeBarsRecorded,duplicates:this.tradeBars.duplicates,lateTrades:this.tradeBars.late,gaps:this.tradeBars.gaps,barSeconds:10},metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
       coordinationStats:this.engine.coordinationStats(),
       engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory,symbolFees:s.settings.symbolFees??{},feeReadFailures:this.control.feeReadFailures,feeCheckedAt:this.control.feeCheckedAt,feeFallbackSymbols:s.settings.symbols.filter(symbol=>!s.settings.symbolFees?.[symbol])},
       execution:{lots:this.executor.lots(),intents:this.store.intents(100),summary:this.executor.summary()},lastReplay:this.store.get('lastReplay')}
