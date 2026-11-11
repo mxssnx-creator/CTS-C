@@ -1,9 +1,10 @@
+import {blockRoundBudget,settleBlockRound,consumeBlockPause} from "./block-rounds"
 import {normalizedVolumeFactor,relationalVolumeSettings} from "../shared/cts-volume/ratios";
 import { strategyProcessing } from "./strategy-processing"
 import { createHash } from "node:crypto"
 import { generateStrategyCatalog } from "./catalog"
 import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals, newSignalState } from "./replay"
-import { aggregateCostNormalizedResults, describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
+import { describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { observedExit } from "./exits"
 import type { Candle, ClosedTrade, Coordination, Direction, EngineEvent, EngineSettings, EngineSnapshot, EngineState, ExecutionIntent, LaneState, PaperPosition, Stage, StrategyConfig,GateProof } from "./types"
 
@@ -55,6 +56,8 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   if (axis.enabled && axis.previous + axis.last > settings.maxSamples) throw new Error("Axis windows exceed retained samples")
   if (!["positive", "negative", "any"].includes(axis.outcome)) throw new Error("Invalid axis outcome")
   if(axis.reference!==undefined&&!['base','same-stage'].includes(axis.reference))throw new Error('Invalid Axis reference stage')
+  if(block.behavior!==undefined&&!['pyramid','rounds'].includes(block.behavior))throw new Error('Invalid Block behavior')
+  finite(block.size??3,'block size',1,100,true);finite(block.pauseRounds??1,'block pause rounds',0,100,true);finite(block.maxMultiplier??3,'block multiplier cap',1,10)
   finite(block.steps, "block steps", 1, 20, true); finite(block.ratio, "block ratio", .01, 10)
   if (!["shared", "additive"].includes(block.mode)) throw new Error("Invalid block mode")
   finite(dca.steps, "DCA steps", 1, 20, true); finite(dca.distancePct, "DCA distance", .001, 100); finite(dca.multiplier, "DCA multiplier", .01, 10)
@@ -73,12 +76,20 @@ function laneKey(connectionId: string, symbol: string, config: StrategyConfig, d
   // JSON identities cannot collide when a user changes delimiters in a label.
   return JSON.stringify([connectionId, symbol, config.id, direction, coordination, stage, identity])
 }
+type WindowResult={count:number;required:number;minPF:number;profit:number;loss:number;enoughSamples:boolean;profitFactor:number;pfState:import('./types').ProfitFactorState;qualified:boolean}
+const windowCache=new WeakMap<LaneState,{closed:number;samples:number[];length:number;head:number|undefined;value:WindowResult}>()
+const axisCache=new WeakMap<LaneState,{closed:number;samples:number[];length:number;head:number|undefined;previous:number;last:number;outcome:string;threshold:number;allowed:boolean}>()
 function windowMetrics(lane: LaneState | undefined, required: number, minPF: number) {
+  minPF = Math.max(minPF,lane?.config.autoPfFloor??0)
   const samples = lane?.samples ?? [], count = Math.min(samples.length, required)
+  const cached=lane?windowCache.get(lane):undefined
+  if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.value.required===required&&cached.value.minPF===minPF)return cached.value
   let profit = 0, loss = 0
   for (let i = 0; i < count; i++) { profit += Math.max(0, samples[i]); loss += Math.max(0, -samples[i]) }
   const pf = describeProfitFactor(profit, loss, count)
-  return { count, required, profit, loss, enoughSamples: count >= required, ...pf, qualified: count >= required && pf.profitFactor >= minPF }
+  const value={count,required,minPF,profit,loss,enoughSamples:count>=required,...pf,qualified:count>=required&&pf.profitFactor>=minPF}
+  if(lane)windowCache.set(lane,{closed:lane.closedCount,samples,length:samples.length,head:samples[0],value})
+  return value
 }
 export function validateObservedCandles(candles:readonly Candle[]):void{
   let previous=-Infinity
@@ -97,17 +108,19 @@ export class TradingEngine {
   private streams=new Map<string,ConfigStream[]>()
   private signalStreams=new Map<string,ConfigStream[]>()
   private portedStreams=new Map<string,{minutes:number;stateKey:string;ids:string[];streams:ConfigStream[];usesReferences:boolean}[]>()
+  private microStreams=new Map<string,ConfigStream[]>()
+  private minuteStreams=new Map<string,ConfigStream[]>()
   private coordinationIds = {} as Record<Coordination, string>
   private processedCoordinationIds={} as Record<Coordination,string>
   private active = new Map<string, Set<string>>()
+  private activeMicro = new Map<string, Set<string>>()
+  private activeMinute = new Map<string, Set<string>>()
   private livePositions = new Map<string,LaneState>()
   private configIds = new Set<string>()
   private currentLaneIds = new Set<string>()
   private contexts=new Map<string,Map<string,LaneContext>>()
   private validLineages=new Set<string>()
   private dirtyLaneIds=new Set<string>()
-  private qualificationCache=new Map<string,{closed:number;required:number;minPF:number;qualified:boolean}>()
-  private axisWindowCache=new Map<string,{closed:number;allowed:boolean}>()
   private volumeWeights=relationalVolumeSettings(undefined)
   private readonly maxRecentTrades = 1000
   /** Parse an independently owned checkpoint without duplicating its entire ledger. */
@@ -154,7 +167,7 @@ export class TradingEngine {
   }
   get settings(): EngineSettings { return structuredClone(this.state.settings) }
   managedSymbols():string[]{return [...new Set([...this.state.settings.symbols,...[...this.active].filter(([,lanes])=>lanes.size>0).map(([symbol])=>symbol)])]}
-  lastProcessedAt(symbol: string): number | null { return this.state.lastTimestamp[normalizeSymbol(symbol)] ?? null }
+  lastProcessedAt(symbol: string,barSeconds:10|60=60): number | null { return (barSeconds===10?this.state.lastMicroTimestamp:this.state.lastTimestamp)?.[normalizeSymbol(symbol)] ?? null }
   updateSettings(input: Partial<EngineSettings>): void {
     const previous = this.state.settings
     if (input.connectionId && input.connectionId !== previous.connectionId) throw new Error("Use a separate engine for another connection")
@@ -163,6 +176,7 @@ export class TradingEngine {
       stageLastN: { ...previous.stageLastN, ...input.stageLastN }, stageMinPF: { ...previous.stageMinPF, ...input.stageMinPF },
       coordinations: { axis: { ...previous.coordinations.axis, ...input.coordinations?.axis }, block: { ...previous.coordinations.block, ...input.coordinations?.block }, dca: { ...previous.coordinations.dca, ...input.coordinations?.dca } },
     })
+    if(JSON.stringify(previous)===JSON.stringify(this.state.settings))return
     this.configs = generateStrategyCatalog(this.state.settings.connectionId, this.state.settings.catalog, "1970-01-01T00:00:00.000Z")
     this.refreshSymbolCatalogs()
     this.refreshCoordinationIds()
@@ -171,7 +185,7 @@ export class TradingEngine {
   }
   exportState(): EngineState { return structuredClone(this.state) }
   private refreshSymbolCatalogs(){
-    this.symbolConfigs.clear();this.symbolConfigIds.clear();this.configIds.clear();this.streams.clear();this.signalStreams.clear();this.portedStreams.clear()
+    this.symbolConfigs.clear();this.symbolConfigIds.clear();this.configIds.clear();this.streams.clear();this.signalStreams.clear();this.portedStreams.clear();this.microStreams.clear();this.minuteStreams.clear()
     const cache=new Map<string,{configs:StrategyConfig[];ids:Set<string>}>()
     for(const symbol of this.state.settings.symbols){
       const fees=this.state.settings.symbolFees?.[symbol],identity=JSON.stringify(fees??null)
@@ -179,7 +193,7 @@ export class TradingEngine {
       if(!cached){const configs=fees?generateStrategyCatalog(this.state.settings.connectionId,{...this.state.settings.catalog,...fees},'1970-01-01T00:00:00.000Z'):this.configs;cached={configs,ids:new Set(configs.map(c=>c.id))};cache.set(identity,cached)}
       const {configs,ids}=cached
       this.symbolConfigs.set(symbol,configs);this.symbolConfigIds.set(symbol,ids)
-      this.streams.set(symbol,configs.map(config=>({config,key:JSON.stringify([symbol,config.type,config.position_cost_step,...(config.indicationSourceId?[config.indicationSourceId]:[]),...((config.signalTimeframeMinutes??1)>1?[config.signalTimeframeMinutes]:[])])})))
+      this.streams.set(symbol,configs.map(config=>({config,key:JSON.stringify([symbol,config.type,config.position_cost_step,...(config.indicationSourceId?[config.indicationSourceId]:[]),...((config.signalTimeframeMinutes??1)!==1?[config.signalTimeframeMinutes]:[])])})))
       const ordinary=new Map<string,ConfigStream>(),groups=new Map<number,Map<string,ConfigStream>>()
       for(const stream of this.streams.get(symbol)!){
         if(!stream.config.indicationSourceId){ordinary.set(stream.key,stream);continue}
@@ -187,6 +201,8 @@ export class TradingEngine {
       }
       this.signalStreams.set(symbol,[...ordinary.values()])
       this.portedStreams.set(symbol,[...groups].map(([minutes,unique])=>{const streams=[...unique.values()],ids=[...new Set(streams.map(s=>s.config.indicationSourceId!))];return {minutes,stateKey:JSON.stringify([symbol,'ported-sources-v1',minutes]),ids,streams,usesReferences:ids.some(id=>/pair-|market-/.test(id))}}))
+      this.microStreams.set(symbol,this.streams.get(symbol)!.filter(({config})=>(config.signalTimeframeMinutes??1)<1))
+      this.minuteStreams.set(symbol,this.streams.get(symbol)!.filter(({config})=>(config.signalTimeframeMinutes??1)>=1))
       for(const config of configs)this.configIds.add(config.id)
     }
   }
@@ -194,6 +210,9 @@ export class TradingEngine {
   private activate(lane: LaneState) {
     if (!this.active.has(lane.symbol)) this.active.set(lane.symbol, new Set())
     this.active.get(lane.symbol)!.add(lane.id)
+    const source=(lane.config.signalTimeframeMinutes??1)<1?this.activeMicro:this.activeMinute
+    if(!source.has(lane.symbol))source.set(lane.symbol,new Set())
+    source.get(lane.symbol)!.add(lane.id)
     if(lane.stage==="live"&&lane.open&&!lane.calculationOnly)this.livePositions.set(lane.open.id,lane)
   }
   private currentLane(lane:LaneState):boolean {
@@ -210,7 +229,7 @@ export class TradingEngine {
   private refreshCurrentLaneIds():void {
     const s=this.state.settings
     const symbols=new Set(s.symbols)
-    this.currentLaneIds.clear();this.contexts.clear();this.validLineages.clear();this.qualificationCache.clear();this.axisWindowCache.clear()
+    this.currentLaneIds.clear();this.contexts.clear();this.validLineages.clear()
     for(const lane of Object.values(this.state.lanes))if(symbols.has(lane.symbol)&&this.symbolConfigIds.get(lane.symbol)?.has(lane.configId)&&(lane.coordination==="normal"||s.coordinations[lane.coordination].enabled)
       &&lane.id===laneKey(s.connectionId,lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage,this.coordinationIdentity(lane.coordination,lane.stage,lane.config,lane.symbol))){this.currentLaneIds.add(lane.id);this.cacheLane(lane)}
   }
@@ -267,7 +286,7 @@ export class TradingEngine {
     if(!lane)return false
     if(this.validLineages.has(lane.id))return true
     const index=STAGES.indexOf(lane.stage),s=this.state.settings
-    const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>proof.stage===STAGES[i]&&proof.qualified&&Number.isFinite(proof.checkedAt)&&proof.checkedAt>0&&Number.isFinite(proof.profitFactor)&&proof.count===proof.required&&proof.profitFactor>=proof.minPF&&proof.required===s.stageLastN[proof.stage as 'base'|'main'|'real']&&proof.minPF===s.stageMinPF[proof.stage as 'base'|'main'|'real']&&proof.laneId===this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,proof.stage)?.id))
+    const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>proof.stage===STAGES[i]&&proof.qualified&&Number.isFinite(proof.checkedAt)&&proof.checkedAt>0&&Number.isFinite(proof.profitFactor)&&proof.count===proof.required&&proof.profitFactor>=proof.minPF&&proof.required===s.stageLastN[proof.stage as 'base'|'main'|'real']&&proof.minPF===Math.max(s.stageMinPF[proof.stage as 'base'|'main'|'real'],lane.config.autoPfFloor??0)&&proof.laneId===this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,proof.stage)?.id))
     if(valid)this.validLineages.add(lane.id)
     return valid
   }
@@ -288,33 +307,30 @@ export class TradingEngine {
   }
   /** Closed evidence changes only at settlement; avoid rebuilding unchanged windows on every price/bar. */
   private qualifies(lane:LaneState|undefined,required:number,minPF:number):boolean{
-    if(!lane||lane.samples.length<required)return false
-    const cached=this.qualificationCache.get(lane.id)
-    if(cached&&cached.closed===lane.closedCount&&cached.required===required&&cached.minPF===minPF)return cached.qualified
-    const qualified=windowMetrics(lane,required,minPF).qualified
-    this.qualificationCache.set(lane.id,{closed:lane.closedCount,required,minPF,qualified})
-    return qualified
+    return !!lane&&lane.samples.length>=required&&windowMetrics(lane,required,minPF).qualified
   }
   private axisAllows(symbol: string, config: StrategyConfig, direction: Direction, stage: Stage): boolean {
     const s = this.state.settings, axis = s.coordinations.axis
     const referenceStage=axis.reference==='base'?'base':stage==='live'&&this.realMirror?'real':stage
     const source = this.cachedLane(symbol,config.id,direction,'normal',referenceStage)
-    if (!source||source.samples.length<axis.previous+axis.last)return false
-    const cached=this.axisWindowCache.get(source.id)
-    if(cached&&cached.closed===source.closedCount)return cached.allowed
-    const previousPF = aggregateCostNormalizedResults(source.samples.slice(axis.last, axis.last + axis.previous)).profitFactor
-    const lastNet = source.samples.slice(0, axis.last).reduce((a, b) => a + b, 0)
-    const threshold = referenceStage === "live" ? s.stageMinPF.real : s.stageMinPF[referenceStage]
-    const allowed=previousPF >= threshold && (axis.outcome === "any" || (axis.outcome === "positive" ? lastNet > 0 : lastNet < 0))
-    this.axisWindowCache.set(source.id,{closed:source.closedCount,allowed});return allowed
+    if (!source || source.samples.length < axis.previous + axis.last) return false
+    const threshold = Math.max(referenceStage === "live" ? s.stageMinPF.real : s.stageMinPF[referenceStage],config.autoPfFloor??0)
+    const cached=axisCache.get(source),samples=source.samples
+    if(cached&&cached.closed===source.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.previous===axis.previous&&cached.last===axis.last&&cached.outcome===axis.outcome&&cached.threshold===threshold)return cached.allowed
+    let profit=0,loss=0,lastNet=0
+    for(let i=0;i<axis.last;i++)lastNet+=samples[i]
+    for(let i=axis.last;i<axis.last+axis.previous;i++){profit+=Math.max(0,samples[i]);loss+=Math.max(0,-samples[i])}
+    const allowed=describeProfitFactor(profit,loss,axis.previous).profitFactor>=threshold&&(axis.outcome==='any'||(axis.outcome==='positive'?lastNet>0:lastNet<0))
+    axisCache.set(source,{closed:source.closedCount,samples,length:samples.length,head:samples[0],previous:axis.previous,last:axis.last,outcome:axis.outcome,threshold,allowed})
+    return allowed
   }
-  private open(lane: LaneState, candle: Candle): PaperPosition {
+  private open(lane: LaneState, candle: Candle, mirror?:PaperPosition): PaperPosition {
     this.dirtyLaneIds.add(lane.id)
     const s = this.state.settings, block = s.coordinations.block
     const proof=(stage:Stage):GateProof=>{
       const source=stage as 'base'|'main'|'real',parent=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,stage),id=parent?.id??''
       const proof=windowMetrics(parent,s.stageLastN[source],s.stageMinPF[source])
-      return {stage,laneId:id,count:proof.count,required:proof.required,minPF:s.stageMinPF[source],profitFactor:proof.profitFactor,pfState:proof.pfState,qualified:proof.qualified,checkedAt:candle.timestamp}
+      return {stage,laneId:id,count:proof.count,required:proof.required,minPF:proof.minPF,profitFactor:proof.profitFactor,pfState:proof.pfState,qualified:proof.qualified,checkedAt:candle.timestamp}
     }
     let admission:GateProof[]|undefined
     if(lane.stage!=='base'){
@@ -322,26 +338,32 @@ export class TradingEngine {
         if(lane.stage==='live'||!lane.parentProof){
           const parent=STAGES[STAGES.indexOf(lane.stage)-1],parentLane=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,parent)!
           if(!this.validLineage(parentLane))throw new Error('Processed parent has no valid own-set lineage')
-          admission=[...structuredClone(parentLane.parentProof??[]),proof(parent)]
-          lane.parentProof??=structuredClone(admission)
-        }else admission=structuredClone(lane.parentProof)
+          admission=[...(parentLane.parentProof??[]).map(p=>({...p})),proof(parent)]
+          lane.parentProof??=admission.map(p=>({...p}))
+        }else admission=lane.parentProof.map(p=>({...p}))
         if(!this.validLineage(lane))throw new Error('Processed set lineage does not match this configuration')
       }else admission=STAGES.slice(0,STAGES.indexOf(lane.stage)).map(proof)
     }
     if(admission?.some(proof=>!proof.qualified))throw new Error('Cannot admit a trade without its own qualified parent evidence')
     const total = s.baseNotional * s.volumeFactor*(s.volumeRatios?.[lane.coordination]??1)*this.laneVolumeFactor(lane.coordination,lane.config,lane.symbol)
-    const notional = lane.coordination === "block" && block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
+    const notional = lane.coordination !== "block" ? total : block.behavior==="rounds" ? total*blockRoundBudget(lane,block) : block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
     const quantity = notional / candle.close
     const position: PaperPosition = {
       id: `${lane.id}@${candle.timestamp}`, activationOrder:++this.state.nextActivationOrder!,openedAt: candle.timestamp, direction: lane.direction,...(admission?{admission}:{}),
       fills: [{ price: candle.close, quantity, timestamp: candle.timestamp, kind: "entry" }], quantity,
-      sizing: { baseBudget: total, block: structuredClone(s.coordinations.block), dca: structuredClone(s.coordinations.dca) },
+      sizing: { baseBudget: total, block: s.coordinations.block, dca: s.coordinations.dca },
       entryPrice: candle.close, peak: candle.close, lastAddPrice: candle.close, addedSteps: 0,
       costPct: lane.config.roundTripCostPct ?? POSITION_COST_PCT_DEFAULT,
       takeProfitPct: lane.config.takeprofit * 100, stopLossPct: lane.config.stoploss * 100,
       exitMode: lane.config.exitMode ?? (lane.config.trailing ? "trailing" : "fixed"), maxHoldMinutes: lane.config.maxHoldMinutes ?? 240, notional,
       trailingBasis: (lane.config.catalogVersion ?? 2)>=3?"peak":"entry",
       trailDistancePct:lane.config.trailDistancePct,exitPolicyVersion:lane.config.catalogVersion??2,maxOrderNotional:s.maxOrderNotional,
+    }
+    if(mirror){
+      // Live executes the accepted Real allocation. In particular, its smaller
+      // executed subset must not run a second, divergent Block recovery cycle.
+      position.fills=mirror.fills.map(fill=>({...fill}));position.quantity=mirror.quantity
+      position.notional=mirror.notional;position.entryPrice=mirror.entryPrice;position.sizing=mirror.sizing
     }
     lane.open = position; lane.lastTimestamp = candle.timestamp; lane.admittedAt ??= candle.timestamp; lane.admissionCount++
     this.activate(lane)
@@ -356,7 +378,8 @@ export class TradingEngine {
     const netReturnPct = netPnl / open.notional * 100
     const trade: ClosedTrade = { id: open.id, laneId: lane.id, configId: lane.configId, symbol: lane.symbol, direction: lane.direction, stage: lane.stage, coordination: lane.coordination,
       openedAt: open.openedAt, closedAt: candle.timestamp, entryPrice: open.entryPrice, exitPrice: candle.close,
-      quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: structuredClone(open.fills), source: "paper",...(open.admission?{admission:structuredClone(open.admission)}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
+      quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
+    if(lane.coordination==="block"&&open.sizing?.block.behavior==="rounds"&&!(this.processedSets&&lane.stage==='live'))settleBlockRound(lane,netPnl,open.sizing.block)
     lane.samples.unshift(netReturnPct); lane.samples.length = Math.min(lane.samples.length, this.sampleRetention(lane))
     lane.closedCount++; lane.wins += netPnl > 0 ? 1 : 0; lane.netPnl += netPnl
     if(lane.costTotal!==undefined)lane.costTotal+=cost
@@ -365,6 +388,7 @@ export class TradingEngine {
       lane.admittedClosed=(lane.admittedClosed??0)+1;lane.admittedProfit=(lane.admittedProfit??0)+Math.max(0,netReturnPct);lane.admittedLoss=(lane.admittedLoss??0)+Math.max(0,-netReturnPct);lane.admittedNetPnl=(lane.admittedNetPnl??0)+netPnl
     }
     lane.open = undefined; this.active.get(lane.symbol)?.delete(lane.id)
+    this.activeMicro.get(lane.symbol)?.delete(lane.id);this.activeMinute.get(lane.symbol)?.delete(lane.id)
     if (!lane.calculationOnly) { this.state.recentTrades.unshift(trade); this.state.recentTrades.length = Math.min(this.state.recentTrades.length, this.maxRecentTrades) }
     if (lane.stage === "live" && !lane.calculationOnly) {
       this.livePositions.delete(open.id)
@@ -377,13 +401,13 @@ export class TradingEngine {
     }
     return trade
   }
-  private mark(lane: LaneState, candle: Candle): EngineEvent | undefined {
+  private mark(lane: LaneState, candle: Candle, ordered=false): EngineEvent | undefined {
     const open = lane.open
-    if (!open || candle.timestamp <= Math.max(open.openedAt, lane.lastTimestamp)) return
+    if (!open || candle.timestamp<open.openedAt || (!ordered&&candle.timestamp===open.openedAt) || candle.timestamp<lane.lastTimestamp || (!ordered&&candle.timestamp===lane.lastTimestamp)) return
     this.dirtyLaneIds.add(lane.id)
     lane.lastTimestamp = candle.timestamp
     const sign = lane.direction === "long" ? 1 : -1
-    const exit=observedExit({...open,trailingEnabled:strategyProcessing(this.state.settings.catalog,lane.config).trailing,price:candle.close,timestamp:candle.timestamp,trailingBasis:open.trailingBasis??((lane.config.catalogVersion??2)>=3?"peak":"entry")})
+    const exit=observedExit(open,{trailingEnabled:strategyProcessing(this.state.settings.catalog,lane.config).trailing,price:candle.close,timestamp:candle.timestamp,trailingBasis:open.trailingBasis??((lane.config.catalogVersion??2)>=3?"peak":"entry")})
     open.peak=exit.peak
     if((open.exitPolicyVersion??3)>=4){open.trailingActive=exit.trailingActive;if(exit.trailingActive)open.trailingStopPrice=exit.stop}
     const reason=exit.reason
@@ -392,7 +416,7 @@ export class TradingEngine {
     const s = this.state.settings
     const sizing = open.sizing ?? { baseBudget: s.baseNotional * s.volumeFactor, block: s.coordinations.block, dca: s.coordinations.dca }
     let addNotional = 0, kind: "block" | "dca" = "block"
-    if (lane.coordination === "block" && open.addedSteps < sizing.block.steps) {
+    if (lane.coordination === "block" && sizing.block.behavior!=="rounds" && open.addedSteps < sizing.block.steps) {
       const fromLast = sign * (candle.close - open.lastAddPrice) / open.lastAddPrice * 100
       if (fromLast >= open.takeProfitPct / (sizing.block.steps + 1)) {
         const b = sizing.block
@@ -418,11 +442,13 @@ export class TradingEngine {
       connectionId: this.state.settings.connectionId, laneId: lane.id, configId: lane.configId, symbol: lane.symbol, direction: lane.direction,
       timestamp: candle.timestamp, price: candle.close, notional: requestedQuantity * candle.close,
       takeProfitPct: position.takeProfitPct, stopLossPct: position.stopLossPct, exitMode: position.exitMode,maxOrderNotional:position.maxOrderNotional,qualificationId:position.admission?.length?hashId(JSON.stringify(position.admission)):undefined,
-      ...((lane.coordination==='block'||lane.coordination==='dca')?{minimumAddRatio:lane.coordination==='block'?position.sizing?.block.ratio:position.sizing?.dca.multiplier}:{}),...(position.parentPositionId?{realPositionId:position.parentPositionId}:{}),source: "real-qualified", status: "pending" })
+      ...(((lane.coordination==='block'&&position.sizing?.block.behavior!=='rounds')||lane.coordination==='dca')?{minimumAddRatio:lane.coordination==='block'?position.sizing?.block.ratio:position.sizing?.dca.multiplier}:{}),...(position.parentPositionId?{realPositionId:position.parentPositionId}:{}),source: "real-qualified", status: "pending" })
+    if(kind==='entry'&&lane.coordination==='block'&&position.sizing?.block.behavior==='rounds')this.state.intents.at(-1)!.entryAllocationRatio=position.notional/position.sizing.baseBudget
   }
-  processCandles(symbolInput: string, candles: Candle[], options: { allowExecution?: boolean;eventLimit?:number } = {}): EngineEvent[] {
+  processCandles(symbolInput: string, candles: Candle[], options: { allowExecution?: boolean;eventLimit?:number;barSeconds?:10|60 } = {}): EngineEvent[] {
     const symbol = normalizeSymbol(symbolInput), s = this.state.settings
     const configured=s.symbols.includes(symbol)
+    const micro=options.barSeconds===10,cursors=micro?(this.state.lastMicroTimestamp??={}):this.state.lastTimestamp
     if (!configured&&!this.active.get(symbol)?.size) throw new Error(`Symbol ${symbol} is not configured`)
     const events: EngineEvent[] = []
     const eventLimit=options.eventLimit??Infinity
@@ -432,18 +458,21 @@ export class TradingEngine {
     // Validate the complete batch before any mutation, so rejected input is atomic.
     validateObservedCandles(candles)
     const historicalSignals=new Map<string,ReturnType<typeof historicalPortedSignals>>()
-    if(configured&&!options.allowExecution&&candles.length>1){
+    if(configured&&!micro&&!options.allowExecution&&candles.length>1){
       const unseen=candles.filter(c=>c.timestamp>(this.state.lastTimestamp[symbol]??0))
-      if(unseen.length>1)for(const group of this.portedStreams.get(symbol)??[])if(!group.usesReferences){
+      if(unseen.length>1)for(const group of this.portedStreams.get(symbol)??[])if(group.minutes>=1&&!group.usesReferences){
         const state=this.state.signals[group.stateKey]??=newSignalState()
         historicalSignals.set(group.stateKey,historicalPortedSignals(state,unseen,group.minutes,group.ids,symbol))
       }
     }
     for (const candle of candles) {
-      if (candle.timestamp <= (this.state.lastTimestamp[symbol] ?? 0)) continue
+      if (candle.timestamp <= (cursors[symbol] ?? 0)) continue
       const justClosed = new Set<string>()
-      for (const id of [...(this.active.get(symbol) ?? [])]) {
+      for (const id of (micro?this.activeMicro:this.activeMinute).get(symbol) ?? []) {
         const lane = this.state.lanes[id], position = lane.open!
+        // A source candle may manage only its own timeframe family. Present-time
+        // 10s bars cannot settle minute positions inside historical recovery.
+        if(micro!==((lane.config.signalTimeframeMinutes??1)<1))continue
         const event = this.mark(lane, candle)
         if (event) {
           if (!lane.calculationOnly) emit(event)
@@ -454,16 +483,17 @@ export class TradingEngine {
           }
         }
       }
-      if(!configured){this.state.lastTimestamp[symbol]=candle.timestamp;this.state.updatedAt=Math.max(this.state.updatedAt,candle.timestamp);this.state.processedCandles++;continue}
+      if(!configured){cursors[symbol]=candle.timestamp;this.state.updatedAt=Math.max(this.state.updatedAt,candle.timestamp);this.state.processedCandles++;continue}
       const signals = new Map<string, Direction | undefined>()
-      const streams=this.streams.get(symbol)??[]
-      for (const {config,key} of this.signalStreams.get(symbol)??[]) {
+      const streams=(micro?this.microStreams:this.minuteStreams).get(symbol)??[]
+      for (const {config,key} of (this.signalStreams.get(symbol)??[]).filter(({config})=>((config.signalTimeframeMinutes??1)<1)===micro)) {
         if (!signals.has(key)) {
           const state = this.state.signals[key] ??= newSignalState()
           signals.set(key, advanceConfiguredSignal(state,candle,config))
         }
       }
       for(const group of this.portedStreams.get(symbol)??[]){
+        if((group.minutes<1)!==micro)continue
         const state=this.state.signals[group.stateKey]??=newSignalState()
         const peers=group.usesReferences?s.symbols.filter(peer=>peer!==symbol).flatMap(peer=>{const rows=this.state.signals[JSON.stringify([peer,'ported-sources-v1',group.minutes])]?.portedBars;return rows?[{symbol:peer,bars:rows}]:[]}):[]
         const output=historicalSignals.has(group.stateKey)?historicalSignals.get(group.stateKey)!.get(candle.timestamp)??new Map<string,Direction|undefined>():advancePortedSources(state,candle,group.minutes,group.ids,{symbol,peers})
@@ -486,7 +516,13 @@ export class TradingEngine {
             const mirrorReady=!this.realMirror||stage!=='live'||Boolean(realPositionId)
             if(axisReady&&parentReady&&mirrorReady&&!lane?.open&&(!lane||!justClosed.has(lane.id))){
               lane??=this.lane(symbol, config, signal, coordination, stage)
-              const position = this.open(lane, candle)
+              if(coordination==='block'&&s.coordinations.block.behavior==='rounds'&&!(this.realMirror&&stage==='live')&&consumeBlockPause(lane,s.coordinations.block)){
+                this.dirtyLaneIds.add(lane.id)
+                if(!this.processedSets&&stage!=='live'&&!windowMetrics(lane,s.stageLastN[stage],s.stageMinPF[stage]).qualified)break
+                continue
+              }
+              const mirror=this.realMirror&&stage==='live'?this.cachedLane(symbol,config.id,signal,coordination,'real')?.open:undefined
+              const position = this.open(lane, candle,mirror)
               if(stage==='real')realPositionId=position.id
               if(this.realMirror&&stage==='live')position.parentPositionId=realPositionId
               if (!lane.calculationOnly) emit({ type: "opened", laneId: lane.id, timestamp: candle.timestamp, stage })
@@ -500,19 +536,20 @@ export class TradingEngine {
           }
         }
       }
-      this.state.lastTimestamp[symbol] = candle.timestamp; this.state.updatedAt = Math.max(this.state.updatedAt, candle.timestamp); this.state.processedCandles++
+      cursors[symbol] = candle.timestamp; this.state.updatedAt = Math.max(this.state.updatedAt, candle.timestamp); this.state.processedCandles++
     }
     return eventIndex?[...events.slice(eventIndex),...events.slice(0,eventIndex)]:events
   }
   /** Manage existing positions on observed quote ticks; signals remain closed-bar only. */
-  processTick(symbolInput: string, price: number, timestamp: number): EngineEvent[] {
+  processTick(symbolInput: string, price: number, timestamp: number, ordered=false, scope:"all"|"micro"="all"): EngineEvent[] {
     const symbol = normalizeSymbol(symbolInput)
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(timestamp) || timestamp <= 0) throw new Error("Invalid observed quote")
     const candle: Candle = { timestamp, open: price, high: price, low: price, close: price, volume: 0 }
     const events: EngineEvent[] = []
-    for (const id of [...(this.active.get(symbol) ?? [])]) {
+    for (const id of (scope==='micro'?this.activeMicro:this.active).get(symbol) ?? []) {
       const lane = this.state.lanes[id], position = lane.open!
-      const event = this.mark(lane, candle)
+      if(scope==="micro"&&(lane.config.signalTimeframeMinutes??1)>=1)continue
+      const event = this.mark(lane, candle, ordered)
       if (!event) continue
       if (!lane.calculationOnly) events.push(event)
       if (lane.stage === "live" && position.executionEligible) {

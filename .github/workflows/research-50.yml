@@ -1,5 +1,7 @@
 name: Frozen 50-symbol stage evidence
 on:
+  pull_request:
+    paths: ["research-data/ctsc-current-request.json"]
   workflow_dispatch:
 permissions:
   contents: read

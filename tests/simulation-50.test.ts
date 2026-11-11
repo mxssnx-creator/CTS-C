@@ -34,6 +34,7 @@ test('bounded simulation worker preserves each trade, hourly totals and sample d
    }
   }
   assert.ok(result.results[0].totals.base.closes>0)
-  assert.deepEqual(result.results[0].totals.base,result.results[2].totals.base)
+  const normal=(profile:any)=>profile.groups.find((r:any)=>r.key===JSON.stringify(['base','coordination','normal'])).totals
+  assert.deepEqual(normal(result.results[0]),normal(result.results[2]),'changing Block behavior must not alter Normal outcomes')
  }finally{child.disconnect();child.kill('SIGTERM');await rm(directory,{recursive:true,force:true})}
 })

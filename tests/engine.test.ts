@@ -19,10 +19,10 @@ function settings(overrides: Partial<EngineSettings> = {}): EngineSettings {
 }
 const bar = (timestamp: number, price: number): Candle => ({ timestamp, open: price, close: price, high: price, low: price, volume: 100 })
 
-test("default catalog covers all 3696 independent configurations and full tactics", () => {
+test("default catalog covers all 5220 independent configurations and full tactics", () => {
   const catalog = generateStrategyCatalog("bingx-x02")
-  assert.equal(catalog.length, 3696)
-  assert.equal(new Set(catalog.map(c => c.id)).size, 3696)
+  assert.equal(catalog.length, 5220)
+  assert.equal(new Set(catalog.map(c => c.id)).size, 5220)
   for (const range of ["Micro", "Minimal", "Short", "Normal", "Long", "Wide"]) assert.ok(catalog.some(c => c.range === range))
   for (const type of ["MA_Cross", "RSI_Band", "MACD_Signal", "Bollinger_Bounce"]) assert.ok(catalog.some(c => c.type === type))
 })
@@ -317,7 +317,7 @@ test("all coordination lanes qualify Base→Main→Real→Live using their own n
 })
 
 test("eligible Live DCA emits entry, exact add quantity and full close intents from observed ticks", () => {
-  const cfg = settings({ stageLastN: { base: 1, main: 1, real: 1 }, catalog: { strategyTpSteps: [3], strategySlRatios: [2.2], strategyExitModes: ["fixed"], strategyIndicationTypes: ["MA_Cross"] } })
+  const cfg = settings({ stageLastN: { base: 1, main: 1, real: 1 }, catalog: { strategyTpSteps: [3], strategySlRatios: [1.6], strategyExitModes: ["fixed"], strategyIndicationTypes: ["MA_Cross"] } })
   cfg.coordinations.dca = { enabled: true, steps: 2, distancePct: .2, multiplier: 2 }
   const engine = new TradingEngine(cfg)
   let position: ReturnType<TradingEngine["snapshot"]>["positions"][number] | undefined

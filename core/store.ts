@@ -15,6 +15,7 @@ export class StateStore {
     if (filename !== ":memory:") chmodSync(filename, 0o600)
     this.database.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;")
     this.database.exec(`
+      CREATE TABLE IF NOT EXISTS market_trade_bars(symbol TEXT NOT NULL, timestamp INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(symbol,timestamp));
       CREATE TABLE IF NOT EXISTS records(key TEXT PRIMARY KEY, data TEXT NOT NULL, updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS intents(id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL, result TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL);
@@ -23,6 +24,13 @@ export class StateStore {
       CREATE TABLE IF NOT EXISTS runtime_lease(name TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL, fence INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS intents_status_created ON intents(status,created);
     `)
+  }
+  saveTradeBar(symbol:string,bar:import('./trade-stream').TradeBar):void{
+    this.database.prepare('INSERT OR IGNORE INTO market_trade_bars VALUES(?,?,?)').run(symbol,bar.timestamp,JSON.stringify(bar))
+    this.database.prepare('DELETE FROM market_trade_bars WHERE symbol=? AND timestamp<?').run(symbol,bar.timestamp-3*86400000)
+  }
+  tradeBars(symbol:string,limit=4320):import('./trade-stream').TradeBar[]{
+    return (this.database.prepare('SELECT data FROM market_trade_bars WHERE symbol=? ORDER BY timestamp DESC LIMIT ?').all(symbol,limit) as {data:string}[]).reverse().map(r=>JSON.parse(r.data))
   }
   getRaw(key: string): string | null { const row = this.database.prepare("SELECT data FROM records WHERE key=?").get(key) as { data: string } | undefined; if(key==='engine'&&row?.data.startsWith('{"checkpointFormat":"lane-rows-v1"'))return JSON.stringify(this.loadEngineState())
     return row?.data ?? null }

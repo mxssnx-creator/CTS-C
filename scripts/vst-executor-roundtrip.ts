@@ -21,6 +21,8 @@ async function main() {
   const store = new StateStore(database), executor = new DemoExecutor(store, venue)
   const intents: ExecutionIntent[] = [], results: Record<string, unknown>[] = []
   const triggerMode=process.argv.includes("--trigger")
+  const distance=(flag:string,fallback:number)=>{const index=process.argv.indexOf(flag),value=index<0?fallback:Number(process.argv[index+1]);if(!Number.isFinite(value)||value<=0||value>=100)throw new Error(`${flag} must be between 0 and 100 percent`);return value}
+  const takeProfitPct=distance('--tp-pct',triggerMode?.05:3),stopLossPct=distance('--sl-pct',triggerMode?.05:2)
   const ratioIndex=process.argv.indexOf('--block-ratio'),blockRatio=ratioIndex<0?undefined:Number(process.argv[ratioIndex+1])
   if(blockRatio!==undefined&&(!Number.isFinite(blockRatio)||blockRatio<.01||blockRatio>10))throw new Error('Block ratio must be .01..10')
   async function sameInventory() { const [p, o] = await Promise.all([venue.positions(), venue.openOrders()]); return inventory(p, o) === baseline }
@@ -43,7 +45,7 @@ async function main() {
       const quantity = Math.ceil(Math.max(contract.minQuantity, contract.minNotional / price) * scale - 1e-9) / scale
       const entry: ExecutionIntent = { id: `${runId}-${direction}-entry`, kind: "entry", connectionId: "x02", laneId: runId, configId: "diagnostic",
         positionId: `${runId}-${direction}`, symbol: contract.symbol, direction, requestedQuantity: quantity, timestamp: Date.now(), price,
-        notional: quantity * price, takeProfitPct: triggerMode ? 0.05 : 3, stopLossPct: triggerMode ? 0.05 : 2, exitMode: "fixed",minimumAddRatio:blockRatio,maxOrderNotional:50, source: "real-qualified", status: "pending" }
+        notional: quantity * price, takeProfitPct, stopLossPct, exitMode: "fixed",minimumAddRatio:blockRatio,maxOrderNotional:50, source: "real-qualified", status: "pending" }
       intents.push(entry)
       await drive(entry)
       let lot = executor.lots().find((row) => row.direction === direction)!
@@ -71,7 +73,7 @@ async function main() {
       }
       if (lot.quantity > 1e-10 || lot.protection !== "closed") throw new Error("Owned residual position or bracket remains")
       if (lot.fees === null) throw new Error("Exchange fill/fee ledger did not fully reconcile")
-      results.push({ direction, symbol: contract.symbol, entryQuantity, addedQuantity,requestedAddRatio:blockRatio,actualAddRatio:addedQuantity/entryQuantity, nativeTriggerObserved:triggerMode?nativeTriggerObserved:undefined, closedQuantity: lot.closedQuantity, realizedGrossPnl: lot.realizedGrossPnl,
+      results.push({ direction, symbol: contract.symbol, takeProfitPct,stopLossPct, entryQuantity, addedQuantity,requestedAddRatio:blockRatio,actualAddRatio:addedQuantity/entryQuantity, nativeTriggerObserved:triggerMode?nativeTriggerObserved:undefined, closedQuantity: lot.closedQuantity, realizedGrossPnl: lot.realizedGrossPnl,
         fees: lot.fees, realizedNetPnl: lot.realizedNetPnl, exchangeRealizedPnl: lot.exchangeRealizedPnl, protection: lot.protection })
     }
     if (!await sameInventory()) throw new Error("Final inventory differs from the initial inventory")

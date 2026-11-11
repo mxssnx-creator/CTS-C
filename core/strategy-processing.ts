@@ -1,6 +1,6 @@
 import type { StrategyConfig } from "./types"
 
-export const PROCESSING_RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide"] as const
+export const PROCESSING_RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"] as const
 export type ProcessingSwitches = { normal?: boolean; trailing?: boolean }
 export type ProcessingByRange = Partial<Record<typeof PROCESSING_RANGES[number], ProcessingSwitches>>
 

@@ -29,7 +29,7 @@ test('coordination volume ratios scale recorded budget and PnL without manufactu
 
 test('TP, SL, trail and hold factors have explicit independent economics and reject invalid prices',()=>{
  const base=generateStrategyCatalog('x',catalog)[0],changed=generateStrategyCatalog('x',{...catalog,strategyTpFactor:2,strategySlFactor:.5,strategyTrailRatio:.4,holdTimeFactor:2})[0]
- assert.equal(changed.takeprofit,base.takeprofit*2);assert.equal(changed.stoploss,base.stoploss);assert.ok(Math.abs(changed.trailDistancePct!-base.stoploss*100*.4)<1e-12)
+ assert.equal(changed.takeprofit,base.takeprofit*2);assert.equal(changed.stoploss,base.stoploss);assert.ok(Math.abs(changed.trailDistancePct!-base.trailDistancePct!*.4)<1e-12)
  assert.equal(changed.maxHoldMinutes,base.maxHoldMinutes!*2);assert.notEqual(changed.id,base.id)
  assert.throws(()=>generateStrategyCatalog('x',{strategyTpFactor:10,strategySlFactor:10}),/distances/)
 })

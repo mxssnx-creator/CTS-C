@@ -12,8 +12,8 @@ test('new period and timeframe grids have independent identities and preserve th
  const now='2026-01-01T00:00:00Z'
  const old=generateStrategyCatalog('test',{...base,strategyIndicationTypes:[...CORE_INDICATIONS]},now)
  const expanded=generateStrategyCatalog('test',{...base,strategyIndicationTypes:[...CORE_INDICATIONS,'Trend','Break'],strategySignalPeriods:[10,20],strategySignalTimeframes:[1,5]},now)
- assert.equal(expanded.length,12);assert.equal(new Set(expanded.map(c=>c.id)).size,12)
- assert.deepEqual(expanded.filter(c=>(CORE_INDICATIONS as readonly string[]).includes(c.type)),old)
+ assert.equal(expanded.length,16);assert.equal(new Set(expanded.map(c=>c.id)).size,16)
+ assert.deepEqual(expanded.filter(c=>(CORE_INDICATIONS as readonly string[]).includes(c.type)&&c.signalTimeframeMinutes===1),old)
 })
 
 test('five-minute stream equals explicitly aggregated complete candles and ignores partial/gapped frames',()=>{
@@ -102,7 +102,7 @@ test('Trend/Break replay and engine exits match over periods, timeframes and all
 
 test('all Trend/Break ranges remain complete and grid configuration does not truncate candidates',()=>{
  const configs=generateStrategyCatalog('grid',{strategyIndicationTypes:[...TECHNICAL_INDICATIONS],strategySignalPeriods:[10,20],strategySignalTimeframes:[1,5]})
- assert.equal(configs.length,9*28*11*3*2*2);assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)
+ assert.equal(configs.length,9*29*15*3*2*2);assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)
  for(const type of TECHNICAL_INDICATIONS)for(const range of ['Micro','Minimal','Short','Normal','Long','Wide'])for(const exit of ['fixed','trailing','trailing-only'])assert.ok(configs.some(c=>c.type===type&&c.range===range&&c.exitMode===exit))
 })
 

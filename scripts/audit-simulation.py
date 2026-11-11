@@ -26,7 +26,7 @@ def audit(root):
         if job['sourceHash']!=data['settings']['sourceHash']:raise ValueError('Mixed source checkpoint')
         for proof in job['calculationProof']:
             if proof['processedCandles']!=data['settings']['warmup']+data['settings']['hours']*60 or proof['lastTimestamp']!=end:raise ValueError('Incomplete calculation')
-        for base in ['original-20-8-8','capacity-20-8-1']:
+        for base in [p['name'] for p in data['profiles'] if not p.get('frozenPrehistory')]:
             path=root/'trades'/job['symbol']/job['type']/(base+'.ndjson.gz'); digest=hashlib.sha256(); local={p:{s:empty() for s in STAGES} for p in [base,'prehistory-selected-'+base]}; parents={}; last_at=None
             with gzip.open(path,'rb') as f:
                 header=json.loads(next(f)); selected=set(header['prehistorySelectedIds'])
@@ -49,7 +49,7 @@ def audit(root):
                     # Events are ordered by bar then stage: retain only this close timestamp's Real parents.
                     if last_at!=t['closedAt']:parents={};last_at=t['closedAt']
                     if t['stage']=='real':parents[t['id']]=t
-                    if base=='capacity-20-8-1' and t['stage']=='live':
+                    if header['profile']['liveEntryMode']=='real-mirror' and t['stage']=='live':
                         parent=parents.get(t.get('parentPositionId'))
                         if not parent:raise ValueError('Unmatched Real / Live close')
                         for k in ['configId','symbol','direction','coordination','openedAt','closedAt','entryPrice','exitPrice','netReturnPct','reason']:

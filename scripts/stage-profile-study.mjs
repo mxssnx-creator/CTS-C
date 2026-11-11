@@ -17,7 +17,7 @@ const results=[];let bestScore=-Infinity,bestStates,best
 for(const profile of profiles){
  const totals=empty(),states=[]
  for(const item of selected){
-  const r=item.row,catalog={...source.settings,...source.fees[item.symbol],strategyTpSteps:[r.tpStep],strategySlRatios:[r.slRatio],strategyExitModes:[r.exitMode],strategyIndicationTypes:[r.tactic],strategySignalPeriods:[r.lookback??20],strategySignalTimeframes:[r.signalTimeframeMinutes??1]}
+  const r=item.row,catalog={...source.settings,microTrailRatio:1,...source.fees[item.symbol],strategyTpSteps:[r.tpStep],strategySlRatios:[r.slRatio],strategyExitModes:[r.exitMode],strategyIndicationTypes:[r.tactic],strategySignalPeriods:[r.lookback??20],strategySignalTimeframes:[r.signalTimeframeMinutes??1]}
   const engine=new TradingEngine({stageGateMode:process.argv.includes('--processed')?'processed-sets':'continuous-ancestors',liveEntryMode:capacity?'real-mirror':'independent',symbols:[item.symbol],catalog,stageLastN:{base:profile.base,main:profile.main,real:profile.real},coordinations:{axis:{enabled:profile.mode==='axis'||profile.mode==='all',previous:capacity?8:5,last:capacity?3:2,outcome:'any',reference:capacity?'same-stage':'base'},block:{enabled:profile.mode==='block'||profile.mode==='all',steps:3,ratio:capacity?.2:.1,mode:'shared'},dca:{enabled:profile.mode==='all',steps:2,distancePct:1,multiplier:2}}})
   add(totals,engine.processCandles(item.symbol,candles[item.symbol].slice(0,item.split)))
   const state=engine.exportState();for(const lane of Object.values(state.lanes))delete lane.open

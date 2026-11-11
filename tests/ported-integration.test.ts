@@ -15,6 +15,22 @@ const rows=waveBars(720)
 const bars:Candle[]=rows.map(b=>({...b,timestamp:b.timestamp+60000}))
 const noAdjustments={axis:{enabled:false,previous:2,last:1,outcome:'any' as const},block:{enabled:false,steps:2,ratio:.2,mode:'shared' as const},dca:{enabled:false,steps:2,distancePct:1,multiplier:2}}
 
+test('genuine ten-second Tactic candles share calculation history without touching minute sources; unsupported Inverse frames are excluded',()=>{
+ const ten=rows.map((b,i)=>({...b,timestamp:rows[0].timestamp+(i+1)*10000})),ids=[...DEFAULT_TACTIC_SOURCES],state=newSignalState(),expected=portedStates('SOL-USDT',1,rows,ids)
+ const actual=Object.fromEntries(ids.map(id=>[id,[] as number[]]))
+ for(const bar of ten){const out=advancePortedSources(state,bar,1/6,ids,{symbol:'SOL-USDT'});for(const id of ids)actual[id].push(out.get(id)==='long'?1:out.get(id)==='short'?-1:0)}
+ for(const id of ids)assert.deepEqual(actual[id],Array.from(entryOnsets(expected.states[id])))
+ const catalog={strategyTpSteps:[2],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Tactic','Inverse'],strategyIndicationSources:[...ids,'inverse-known-ema-9-21'],strategySignalTimeframes:[1/6,1]}
+ assert.throws(()=>validateConfiguration({...DEFAULTS,strategyIndicationTypes:['Inverse'],strategySignalTimeframes:[1/6]}))
+ assert.ok(generateStrategyCatalog('bingx-x02',catalog).filter(c=>c.type==='Inverse').every(c=>c.signalTimeframeMinutes===1))
+ const engine=new TradingEngine({symbols:['SOL-USDT'],catalog,coordinations:noAdjustments,stageLastN:{base:250,main:250,real:250}})
+ engine.processCandles('SOL-USDT',bars.slice(0,120));const before=engine.exportState(),minute=JSON.stringify(before.signals[JSON.stringify(['SOL-USDT','ported-sources-v1',1])])
+ engine.processCandles('SOL-USDT',ten,{barSeconds:10});const after=engine.exportState()
+ assert.equal(JSON.stringify(after.signals[JSON.stringify(['SOL-USDT','ported-sources-v1',1])]),minute)
+ assert.equal(after.lastTimestamp['SOL-USDT'],before.lastTimestamp['SOL-USDT']);assert.equal(after.lastMicroTimestamp!['SOL-USDT'],ten.at(-1)!.timestamp)
+ const restarted=TradingEngine.fromSerialized(engine.serializeState());assert.deepEqual(restarted.processCandles('SOL-USDT',ten,{barSeconds:10}),[])
+})
+
 test('historical vectors preserve source ticks through rebases, higher frames, duplicate overlap and future extensions',()=>{
  const ids=['inverse-known-ema-9-21','tactic-dca-bounce-8-percent-0.5-1-0.25']
  for(const minutes of [1,5,15]){

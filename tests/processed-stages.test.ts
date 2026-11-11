@@ -6,8 +6,9 @@ import type {Candle,EngineSettings,EngineState} from '../core/types'
 const bars:Candle[]=Array.from({length:700},(_,i)=>{const close=100+10*Math.sin(i/5)+2*Math.sin(i/13);return {timestamp:1790000000000+i*60000,open:close,high:close,low:close,close,volume:100}})
 function settings():EngineSettings{return validateEngineSettings({symbols:['BTC-USDT'],stageGateMode:'processed-sets',stageLastN:{base:1,main:1,real:1},stageMinPF:{base:0,main:0,real:0},catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']},coordinations:{axis:{enabled:true,previous:1,last:1,outcome:'any'},block:{enabled:true,steps:2,ratio:.2,mode:'shared'},dca:{enabled:true,steps:2,distancePct:.1,multiplier:.2}}})}
 const clean=(state:EngineState)=>{const {startedAt,...rest}=state;return JSON.parse(JSON.stringify(rest))}
-test('processed stages start with empty own evidence and preserve exact Real/Live entries, exits, fees and fills',()=>{
+for(const rounds of [false,true])test(`processed stages start with empty own evidence and preserve exact Real/Live entries, exits, fees and fills (rounds=${rounds})`,()=>{
  const cfg=settings();cfg.catalog.strategyExitModes=['fixed','trailing','trailing-only']
+ if(rounds)Object.assign(cfg.coordinations.block,{behavior:'rounds',size:3,pauseRounds:1,maxMultiplier:1.4})
  const e=new TradingEngine(cfg),real=new Map<string,any>(),closedReal=new Map<string,any>();let liveOpened=0,liveClosed=0
  const seen=new Set<string>()
  for(const candle of bars.slice(0,300)){
