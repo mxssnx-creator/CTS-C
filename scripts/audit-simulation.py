@@ -52,7 +52,7 @@ def audit(root):
                     if header['profile']['liveEntryMode']=='real-mirror' and t['stage']=='live':
                         parent=parents.get(t.get('parentPositionId'))
                         if not parent:raise ValueError('Unmatched Real / Live close')
-                        for k in ['configId','symbol','direction','coordination','openedAt','closedAt','entryPrice','exitPrice','netReturnPct','reason']:
+                        for k in ['configId','symbol','direction','coordination','openedAt','closedAt','entryPrice','exitPrice','quantity','notional','fills','grossPnl','cost','netPnl','netReturnPct','reason']:
                             if t[k]!=parent[k]:raise ValueError('Real / Live path diverged: '+k)
                         parent_checks+=1
                     hour=int((t['closedAt']-start-1)//3600000)
@@ -72,7 +72,7 @@ def audit(root):
                 check_totals(hours[name][h['hour']][stage],h['stages'][stage],name+'/'+str(h['hour'])+'/'+stage)
                 c=h['coverage'][stage]
                 if not 0<=c['enough']<=c['sets'] or not 0<=c['admissionReady']<=c['sets']:raise ValueError('Invalid evidence denominator')
-    return {'passed':True,'jobs':jobs,'ledgerFiles':len(files),'closedTradeRecords':total,'matchedRealLiveClosures':parent_checks,'ordersSubmitted':0,'checks':['all jobs consumed all bars','frozen prehistory membership','exact symbol/configuration/direction/stage/coordination identity','weighted fills and quantities','single roundtrip fee and slippage deduction','gross/net/cost and normalized return','every post-Base admission proof','capacity Real / Live close correspondence','all profile totals and hourly closes','sample coverage denominators'],'profiles':sums,'ledgerDigests':files}
+    return {'passed':True,'jobs':jobs,'ledgerFiles':len(files),'closedTradeRecords':total,'matchedRealLiveClosures':parent_checks,'ordersSubmitted':0,'checks':['all jobs consumed all bars','frozen prehistory membership','exact symbol/configuration/direction/stage/coordination identity','weighted fills and quantities','single roundtrip fee and slippage deduction','gross/net/cost and normalized return','every post-Base admission proof','exact Real / Live fills, quantity, notional, costs, PnL and close path','all profile totals and hourly closes','sample coverage denominators'],'profiles':sums,'ledgerDigests':files}
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--root',required=True);p.add_argument('--output',required=True);a=p.parse_args();result=audit(a.root);Path(a.output).write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if k not in ['profiles','ledgerDigests']}))

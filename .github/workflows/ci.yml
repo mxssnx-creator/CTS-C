@@ -27,7 +27,7 @@ jobs:
       - name: Verify complete 50-symbol report and filters
         run: |
           gzip -dc research-data/ctsc-50-summary-20261111.json.gz > "$RUNNER_TEMP/ctsc-summary.json"
-          python3 scripts/render-simulation-report.py --input "$RUNNER_TEMP/ctsc-summary.json" --output artifacts/ui/CTS-C-50-symbol-results-20261111.html --commit 9d9fb2509d8ae7786940124bcc37fb121a69825d
+          python3 scripts/render-simulation-report.py --input "$RUNNER_TEMP/ctsc-summary.json" --output artifacts/ui/CTS-C-50-symbol-results-20261111.html --commit 1e59722bc2cc1b73f378f2642f0f300b60db21fc
           node scripts/report-smoke.mjs artifacts/ui/CTS-C-50-symbol-results-20261111.html "$RUNNER_TEMP/ctsc-summary.json"
         env:
           CTS_UI_OUTPUT: artifacts/ui
@@ -38,5 +38,6 @@ jobs:
           path: artifacts/ui
           if-no-files-found: ignore
       - run: python3 -m unittest discover -s integrations/research -p 'test_contract.py' -v
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
       - run: docker build -t cts-c:verified .
       - run: node scripts/docker-smoke.mjs
