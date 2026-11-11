@@ -1,8 +1,11 @@
+import { portedStates, StreamMath,entryOnsets } from "../shared/cts-indications/index.ts"
 import type { Candle, PseudoPosition, SignalState } from "./types"
 import { calculatePriceMovePct, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { observedExit } from "./exits"
 import { INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import {technicalSignal} from './technical-signals'
+
+const sourceStreams=new WeakMap<SignalState,{first:number;stream:StreamMath}>()
 
 export interface ReplayStrategyConfig {
   type: string
@@ -18,6 +21,7 @@ export interface ReplayStrategyConfig {
   maxHoldMinutes?: number
   catalogVersion?: number
   trailDistancePct?:number
+  indicationSourceId?:string
   signalTimeframeMinutes?:number
 }
 
@@ -94,9 +98,19 @@ export function createSignalEvaluator(type: string, step: number): (price: numbe
 }
 
 /** Only complete, contiguous, UTC-aligned one-minute source bars form a higher-timeframe signal. */
-export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'>):Direction|undefined{
+export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'|'indicationSourceId'>):Direction|undefined{
   const minutes=config.signalTimeframeMinutes??1
-  if(minutes===1)return advanceSignal(state,bar.close,config.type,config.position_cost_step,bar)
+  const evaluate=(closed:Candle):Direction|undefined=>{
+    if(!config.indicationSourceId)return advanceSignal(state,closed.close,config.type,config.position_cost_step,closed)
+    const rows=state.portedBars??=[]
+    if(rows.at(-1)&&closed.timestamp-minutes*60000<=rows.at(-1)!.timestamp)return
+    rows.push({...closed,timestamp:closed.timestamp-minutes*60000});if(rows.length>4320)rows.splice(0,rows.length-4320)
+    let cached=sourceStreams.get(state);if(!cached||cached.first!==rows[0].timestamp){cached={first:rows[0].timestamp,stream:new StreamMath()};sourceStreams.set(state,cached)}
+    const output=portedStates('ASSET-USDT',minutes,rows,[config.indicationSourceId],[],cached.stream)
+    const direction=entryOnsets(output.states[config.indicationSourceId]).at(-1)??0
+    return direction>0?'long':direction<0?'short':undefined
+  }
+  if(minutes===1)return evaluate(bar)
   const span=minutes*60000,bucket=Math.floor((bar.timestamp-1)/span)*span
   if(!state.frame||state.frame.bucket!==bucket)state.frame={bucket,candle:{...bar},count:1,lastTimestamp:bar.timestamp,complete:bar.timestamp===bucket+60000}
   else{
@@ -106,7 +120,7 @@ export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick
   }
   const f=state.frame
   if(bar.timestamp!==bucket+span||!f.complete||f.count!==minutes)return
-  return advanceSignal(state,f.candle.close,config.type,config.position_cost_step,f.candle)
+  return evaluate(f.candle)
 }
 
 function observedBar(row:any,price:number,time:number):Candle{
@@ -116,7 +130,7 @@ function observedBar(row:any,price:number,time:number):Candle{
 }
 
 /** One causal trace can serve many distance/exit configurations without recomputing indicators. */
-export function strategySignalTrace(candles:any[],config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'>,prehistory:any[]=[]):(Direction|undefined)[]{
+export function strategySignalTrace(candles:any[],config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'|'indicationSourceId'>,prehistory:any[]=[]):(Direction|undefined)[]{
   const state=newSignalState();let previous=-Infinity
   const observe=(row:any)=>{
     const price=Number(row?.close??row?.price),time=timestampMs(row?.timestamp??row?.time)
