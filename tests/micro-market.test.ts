@@ -16,7 +16,7 @@ test('Micro/Low-Range Cartesian identity covers every step, tenth ratio, exit an
   const configs=generateStrategyCatalog('bingx-x02',settings)
   assert.equal(configs.length,720);assert.equal(new Set(configs.map(c=>c.id)).size,720)
   assert.equal(configurationCount(settings),configs.length)
-  for(const c of configs){assert.ok(Math.abs(c.roundTripCostPct!-.11)<1e-12);assert.ok(Math.abs(c.stoploss/c.takeprofit-c.slRatio!)<1e-12);assert.ok(Math.abs(c.trailDistancePct!-c.stoploss*50)<1e-12)}
+  for(const c of configs){assert.ok(Math.abs(c.roundTripCostPct!-.11)<1e-12);assert.ok(Math.abs(c.stoploss-Math.max(.001,c.takeprofit*c.slRatio!))<1e-12);assert.ok(Math.abs(c.trailDistancePct!-Math.max(.05,c.stoploss*50))<1e-12)}
 })
 test('maker/taker costs charge two execution legs and fee-relative slippage exactly once',()=>{
   assert.ok(Math.abs(resolveTradingCostPct()-.11)<1e-12)

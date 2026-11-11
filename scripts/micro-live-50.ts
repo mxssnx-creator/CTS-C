@@ -10,24 +10,25 @@ import type {ExecutionIntent} from '../core/types'
 const arg=(name:string,fallback:string)=>{const i=process.argv.indexOf(name);return i<0?fallback:process.argv[i+1]}
 async function main(){
  if(!process.argv.includes('--execute'))throw Error('Pass --execute for the authorized VST run')
- const directory=resolve(arg('--output','.data/micro-live-50')),duration=Number(arg('--seconds','600'))
+ const directory=resolve(arg('--output','.data/micro-live-50')),duration=Number(arg('--seconds','600')),symbolCount=Number(arg('--symbols','50'))
+ if(!Number.isInteger(symbolCount)||symbolCount<1||symbolCount>50||!Number.isFinite(duration)||duration<=0||duration>1800)throw Error('Symbols must be1..50 and observation seconds1..1800')
  await mkdir(directory,{recursive:true,mode:0o700})
  const store=new StateStore(join(directory,'runtime.sqlite')),venue=new BingxVstClient(),runtime=new TerminalRuntime('bingx-x02',store)
  const initial={positions:await venue.positions(),orders:await venue.openOrders()}
- runtime.saveFlatSettings({symbolCount:50,historyCandles:1440,baseNotional:100,volumeFactor:.01,maxOrderNotional:Number(arg('--max-order-notional','10')),stageGateMode:'processed-sets',strategyEnabledRanges:['Micro','Low-Range'],strategyTpSteps:[2,3,4,5],strategySlRatios:Array.from({length:15},(_,i)=>(i+2)/10),strategyExitModes:['fixed','trailing','trailing-only'],strategyIndicationTypes:arg('--indications','Trend').split(','),strategySignalTimeframes:[1/6,1],autoPfEnabled:true,autoPfRatio:.2,autoPfMax:2,microTradeStream:true,microTrailRatio:.5,axisPrevious:5,axisLast:2,axisOutcome:'positive',axisReferenceStage:'base',blockBehavior:'rounds',blockSize:3,blockSteps:3,blockVolumeRatio:.2,blockPauseRounds:1,blockMaxMultiplier:1.6,dcaDistancePct:.2,dcaMultiplier:.2})
+ runtime.saveFlatSettings({symbolCount,historyCandles:1440,baseNotional:100,volumeFactor:.01,maxOrderNotional:Number(arg('--max-order-notional','10')),stageGateMode:'processed-sets',microMinSlDistancePct:.1,microMinTrailDistancePct:.05,strategyEnabledRanges:arg('--ranges','Micro,Low-Range').split(','),strategyTpSteps:[2,3,4,5,6,8,9,12],strategySlRatios:Array.from({length:15},(_,i)=>(i+2)/10),strategyExitModes:['fixed','trailing','trailing-only'],strategyIndicationTypes:arg('--indications','Trend').split(','),strategySignalTimeframes:[1/6,1],autoPfEnabled:true,autoPfRatio:.2,autoPfMax:2,microTradeStream:true,microTrailRatio:.5,axisPrevious:5,axisLast:2,axisOutcome:'positive',axisReferenceStage:'base',blockBehavior:'rounds',blockSize:3,blockSteps:3,blockVolumeRatio:.2,blockPauseRounds:1,blockMaxMultiplier:1.6,dcaDistancePct:.2,dcaMultiplier:.2})
  let runError:string|null=null,warmedAt:number|undefined,observationCompleted=false,stopRequested=false,observedSeconds=0
  try{
   const historyDirectory=arg('--history-directory','')
   if(historyDirectory){
    if(runtime.engine.managedSymbols().some(symbol=>runtime.engine.lastProcessedAt(symbol)!==null))throw Error('Offline profile preparation requires a fresh directory; resume the saved runtime without --history-directory')
    const manifest=JSON.parse(await readFile(join(historyDirectory,'manifest.json'),'utf8'))
-   if(manifest.symbols.length!==50||manifest.barSeconds!==60)throw Error('A 50-symbol observed one-minute study is required')
+   if(manifest.symbols.length!==symbolCount||manifest.barSeconds!==60)throw Error('The exact requested observed one-minute study is required')
    runtime.engine.updateSettings({symbols:manifest.symbols,symbolFees:Object.fromEntries(manifest.symbols.map((symbol:string)=>[symbol,{makerFeePct:manifest.fee.maker*100,takerFeePct:manifest.fee.taker*100}]))})
    for(const [index,symbol] of manifest.symbols.entries()){
     const raw=JSON.parse(await readFile(join(historyDirectory,`${symbol}.json`),'utf8')).slice(-1440)
     const bars=raw.map((c:any)=>({timestamp:(c.time+60)*1000,open:c.open,high:c.high,low:c.low,close:c.close,volume:c.volume}))
     await runtime.warmObservedHistory(symbol,bars)
-    console.log(JSON.stringify({phase:'observed-history-prewarm',symbol,completed:index+1,total:50}))
+    console.log(JSON.stringify({phase:'observed-history-prewarm',symbol,completed:index+1,total:symbolCount}))
    }
    // Each symbol is durably checkpointed. Startup still recovers every missing
    // native minute; cached observations never manufacture runtime freshness.
@@ -38,7 +39,7 @@ async function main(){
    await new Promise(r=>setTimeout(r,5000))
    const snapshot=await runtime.serial(async()=>runtime.snapshot())
    const coverage=runtime.control.warmed.length
-   if(coverage===50)warmedAt??=Date.now()
+   if(coverage===symbolCount)warmedAt??=Date.now()
    const observation={checkedAt:new Date().toISOString(),elapsedSeconds:(Date.now()-began)/1000,warmed:coverage,control:runtime.control,stages:runtime.engine.snapshot({laneLimit:0,positionLimit:0}).stages,stream:(snapshot as any).microMarketData,execution:new DemoExecutor(store,venue).summary(),performance:{heapBytes:process.memoryUsage().heapUsed,maxRssKiB:process.resourceUsage().maxRSS}}
    await appendFile(join(directory,'observations.ndjson'),JSON.stringify(observation)+'\n')
    await writeFile(join(directory,'latest.json'),JSON.stringify(observation))
