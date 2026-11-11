@@ -26,6 +26,7 @@ export class TerminalRuntime {
   private readonly owner=randomUUID()
   private leased=false
   private leaseLost=false
+  private hydratedCheckpointToken:string|null=null
   private heartbeat?:ReturnType<typeof setInterval>
   private checkpointAt=0
   private bufferedEvents:EngineEvent[]=[]
@@ -46,6 +47,7 @@ export class TerminalRuntime {
     this.client=this.createClient(connectionId)
     this.executor=new DemoExecutor(this.store,this.client,{connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:intent=>this.validateLiveIntent(intent)})
     const restored = this.store.loadEngineState()
+    this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
     this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId})
     if(this.engine.settings.connectionId!==connectionId)throw new Error('Engine checkpoint belongs to another connection')
     this.control = { ...DEFAULT_CONTROL, ...this.store.get<Control>('control'), warmed: [] }
@@ -56,12 +58,24 @@ export class TerminalRuntime {
   private ensureLease() {
     if(this.leaseLost)throw new Error('Execution ownership was lost; restart this process to reload durable state')
     if(this.leased){if(this.store.renewLease(this.owner))return;this.leaseLost=true;this.control.running=false;clearTimeout(this.timer);throw new Error('Another runtime owns execution or this runtime lease expired')}
-    if(!this.store.acquireLease(this.owner))throw new Error('Another CTS-C process owns this data directory')
+    let acquired=false
+    for(let attempt=0;attempt<3;attempt++){
+      if(!this.store.acquireLease(this.owner))throw new Error('Another CTS-C process owns this data directory')
+      if(this.hydratedCheckpointToken===this.store.checkpointToken()){
+        if(!this.store.renewLease(this.owner)){this.leaseLost=true;throw new Error('Runtime ownership expired during checkpoint verification')}
+        acquired=true;break
+      }
+      this.store.releaseLease(this.owner)
+      // Hydration can take longer than a lease on a large journal. Do it unowned, then
+      // verify the exact checkpoint generation after reacquiring before any mutation.
+      const restored=this.store.loadEngineState()
+      if(restored){if(restored.settings.connectionId!==this.connectionId)throw new Error('Engine checkpoint belongs to another connection');this.engine=TradingEngine.fromOwnedCheckpoint(restored)}
+      this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
+    }
+    if(!acquired)throw new Error('Checkpoint changed repeatedly before execution ownership')
     this.leased=true
     this.heartbeat=setInterval(()=>{try{this.ensureLease()}catch(error){this.control.lastError=error instanceof Error?error.message:'Ownership lost';clearInterval(this.heartbeat)}},5000)
     this.heartbeat.unref?.()
-    const restored=this.store.loadEngineState()
-    if(restored)this.engine=TradingEngine.fromOwnedCheckpoint(restored)
     this.control={...this.control,...this.store.get<Control>('control'),warmed:[]}
   }
   shutdown(){clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false;this.leaseLost=true;this.control.running=false}
