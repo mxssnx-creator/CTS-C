@@ -16,7 +16,8 @@
     "check": "npm run typecheck && npm test && npm run build && npm run test:runtime",
     "postbuild": "node scripts/prepare-standalone.mjs",
     "test:browser": "node --import tsx scripts/browser-smoke.mjs",
-    "test:strategy-features": "node --import tsx --test tests/strategy-processing.test.ts tests/ported-indications.test.ts tests/relational-volume.test.ts shared/cts-indications/ported.test.ts shared/cts-volume/ratios.test.ts && node --import tsx --test shared/cts-volume/ui.test.tsx"
+    "test:strategy-features": "node --import tsx --test tests/strategy-processing.test.ts tests/ported-indications.test.ts tests/relational-volume.test.ts shared/cts-indications/ported.test.ts shared/cts-volume/ratios.test.ts && node --import tsx --test shared/cts-volume/ui.test.tsx",
+    "test:lastn-blocks": "node --experimental-strip-types --test shared/cts-lastn/blocks.test.ts"
   },
   "dependencies": {
     "lightweight-charts": "^5.2.0",

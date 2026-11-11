@@ -1,3 +1,4 @@
+import type {BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 export type Direction = "long" | "short"
 export type Stage = "base" | "main" | "real" | "live"
 export type Coordination = "normal" | "axis" | "block" | "dca"
@@ -20,6 +21,7 @@ export interface PseudoPosition {
   direction?: Direction; indication_type?: string
 }
 export interface EngineSettings {
+  stageBlocks?: Partial<Record<"base"|"main"|"real",BlockPolicy>>;
   liveEntryMode?:'independent'|'real-mirror'
   stageGateMode?:'continuous-ancestors'|'processed-sets'
   connectionId: string; symbols: string[]; initialEquity: number; baseNotional: number; volumeFactor: number
@@ -38,7 +40,7 @@ export interface EngineSettings {
   maxSamples: number
 }
 export interface EntryFill { price: number; quantity: number; timestamp: number; kind: "entry" | "block" | "dca" }
-export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number;pfState:ProfitFactorState;qualified:boolean;checkedAt:number}
+export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string}
 export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   activationOrder?:number

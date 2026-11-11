@@ -54,5 +54,5 @@ test('mode changes share only Base facts, isolate derived sets, and leave absent
  assert.ok(Object.values(after.lanes).filter(l=>l.stage==='main'&&!derived.has(l.id)).every(l=>l.parentProof===undefined))
  const old=e.exportState();delete old.settings.stageGateMode;assert.equal(TradingEngine.fromSerialized(JSON.stringify(old)).settings.stageGateMode,'continuous-ancestors')
  assert.throws(()=>e.updateSettings({stageGateMode:'invalid' as any}))
- assert.equal(validateConfiguration(DEFAULTS).stageGateMode,'continuous-ancestors');assert.equal(flatEngineSettings(e.settings,{symbolCount:1,historyCandles:100}).stageGateMode,'continuous-ancestors')
+ assert.equal(validateConfiguration(DEFAULTS).stageGateMode,'processed-sets');assert.equal(flatEngineSettings(e.settings,{symbolCount:1,historyCandles:100}).stageGateMode,'continuous-ancestors')
 })
