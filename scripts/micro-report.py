@@ -16,6 +16,9 @@ p.add_argument('--live')
 p.add_argument('--executor-log', required=True)
 p.add_argument('--output', required=True)
 p.add_argument('--verification')
+p.add_argument('--native-log')
+p.add_argument('--contracts')
+p.add_argument('--cost-comparison')
 a = p.parse_args()
 target=Path(a.output);target.parent.mkdir(parents=True,exist_ok=True)
 study = json.loads(Path(a.study).read_text())
@@ -23,6 +26,10 @@ live = json.loads(Path(a.live).read_text()) if a.live and Path(a.live).exists() 
 raw = Path(a.executor_log).read_text()
 diagnostic = json.loads(raw[raw.index('\n{\n') + 1:])
 verification = json.loads(Path(a.verification).read_text()) if a.verification else {}
+native_raw = Path(a.native_log).read_text() if a.native_log else None
+native = json.loads(native_raw[native_raw.index('\n{\n') + 1:]) if native_raw else None
+contracts = json.loads(Path(a.contracts).read_text()) if a.contracts else None
+cost_comparison = json.loads(Path(a.cost_comparison).read_text()) if a.cost_comparison else []
 esc = lambda x: html.escape(str(x))
 stages = ['base', 'main', 'real', 'live']
 coords = ['normal', 'axis', 'block', 'dca']
@@ -94,6 +101,7 @@ ax.set_xticks(range(len(labels)),labels,rotation=90,fontsize=7);ax.set_ylim(0,10
 coverage_chart=svg(fig)
 
 heatmaps=''
+break_even=table(['TP step']+[f'SL/TP {i/10:.1f}' for i in range(2,17)],[[step]+[f'{100*(step*i/10+1)/(step+step*i/10):.1f}%' for i in range(2,17)] for step in [2,3,4,5]])
 for range_name in ['Micro','Low-Range']:
     rows=[]
     for step in [2,3,4,5]:
@@ -123,11 +131,26 @@ live_section='<p>The automatic 50-symbol run has no finalized result attached ye
 if live:
     account=live['accounting']
     live_section=table(['Measure','Observed value'],[
-        ['Environment',live['environment']],['Finished',live['generatedAt']],['Run error',live.get('runError') or 'None'],['Cleanup error',live.get('cleanupError') or 'None'],['Owned open lots after cleanup',live['ownedOpenLots']],['Owned reconciled closes',account['executionPF']['closed']],['Actual execution PF',pf(account['executionPF'])],['Validated execution PF',pf(account['validatedExecutionPF'])],['Actual signed fees',account['fees']],['Actual net PnL',account['realizedNetPnl']],['Whole-account snapshot unchanged',live['foreignInventoryPreserved']],['Final total account positions / orders',f"{live['finalPositionCount']} / {live['finalOrderCount']}"]])
+        ['Environment',live['environment']],['Finished',live['generatedAt']],['Full observation completed',live.get('observationCompleted',False)],['Observation after warmup (seconds)',round(live.get('observedSeconds',0),1)],['Warmed symbols',live.get('warmedSymbols',0)],['Run error',live.get('runError') or 'None'],['Cleanup error',live.get('cleanupError') or 'None'],['Owned open lots after cleanup',live['ownedOpenLots']],['Owned reconciled closes',account['executionPF']['closed']],['Actual execution PF',pf(account['executionPF'])],['Validated execution PF',pf(account['validatedExecutionPF'])],['Actual signed fees',account['fees']],['Actual net PnL',account['realizedNetPnl']],['Whole-account snapshot unchanged',live['foreignInventoryPreserved']],['Final total account positions / orders',f"{live['finalPositionCount']} / {live['finalOrderCount']}"]])
     live_section+='<p>Whole-account snapshots can change through other users of the shared account. Owned order attribution and cleanup are separate checks. Diagnostic orders below do not count as strategy qualification.</p>'
+    live_section+='<h3>Automatic run: own-stage coverage, including minute warmup</h3><p>Historical warmup and the observed interval contribute to these paper totals. Qualified-window PF only describes currently passing sets; admitted-forward PF retains their later losses. Neither is the exchange execution PF above.</p>'
+    live_section+=table(['Stage','Lanes','Enough N','Enough %','Qualified now','Validated-window PF','Admitted forward closes','Admitted forward PF'],[[r['stage'],r['lanes'],r['enoughSamples'],f"{r['enoughSamplesPct']:.2f}%",r['qualified'],pf({'closes':r['validatedWindow']['samples'],**r['validatedWindow']}),r['admittedForward']['closes'],pf(r['admittedForward'])] for r in live.get('stages',[])])
     live_section+=table(['Symbol','Recorded bars','Complete','First timestamp ms','Last timestamp ms'],[[r['symbol'],r['bars'],r['complete'],r.get('first','—'),r.get('last','—')] for r in live['tradeBarCoverage']])
 
 diagnostic_table=table(['Side','Entry qty','Added qty','Actual add ratio','Closed qty','Gross PnL','Signed fees','Net PnL','Protection'],[[r['direction'],r['entryQuantity'],r['addedQuantity'],r['actualAddRatio'],r['closedQuantity'],f"{r['realizedGrossPnl']:.6f}",f"{r['fees']:.6f}",f"{r['realizedNetPnl']:.6f}",r['protection']] for r in diagnostic['results']])
+native_section=''
+if native:
+    native_section='<h3>Smallest-distance native order</h3><p>The Step-2 diagnostic used TP 0.22% and SL 0.044% (SL/TP 0.2). Native protection triggered and the owned quantity closed. This confirms this particular XRP order, not profitability or all symbols.</p>'
+    native_section+=table(['Symbol','Direction','TP %','SL %','Native trigger observed','Closed qty','Signed fees','Net PnL'],[[r['symbol'],r['direction'],r['takeProfitPct'],r['stopLossPct'],r['nativeTriggerObserved'],r['closedQuantity'],f"{r['fees']:.6f}",f"{r['realizedNetPnl']:.6f}"] for r in native['results']])
+    native_section+=f"<p>Residual positions / orders: {native['residualPositions']} / {native['residualOrders']}; inventory comparison: {native['foreignInventoryPreserved']}.</p>"
+if cost_comparison:
+    native_section+='<h3>Actual commissions versus modeled cost</h3><p>Actual fee percentages divide signed commissions by the total opened notional, including additions. Price slippage is already reflected in fills; adding the model allowance to actual PnL would deduct it twice. The difference below compares commissions with fees plus the model slippage allowance, not a measured fill-price error.</p>'
+    native_section+=table(['Diagnostic','Direction','Opened notional','Actual fee %','Model total %','Difference (percentage points)','Actual net return %'],[[r['diagnostic'],r['direction'],f"{r['openedNotional']:.6f}",f"{r['actualFeeRoundTripPct']:.6f}",f"{r['modelRoundTripPct']:.6f}",f"{r['actualMinusModelFeePct']:.6f}",f"{r['netReturnPct']:.6f}"] for r in cost_comparison])
+contract_section=''
+if contracts:
+    one_tick=sum(r.get('oneTickStops',0) for r in contracts['rows'])
+    contract_section=f"<h2>Exchange minimums across 50 symbols</h2><p>The read-only audit checked {contracts['checked']:,} step/ratio/direction combinations at observed quotes. {contracts['representable']:,} retained distinct rounded stops; {one_tick:,} met the stricter minimum of one full price tick. The executor rejects narrower protection before opening or adding exposure. All independent paper sets remain available.</p><p>A 10 USDT cap admitted normal minimum size on 49 symbols but no 0.2-DCA entry after quantity rounding. The final demo-only profile uses a 65 USDT cap, above the observed largest DCA minimum of 61.695 USDT. These price-dependent limits are not permanent exchange guarantees; general application caps were not increased.</p>"
+    contract_section+=table(['Symbol','Price tick','Normal minimum USDT','0.2-DCA minimum USDT','Distinct stop / checked','At least 1 tick / checked'],[[r['symbol'],f"{10**-r['contract']['pricePrecision']:.8f}",f"{r['normalMinimumNotional']:.4f}",f"{r['dcaPointTwoMinimumNotional']:.4f}",f"{r['representable']}/{r['checked']}",f"{r.get('oneTickStops',0)}/{r['checked']}"] for r in contracts['rows']])
 stage_table=table(['Stage','Entries','Closes','Forward PF','Net PnL (model units)','Costs (model units)'],[[s,study['stages'][s]['entries'],study['stages'][s]['closes'],pf(study['stages'][s]),f"{study['stages'][s]['pnl']:.6f}",f"{study['stages'][s]['fees']:.6f}"] for s in stages])
 detail_rows=[[k,v['closes'],pf(v),f"{v['pnl']:.6f}",v['entries'],v['adds']] for k,v in sorted(study['groups'].items())]
 source_links='<ul><li><a href="https://bingxservice.zendesk.com/hc/en-001/articles/11263240298255-Perpetual-Futures-Fee-Schedule">BingX perpetual fee schedule</a></li><li><a href="https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-ws-market/api-reference.md">BingX official trade WebSocket reference</a></li><li><a href="https://github.com/ccxt/ccxt/blob/master/python/ccxt/pro/bingx.py">CCXT BingX WebSocket implementation and VST host</a></li></ul>'
@@ -139,6 +162,7 @@ document=f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="vi
 <h2>Economics and independent sets</h2><p>Micro steps 2–5 and Low-Range steps 2–5 were tested with SL/TP 0.2–1.6 in 0.1 increments, three exit modes, and MA Cross / RSI Band / Trend / Break. Every combination has its own identity; directions, coordinations, stage proofs and 10-second versus one-minute evidence remain separate.</p>
 {table(['Cost component','Percentage points'],[['Maker, per side','0.02%'],['Taker, per side','0.05%'],['Two market sides','0.10%'],['Modeled slippage, 10% of fees','0.01%'],['Modeled market round trip','0.11%']])}
 <p>Step 2 therefore targets 0.22%; step 5 targets 0.55%. SL is TP × selected ratio. The thin trail factor is 0.5 × SL; a dynamic peak stop ratchets without loosening. Auto PF raises the per-configuration minimum from its TP distance while preserving each stage floor. Actual exchange accounting uses fills and signed commissions exactly once; the additional modeled cost is not deducted again.</p>
+<details><summary>Cost-implied break-even win rate for fixed TP/SL</summary><p>Assuming every exit hits exactly its fixed TP or SL, with the modeled cost C charged once: win rate = (SL + C) / (TP + SL). For Step 2 and ratio 0.2 this is 58.3%. Trailing, timed exits and actual fills change the payoff distribution; this table is an arithmetic constraint, not a forecast.</p>{break_even}</details>
 <h2>Forward stage outcomes</h2><div class="grid"><div class="chart">{stage_chart}</div><div>{stage_table}</div></div>
 <p>The first 65% of 4,320 observed minute bars per symbol ranked candidates. Up to three training-qualified candidates per range were frozen; the remaining 35% supplied new forward positions. Base/Main/Real use 20/8/8 closes and PF 1.1, plus the configuration Auto PF floor. Axis uses five previous and two recent Normal Base closes; Block uses rounds of three, a 0.2 base-budget increment and a 1.6 cap. Base and derived stages learn from their own trades. Live paper mirrors accepted Real allocations. Minute-close replay cannot establish sub-minute stop ordering.</p>
 <h2>Sampling and symbol coverage</h2><div class="chart">{coverage_chart}</div>
@@ -148,7 +172,7 @@ document=f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="vi
 <h2>Steps and SL ratios</h2><p>These cells describe only training-frozen candidates. A dash means no selected forward observations. It is not a zero loss or a failed execution.</p>{heatmaps}
 <h2>Hourly details</h2><div class="chart">{hour_chart}</div><details><summary>Exact hourly PF, counts, PnL and modeled costs</summary>{table(['UTC hour','Stage','Closes','PF','Net PnL','Costs'],hour_rows)}</details>
 <h2>x02 automatic observation</h2>{live_section}
-<h2>Actual executor round trip</h2><p>The separate VST diagnostic confirmed long and short entry, a 20% quantity addition, native protection, owned closure and fee reconciliation. It was an execution diagnostic, not a qualified strategy trade. Both closes were negative. Residual diagnostic positions and orders: 0; its whole-account inventory comparison passed.</p>{diagnostic_table}
+<h2>Actual executor round trip</h2><p>The separate VST diagnostic confirmed long and short entry, a 20% quantity addition, native protection, owned closure and fee reconciliation. It was an execution diagnostic, not a qualified strategy trade. Both closes were negative. Residual diagnostic positions and orders: 0; its whole-account inventory comparison passed.</p>{diagnostic_table}{native_section}{contract_section}
 <h2>Data integrity and restart</h2><p>Observed trade events form 10-second OHLCV. Partial connection buckets, stale data and discontinuities do not create synthetic history. VST events in the probe omitted trade IDs; the parser preserves this as unavailable. Real IDs are deduplicated where present. Minute warmup and present-time tick/bar processing are separated. Two preliminary automatic attempts exposed a candle-path leak, submitted no owned strategy orders and are excluded from economic evidence. Restart, ownership, partial-fill and unknown-outcome behavior are covered by executable regressions; the final live record states the observed limits.</p>
 <details><summary>Every selected configuration / coordination / stage</summary><p><input id="filter" placeholder="Filter symbol-independent configuration groups"></p>{table(['Range / indication / TP / SL / exit / coordination / stage','Closes','PF','Net PnL','Entries','Adds'],detail_rows,True)}</details>
 <h2>Verification and provenance</h2><pre>{esc(json.dumps(verification,indent=2))}</pre><p>Study cutoff (milliseconds): {study['manifest']['cutoff']}; generated: {esc(study['generatedAt'])}. Raw candles, SHA-256 hashes, frozen choices and negative outcomes accompany the evidence archive. Model money totals are correlated hypothetical lanes, not account equity. Funding, liquidation, queue position and depth are outside the replay model.</p>
