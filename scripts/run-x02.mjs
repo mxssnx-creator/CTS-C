@@ -160,8 +160,10 @@ export async function runX02() {
     if (!canContinue()) return
     const symbolsIndex=process.argv.indexOf('--symbols'),symbolCount=symbolsIndex<0?50:Number(process.argv[symbolsIndex+1])
     if(!Number.isInteger(symbolCount)||symbolCount<1||symbolCount>500)throw new Error('--symbols must be 1..500')
+    const historyIndex=process.argv.indexOf('--history-candles'),historyCandles=historyIndex<0?4320:Number(process.argv[historyIndex+1])
+    if(!Number.isInteger(historyCandles)||historyCandles<100||historyCandles>4320)throw new Error('--history-candles must be 100..4320')
     // Keep all other saved configuration and ownership state. A fresh database uses engine defaults.
-    await saveInitialSettings(request, { symbolCount, historyCandles: 1440, volumeFactor: .01,maxOrderNotional:10 }, { sleep, canContinue })
+    await saveInitialSettings(request, { symbolCount, historyCandles, volumeFactor: .01,maxOrderNotional:10 }, { sleep, canContinue })
     if (!canContinue()) return
     await request('/api/terminal', { action: 'start-x02' }, { timeoutMs: STARTUP_REQUEST_TIMEOUT })
     await observeRuntime({ request, isRunning: () => childIsRunning(child), isStopping: () => stopping, sleep, warn: message => console.error(message), publish: s => {

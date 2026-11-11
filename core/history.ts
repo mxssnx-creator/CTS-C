@@ -6,7 +6,7 @@ const MINUTE = 60_000
 export interface HistoryPlan { count:number; cutoff:number; cursor:number|null }
 /** Fetch the oldest missing chunk first, even when the interruption exceeds the configured history size. */
 export function planHistory(configuredCount:number,cursor:number|null,now=Date.now()):HistoryPlan {
-  if(!Number.isInteger(configuredCount)||configuredCount<100||configuredCount>1440)throw new Error('History count must be 100..1440')
+  if(!Number.isInteger(configuredCount)||configuredCount<100||configuredCount>4320)throw new Error('History count must be 100..4320')
   const latest=Math.floor(now/MINUTE)*MINUTE
   if(cursor===null)return {count:configuredCount,cutoff:latest,cursor}
   if(!Number.isSafeInteger(cursor)||cursor<=0||cursor%MINUTE!==0||cursor>latest)throw new Error('Invalid or future history cursor')
@@ -27,10 +27,10 @@ export function validateHistory(symbol:string,candles:Candle[],plan:HistoryPlan)
 }
 /** Backfill observed closed minutes; BingX VST may cap a page at 1,000. */
 export async function closedHistory(source:HistorySource,symbol:string,count:number,cutoff=Date.now()):Promise<Candle[]> {
-  if(!Number.isInteger(count)||count<100||count>1440)throw new Error('History count must be 100..1440')
+  if(!Number.isInteger(count)||count<100||count>4320)throw new Error('History count must be 100..4320')
   const rows=new Map<number,VenueCandle>()
   let endTime=Math.floor(cutoff/60_000)*60_000-1
-  for(let page=0;page<3&&rows.size<count;page++){
+  for(let page=0;page<Math.ceil(count/1000)+1&&rows.size<count;page++){
     const data=await source.candles(symbol,'1m',Math.min(1000,count-rows.size+1),endTime)
     const closed=data.filter(c=>c.time+60_000<=cutoff&&c.time<=endTime)
     if(!closed.length)break

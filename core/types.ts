@@ -10,6 +10,7 @@ export interface StrategyConfig {
   type: string; position_cost_step: number; takeprofit: number; stoploss: number; trailing: boolean
   range?: StrategyRange; tpStep?: number; slRatio?: number; exitMode?: ExitMode
   roundTripCostPct?: number; maxHoldMinutes?: number; trailDistancePct?:number
+  indicationSourceId?:string
   signalTimeframeMinutes?:number
 }
 export interface PseudoPosition {
@@ -18,6 +19,7 @@ export interface PseudoPosition {
   direction?: Direction; indication_type?: string
 }
 export interface EngineSettings {
+  liveEntryMode?:'independent'|'real-mirror'
   stageGateMode?:'continuous-ancestors'|'processed-sets'
   connectionId: string; symbols: string[]; initialEquity: number; baseNotional: number; volumeFactor: number
   volumeRatios?:Record<Coordination,number>
@@ -57,6 +59,8 @@ export interface ClosedTrade {
   parentPositionId?:string
 }
 export interface LaneState {
+  /** Internal Normal reference, never funded or counted as active Live execution. */
+  calculationOnly?: boolean;
   id: string; symbol: string; configId: string; direction: Direction; stage: Stage; coordination: Coordination
   config: StrategyConfig; samples: number[]; closedCount: number; wins: number; netPnl: number; grossProfit: number; grossLoss: number
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
@@ -65,6 +69,7 @@ export interface LaneState {
   parentProof?:GateProof[]
 }
 export interface SignalState {
+  portedBars?: Candle[];
   count: number; prices: number[]; gains: number[]; losses: number[]; previousPrice?: number
   emaFast: number; emaSlow: number; emaSignal: number; avgGain: number; avgLoss: number
   previousSmaDiff?: number; previousHistogram?: number; previousRsi?: number; bandExcursion?: "below" | "above"
@@ -97,7 +102,7 @@ export interface EngineState {
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]
 }
 export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; pfState: ProfitFactorState; netPnl: number; wins:number; fees:number|null; longOpen:number; shortOpen:number; currentLanes:number; currentEnoughSamples:number; currentQualified:number; admissionReady:number; blockedByParent:number; currentProfitFactor:number; currentPfState:ProfitFactorState
-  validatedWindow?:{samples:number;sets:number;profitFactor:number;pfState:ProfitFactorState}
+  validatedWindow?:{samples:number;sets:number;profitFactor:number;pfState:ProfitFactorState;profit?:number;loss?:number}
   admittedForward?:{closes:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;unprovenCloses:number}
 }
 export interface EngineSnapshot {

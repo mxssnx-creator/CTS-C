@@ -1,4 +1,6 @@
 "use client"
+import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
+import {VolumeRatioSliders} from "../../shared/cts-volume/sliders.tsx";
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, Download, Layers3, RotateCcw, Save, SlidersHorizontal, Upload } from "lucide-react"
@@ -49,6 +51,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
   const [importing, setImporting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [sourceFilter,setSourceFilter]=useState('')
   const dirtyRef = useRef(false)
   const importInput = useRef<HTMLInputElement>(null)
   const serverFingerprint = JSON.stringify(settings)
@@ -61,6 +64,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
   }
   const selected = (key: string) => draft[key] as (string | number)[]
   const coreCount = useMemo(() => configurationCount(draft), [draft])
+  const sourceChoices=useMemo(()=>{const q=sourceFilter.trim().toLowerCase(),selected=new Set(draft.strategyIndicationSources as string[]);return PORTED_CATALOG.filter(s=>selected.has(s.id)||!q||`${s.id} ${s.label}`.toLowerCase().includes(q))},[sourceFilter,draft.strategyIndicationSources])
   const reset = () => {
     dirtyRef.current = false; setDirty(false); setDraft(hydrate(settings)); setError(null); setMessage(null)
   }
@@ -101,7 +105,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
     if (!file) return
     setImporting(true); setError(null); setMessage(null)
     try {
-      if (file.size > 131_072) throw new Error("Configuration file must be 128 KB or smaller.")
+      if (file.size > 2_097_152) throw new Error("Configuration file must be 2 MB or smaller.")
       let parsed: unknown
       try { parsed = JSON.parse(await file.text()) }
       catch { throw new Error("Could not read valid JSON from this configuration file.") }
@@ -126,6 +130,24 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
     <>
     <form onSubmit={save} className="space-y-5">
       <fieldset disabled={busy || saving || importing} className="min-w-0 space-y-5">
+      <section className="terminal-panel space-y-3 p-5"><h3 className="text-sm font-semibold">Tactic & Inverse · independent indication sources</h3><p className="terminal-muted text-xs">Tactic adds DCA-style adverse-distance and recovery configurations. Inverse uses CTS-A-O calculations before entry and qualifies its own results. Select Tactic / Inverse below to process these sources. Market / pair sources require a matching reference universe; absent references cannot qualify.</p>
+        <button type="button" className="terminal-button" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic','Inverse'])]);change('strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES])}}>Prepare Tactic + Inverse</button>
+        <label className="block text-xs">Search source configurations<input className="terminal-input mt-2 w-full" value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} placeholder="Decline, recovery, trend, pair…" /></label>
+        <label className="block text-xs">Independent source configurations<select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Tactic and Inverse source configurations" value={draft.strategyIndicationSources as string[]} onChange={e=>change('strategyIndicationSources',Array.from(e.target.selectedOptions,o=>o.value))}>{sourceChoices.map(s=><option key={s.id} value={s.id}>{s.label} · {s.id}</option>)}</select></label>
+        <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {PORTED_CATALOG.length} available. Tactic supports 1/5/15/30m; Inverse supports 1/5/15m. Shared history retains up to 4,320 completed source candles per symbol and timeframe and periodically rebases its calculations.</p>
+      </section>
+      <section className="terminal-panel space-y-4 p-5" aria-label="Relational volume"><h3 className="text-sm font-semibold">Relational volume · Indications</h3><VolumeRatioSliders overall value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{indicationTypes:INDICATIONS,indications:draft.strategyIndicationSources as string[]}}/></section>
+      <section className="terminal-panel space-y-4 p-5"><h3 className="text-sm font-semibold">Relational volume · Strategies & Ranges</h3><VolumeRatioSliders value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{strategies:['normal','axis','block','dca'],ranges:RANGES}}/></section>
+      {Object.keys(symbolFees).length>0&&<section className="terminal-panel space-y-4 p-5"><h3 className="text-sm font-semibold">Relational volume · Symbols</h3><VolumeRatioSliders value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{symbols:Object.keys(symbolFees)}}/></section>}
+      <section className="terminal-panel space-y-4 p-5" aria-label="Strategy processing">
+        <h3 className="text-sm font-semibold">Strategy processing · Normal & Trailing</h3>
+        <p className="terminal-muted text-xs">Normal off keeps calculation and Axis/Block/DCA progression, including their fixed exits. Plain Normal and plain Trailing lanes cannot enter Live. Trailing off excludes every new trailing configuration. Both the overall and range switch must be on.</p>
+        <div className="flex flex-wrap gap-5">{([['strategyNormalEnabled','Normal · overall'],['strategyTrailingEnabled','Trailing · overall']] as const).map(([key,label]) => <label key={key} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={draft[key] !== false} onChange={e=>change(key,e.target.checked)} />{label}</label>)}</div>
+        <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th>Coordination / Range</th><th>Normal</th><th>Trailing</th></tr></thead><tbody>{RANGES.map(range => <tr key={range}><th className="py-2 font-normal">{range}</th>{(['normal','trailing'] as const).map(key => {
+          const byRange = (draft.strategyProcessingByRange ?? {}) as Record<string, {normal?:boolean;trailing?:boolean}>
+          return <td key={key}><input type="checkbox" aria-label={`${range} ${key} processing`} checked={byRange[range]?.[key] !== false} onChange={e=>change('strategyProcessingByRange',{...byRange,[range]:{...byRange[range],[key]:e.target.checked}})} /></td>
+        })}</tr>)}</tbody></table></div>
+      </section>
       <div className="terminal-panel flex flex-wrap items-center justify-between gap-4 p-5">
         <div><p className="terminal-muted text-[10px] uppercase tracking-[.2em]">{connectionName.toUpperCase()} / Configuration studio</p><h2 className="mt-1 text-xl font-semibold">Independent strategy combinations</h2><p className="terminal-muted mt-2 max-w-2xl text-xs leading-relaxed">Ranges, distances, exit modes, and indications generate separate core configurations. Axis, Block, and DCA coordinate their progression.</p></div>
         <div className="flex flex-wrap gap-2">
@@ -155,7 +177,8 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <div className="mb-5 flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-[var(--terminal-accent)]" /><h3 className="text-sm font-semibold">Stage gates & completed evidence</h3></div>
             <p className="terminal-muted mb-5 text-xs">PF 1.0 is neutral. Each stage uses its own most recent completed samples. The Real gate controls progression into Live; exchange execution also requires a verified connection.</p>
             <div className="mb-5">{enumField("stageGateMode", "Stage progression", [{ value: "processed-sets", label: "Independent processed sets" }, { value: "continuous-ancestors", label: "Recheck all ancestor windows" }])}</div>
-            <p className="terminal-muted mb-5 text-xs">Independent sets retain their admission proof and learn from their own new trades. Real remains the final current gate; Live mirrors fresh accepted Real entries. Changing mode starts separate downstream cohorts and preserves prior results.</p>
+            <div className="mb-5">{enumField("liveEntryMode", "Live entries", [{ value: "independent", label: "Independent signal entries · legacy baseline" }, { value: "real-mirror", label: "Mirror fresh qualified Real entries" }])}</div>
+            <p className="terminal-muted mb-5 text-xs">Real remains the final current PF gate. Mirroring links each new Live position to its fresh Real entry and uses Real evidence for Axis, without another Live evidence gate. Independent processed sets always mirror Real. Mode changes preserve prior outcomes.</p>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{NUMERIC_FIELDS.map(numberField)}</div>
           </section>
         </div>
