@@ -119,12 +119,12 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
   const numberField = (field: (typeof NUMERIC_FIELDS)[number]) => (
     <label key={field.key} className="space-y-2 text-xs">
       <span className="block terminal-muted">{field.label}</span>
-      <input className="terminal-input w-full" type="number" min={field.min} max={field.max} step={field.step} required value={String(draft[field.key] ?? "")} onChange={event => change(field.key, event.target.value)} />
+      <input aria-label={field.label} className="terminal-input w-full" type="number" min={field.min} max={field.max} step={field.step} required value={String(draft[field.key] ?? "")} onChange={event => change(field.key, event.target.value)} />
       {settings[field.key] === undefined && <span className="block text-[10px] terminal-muted">Default · {String(DEFAULTS[field.key])}</span>}
     </label>
   )
   const enumField = (key: string, label: string, options: { value: string; label: string }[]) => (
-    <label className="space-y-2 text-xs"><span className="block terminal-muted">{label}</span><select className="terminal-input w-full" value={String(draft[key])} onChange={event => change(key, event.target.value)}>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>{settings[key] === undefined && <span className="block text-[10px] terminal-muted">Default · {String(DEFAULTS[key])}</span>}</label>
+    <label className="space-y-2 text-xs"><span className="block terminal-muted">{label}</span><select aria-label={label} className="terminal-input w-full" value={String(draft[key])} onChange={event => change(key, event.target.value)}>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>{settings[key] === undefined && <span className="block text-[10px] terminal-muted">Default · {String(DEFAULTS[key])}</span>}</label>
   )
   return (
     <>
