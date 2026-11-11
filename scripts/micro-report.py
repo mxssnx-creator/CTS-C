@@ -70,8 +70,8 @@ hours = sorted(set(k.split('/')[0] for k in study['hourly']))
 fig, axes = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
 for s, color in zip(stages, colors):
     vals = [study['hourly'].get(f'{h}/{s}', {}) for h in hours]
-    axes[0].plot(range(len(hours)), [min(v.get('profitFactor', 0), 3) if v.get('closes') else float('nan') for v in vals], label=s.title(), color=color)
-    axes[1].plot(range(len(hours)), [v.get('closes', 0) for v in vals], label=s.title(), color=color)
+    axes[0].plot(range(len(hours)), [min(v.get('profitFactor', 0), 3) if v.get('closes') else float('nan') for v in vals], label='Live paper' if s=='live' else s.title(), color=color)
+    axes[1].plot(range(len(hours)), [v.get('closes', 0) for v in vals], label='Live paper' if s=='live' else s.title(), color=color)
 axes[0].axhline(1, color='#ffbf76', linestyle='--');axes[0].set_ylabel('Hourly PF (display cap 3)');axes[0].legend(ncol=4)
 axes[1].set_ylabel('Closes');axes[1].set_xticks(range(0, len(hours), max(1, len(hours)//10)), [hours[i][5:16] for i in range(0, len(hours), max(1, len(hours)//10))], rotation=35, ha='right')
 axes[1].set_xlabel('UTC hour; exact PF and no-loss states in table')
