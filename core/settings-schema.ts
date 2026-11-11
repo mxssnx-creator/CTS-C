@@ -1,3 +1,4 @@
+import {checkBlockPolicy,type BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 import {relationalVolumeSettings,DEFAULT_RELATIONAL_VOLUME} from "../shared/cts-volume/ratios.ts";
 import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from "../shared/cts-indications/catalog.ts"
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
@@ -14,7 +15,8 @@ export const MODES = ["fixed", "trailing", "trailing-only"]
 export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
-  stageGateMode: "continuous-ancestors",
+  stageGateMode: "processed-sets",
+  stageBlocks: {},
   liveEntryMode: "independent",
   baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
@@ -121,7 +123,10 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     const arrayOptions = ARRAY_FIELDS[key]
     const enumOptions = ENUM_FIELDS[key]
     const field = ALL_NUMERIC_FIELDS.find(item => item.key === key)
-    if (key === "relationalVolumeRatios") {
+    if(key==="stageBlocks"){
+      if(!value||typeof value!=="object"||Array.isArray(value)||Object.keys(value).some(k=>!["base","main","real"].includes(k)))throw new Error("Invalid stage blocks");
+      for(const policy of Object.values(value))checkBlockPolicy(policy as BlockPolicy);output[key]=structuredClone(value);
+    } else if (key === "relationalVolumeRatios") {
       output[key]=relationalVolumeSettings(value,true)
     } else if (key === "strategyProcessingByRange") {
       output[key] = validateProcessingByRange(value)
@@ -151,7 +156,7 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
   const result: Record<string, unknown> = structuredClone(DEFAULTS)
   for (const [key, fallback] of Object.entries(DEFAULTS)) {
     if (settings[key] === undefined) continue
-    if (key === "relationalVolumeRatios") {
+    if(key==="stageBlocks"){try{result[key]=validateConfiguration({stageBlocks:JSON.parse(settings[key])},{partial:true}).stageBlocks}catch{}} else if (key === "relationalVolumeRatios") {
       try{result[key]=relationalVolumeSettings(JSON.parse(settings[key]),true)}catch{}
     } else if (key === "strategyProcessingByRange") {
       try { result[key] = validateProcessingByRange(JSON.parse(settings[key])) } catch { /* Preserve defaults on invalid legacy data. */ }
@@ -168,7 +173,7 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
 export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;historyCandles:number}):Record<string,unknown>{
   const values:Record<string,unknown>={...structuredClone(DEFAULTS)}
   for(const [key,value] of Object.entries(s.catalog))if(Object.hasOwn(DEFAULTS,key))values[key]=value
-  return {...values,stageGateMode:s.stageGateMode??'continuous-ancestors',liveEntryMode:s.liveEntryMode??'independent',symbolCount:control.symbolCount,historyCandles:control.historyCandles,volumeFactor:s.volumeFactor,baseNotional:s.baseNotional,maxOrderNotional:s.maxOrderNotional??0,
+  return {...values,stageBlocks:s.stageBlocks??{},liveEntryMode:s.liveEntryMode??'independent',stageGateMode:s.stageGateMode??'continuous-ancestors',symbolCount:control.symbolCount,historyCandles:control.historyCandles,volumeFactor:s.volumeFactor,baseNotional:s.baseNotional,maxOrderNotional:s.maxOrderNotional??0,
     normalVolumeRatio:s.volumeRatios?.normal??1,axisVolumeRatio:s.volumeRatios?.axis??1,blockVolumeFactor:s.volumeRatios?.block??1,dcaVolumeRatio:s.volumeRatios?.dca??1,
     prevPosWindow:s.stageLastN.base,mainEvalPosCount:s.stageLastN.main,realEvalPosCount:s.stageLastN.real,
     baseProfitFactor:s.stageMinPF.base,mainProfitFactor:s.stageMinPF.main,realProfitFactor:s.stageMinPF.real,

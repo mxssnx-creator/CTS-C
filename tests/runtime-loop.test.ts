@@ -360,3 +360,23 @@ test('a stale or pre-close quote cannot authorize a fresh executable history bar
   r.marks.set(symbol,{price:100,timestamp:Date.now()});await r.tick();assert.equal(allowed,true);assert.equal(runtime.engine.lastProcessedAt(symbol),now)
  })
 })
+
+
+test("stream execution dispatches a close before the next main tick and coalesces in-flight work",async()=>{
+  await isolated(async runtime=>{
+    const internal=runtime as any, blocked=deferred<any[]>()
+    const state=runtime.engine.exportState();state.intents=[intent("close")]
+    runtime.engine=new TradingEngine(state.settings,state)
+    let calls=0
+    internal.executor={process:(ready:ExecutionIntent[])=>{calls++;assert.deepEqual(ready.map(i=>i.id),["intent-close"]);return blocked.promise}}
+    internal.tradeStream={status:{generation:0},drain:()=>[],stop:()=>{}}
+    internal.consumeTrades()
+    assert.equal(calls,1,"100ms stream callback must dispatch without invoking tick()")
+    const task=internal.executionTask
+    for(let i=0;i<100;i++)internal.consumeTrades()
+    assert.equal(calls,1,"slow venue creates no concurrent or queued executor promises")
+    blocked.resolve([{id:"intent-close",status:"acknowledged"}]);await task
+    internal.consumeTrades();assert.equal(calls,1,"idle stream does not poll the venue at 10Hz")
+    assert.equal(runtime.engine.pendingIntents().length,0)
+  })
+})

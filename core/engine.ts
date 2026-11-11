@@ -1,3 +1,4 @@
+import {blockPrefix,blockRequired,blockPolicyKey,checkBlockPolicy,evaluateBlocks,type BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 import {blockRoundBudget,settleBlockRound,consumeBlockPause} from "./block-rounds"
 import {normalizedVolumeFactor,relationalVolumeSettings} from "../shared/cts-volume/ratios";
 import { strategyProcessing } from "./strategy-processing"
@@ -51,6 +52,11 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   for(const coordination of ['normal','axis','block','dca'] as const)finite(settings.volumeRatios![coordination],`${coordination} volume ratio`,.001,100)
   finite(settings.maxOrderNotional??0,'maximum order notional',0,1e9)
   for (const stage of ["base", "main", "real"] as const) { finite(settings.stageLastN[stage], `${stage} lastN`, 1, settings.maxSamples, true); finite(settings.stageMinPF[stage], `${stage} PF`, 0, 999) }
+  if(settings.stageBlocks)for(const [stage,policy]of Object.entries(settings.stageBlocks)){
+    if(!["base","main","real"].includes(stage))throw new Error("Invalid block stage");checkBlockPolicy(policy);
+    if(blockRequired(policy)>settings.maxSamples)throw new Error("Disjoint blocks exceed retained samples");
+    if(settings.stageMinPF[stage as "base"|"main"|"real"]<=1)throw new Error("Disjoint block PF must exceed one");
+  }
   const { axis, block, dca } = settings.coordinations
   finite(axis.previous, "axis previous", 1, settings.maxSamples, true); finite(axis.last, "axis last", 1, settings.maxSamples, true)
   if (axis.enabled && axis.previous + axis.last > settings.maxSamples) throw new Error("Axis windows exceed retained samples")
@@ -76,10 +82,21 @@ function laneKey(connectionId: string, symbol: string, config: StrategyConfig, d
   // JSON identities cannot collide when a user changes delimiters in a label.
   return JSON.stringify([connectionId, symbol, config.id, direction, coordination, stage, identity])
 }
-type WindowResult={count:number;required:number;minPF:number;profit:number;loss:number;enoughSamples:boolean;profitFactor:number;pfState:import('./types').ProfitFactorState;qualified:boolean}
+type WindowResult={pfSampleCount?:number;blockPolicyKey?:string;count:number;required:number;minPF:number;profit:number;loss:number;enoughSamples:boolean;profitFactor:number;pfState:import('./types').ProfitFactorState;qualified:boolean}
 const windowCache=new WeakMap<LaneState,{closed:number;samples:number[];length:number;head:number|undefined;value:WindowResult}>()
+const blockWindowCache=new WeakMap<LaneState,{closed:number;samples:number[];head:number|undefined;length:number;key:string;value:WindowResult}>()
 const axisCache=new WeakMap<LaneState,{closed:number;samples:number[];length:number;head:number|undefined;previous:number;last:number;outcome:string;threshold:number;allowed:boolean}>()
-function windowMetrics(lane: LaneState | undefined, required: number, minPF: number) {
+export function windowMetrics(lane: LaneState | undefined, required: number, minPF: number, blocks?:BlockPolicy):WindowResult {
+  if(blocks){
+    minPF=Math.max(minPF,lane?.config.autoPfFloor??0);
+    const samples=lane?.samples??[],key=blockPolicyKey(blocks),cached=lane?blockWindowCache.get(lane):undefined;
+    if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.key===key&&cached.value.minPF===minPF)return cached.value;
+    const result=evaluateBlocks(blockPrefix(samples,blockRequired(blocks)),blocks,minPF);
+    const pf=describeProfitFactor(result.long.gp,result.long.gl,result.long.count);
+    const value={profit:result.long.gp,loss:result.long.gl,pfSampleCount:result.long.count,count:result.count,required:result.required,minPF,enoughSamples:result.count===result.required,...pf,qualified:result.state==="qualified",blockPolicyKey:result.key};
+    if(lane)blockWindowCache.set(lane,{closed:lane.closedCount,samples,head:samples[0],length:samples.length,key,value});
+    return value;
+  }
   minPF = Math.max(minPF,lane?.config.autoPfFloor??0)
   const samples = lane?.samples ?? [], count = Math.min(samples.length, required)
   const cached=lane?windowCache.get(lane):undefined
@@ -249,7 +266,7 @@ export class TradingEngine {
     this.volumeWeights=relationalVolumeSettings(s.catalog.relationalVolumeRatios,true)
     for (const coordination of ["normal", "axis", "block", "dca"] as const) {
       const parameters = coordination === "normal" ? null : s.coordinations[coordination]
-      this.coordinationIds[coordination] = hashId(JSON.stringify([s.baseNotional, s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0, parameters, s.stageLastN, s.stageMinPF]))
+      this.coordinationIds[coordination] = hashId(JSON.stringify([s.baseNotional, s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0, parameters, s.stageLastN, s.stageMinPF,...(s.stageBlocks&&Object.keys(s.stageBlocks).length?[s.stageBlocks]:[])]))
       this.processedCoordinationIds[coordination]=hashId(this.coordinationIds[coordination]+':processed-sets-v1')
     }
   }
@@ -267,7 +284,8 @@ export class TradingEngine {
   /** maxSamples is a ceiling, not a target allocation. Lifetime totals are separate. */
   private sampleRetention(lane: Pick<LaneState, "stage" | "coordination">): number {
     const s = this.state.settings
-    const gateWindow = s.stageLastN[lane.stage === "live" ? "real" : lane.stage]
+    const source=lane.stage === "live" ? "real" : lane.stage
+    const gateWindow = s.stageBlocks?.[source]?blockRequired(s.stageBlocks[source]!):s.stageLastN[source]
     const axisWindow = lane.coordination === "normal" && s.coordinations.axis.enabled&&(s.coordinations.axis.reference!=='base'||lane.stage==='base')
       ? s.coordinations.axis.previous + s.coordinations.axis.last : 0
     return Math.min(s.maxSamples, Math.max(gateWindow, axisWindow))
@@ -286,7 +304,7 @@ export class TradingEngine {
     if(!lane)return false
     if(this.validLineages.has(lane.id))return true
     const index=STAGES.indexOf(lane.stage),s=this.state.settings
-    const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>proof.stage===STAGES[i]&&proof.qualified&&Number.isFinite(proof.checkedAt)&&proof.checkedAt>0&&Number.isFinite(proof.profitFactor)&&proof.count===proof.required&&proof.profitFactor>=proof.minPF&&proof.required===s.stageLastN[proof.stage as 'base'|'main'|'real']&&proof.minPF===Math.max(s.stageMinPF[proof.stage as 'base'|'main'|'real'],lane.config.autoPfFloor??0)&&proof.laneId===this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,proof.stage)?.id))
+    const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>proof.stage===STAGES[i]&&proof.qualified&&Number.isFinite(proof.checkedAt)&&proof.checkedAt>0&&Number.isFinite(proof.profitFactor)&&proof.count===proof.required&&proof.profitFactor>=proof.minPF&&proof.required===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockRequired(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):s.stageLastN[proof.stage as 'base'|'main'|'real'])&&(proof.blockPolicyKey??null)===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockPolicyKey(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):null)&&proof.minPF===Math.max(s.stageMinPF[proof.stage as 'base'|'main'|'real'],lane.config.autoPfFloor??0)&&proof.laneId===this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,proof.stage)?.id))
     if(valid)this.validLineages.add(lane.id)
     return valid
   }
@@ -307,7 +325,8 @@ export class TradingEngine {
   }
   /** Closed evidence changes only at settlement; avoid rebuilding unchanged windows on every price/bar. */
   private qualifies(lane:LaneState|undefined,required:number,minPF:number):boolean{
-    return !!lane&&lane.samples.length>=required&&windowMetrics(lane,required,minPF).qualified
+    const source=lane?.stage==='live'?'real':lane?.stage,blocks=source?this.state.settings.stageBlocks?.[source]:undefined;
+    return !!lane&&lane.samples.length>=(blocks?blockRequired(blocks):required)&&windowMetrics(lane,required,minPF,blocks).qualified
   }
   private axisAllows(symbol: string, config: StrategyConfig, direction: Direction, stage: Stage): boolean {
     const s = this.state.settings, axis = s.coordinations.axis
@@ -329,8 +348,8 @@ export class TradingEngine {
     const s = this.state.settings, block = s.coordinations.block
     const proof=(stage:Stage):GateProof=>{
       const source=stage as 'base'|'main'|'real',parent=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,stage),id=parent?.id??''
-      const proof=windowMetrics(parent,s.stageLastN[source],s.stageMinPF[source])
-      return {stage,laneId:id,count:proof.count,required:proof.required,minPF:proof.minPF,profitFactor:proof.profitFactor,pfState:proof.pfState,qualified:proof.qualified,checkedAt:candle.timestamp}
+      const proof=windowMetrics(parent,s.stageLastN[source],s.stageMinPF[source],s.stageBlocks?.[source])
+      return {stage,laneId:id,count:proof.count,required:proof.required,minPF:proof.minPF,profitFactor:proof.profitFactor,pfState:proof.pfState,qualified:proof.qualified,checkedAt:candle.timestamp,...("blockPolicyKey" in proof?{blockPolicyKey:proof.blockPolicyKey as string}:{})}
     }
     let admission:GateProof[]|undefined
     if(lane.stage!=='base'){
@@ -518,7 +537,7 @@ export class TradingEngine {
               lane??=this.lane(symbol, config, signal, coordination, stage)
               if(coordination==='block'&&s.coordinations.block.behavior==='rounds'&&!(this.realMirror&&stage==='live')&&consumeBlockPause(lane,s.coordinations.block)){
                 this.dirtyLaneIds.add(lane.id)
-                if(!this.processedSets&&stage!=='live'&&!windowMetrics(lane,s.stageLastN[stage],s.stageMinPF[stage]).qualified)break
+                if(!this.processedSets&&stage!=='live'&&!windowMetrics(lane,s.stageLastN[stage],s.stageMinPF[stage],s.stageBlocks?.[stage]).qualified)break
                 continue
               }
               const mirror=this.realMirror&&stage==='live'?this.cachedLane(symbol,config.id,signal,coordination,'real')?.open:undefined
@@ -586,7 +605,7 @@ export class TradingEngine {
       if(!this.currentLane(lane)||lane.calculationOnly)continue
       const row=byId.get(`${lane.stage}:${lane.coordination}`)!,source=lane.stage==='live'?'real':lane.stage
       row.lanes++;row.closed+=lane.closedCount;row.profit+=lane.grossProfit;row.loss+=lane.grossLoss;row.netPnl+=lane.netPnl
-      row.enoughSamples+=Number(lane.samples.length>=this.state.settings.stageLastN[source])
+      row.enoughSamples+=Number(lane.samples.length>=(this.state.settings.stageBlocks?.[source]?blockRequired(this.state.settings.stageBlocks[source]!):this.state.settings.stageLastN[source]))
     }
     return rows.map(({profit,loss,...row})=>{
       const own=describeProfitFactor(profit,loss,row.closed),normal=byId.get(`${row.stage}:normal`)!,baseline=describeProfitFactor(normal.profit,normal.loss,normal.closed)
@@ -602,7 +621,7 @@ export class TradingEngine {
     for (const lane of Object.values(this.state.lanes)) {
       if (lane.calculationOnly) continue
       const source = lane.stage === "live" ? "real" : lane.stage
-      const metrics = windowMetrics(lane, s.stageLastN[source], s.stageMinPF[source])
+      const metrics = windowMetrics(lane, s.stageLastN[source], s.stageMinPF[source],s.stageBlocks?.[source])
       const stats = stageStats[lane.stage]
       stats.lanes++; stats.open += lane.open ? 1 : 0; stats.closed += lane.closedCount
       stats.enoughSamples += metrics.enoughSamples ? 1 : 0; stats.qualified += metrics.qualified ? 1 : 0
@@ -620,8 +639,8 @@ export class TradingEngine {
         stats.admissionReady+=Number(parentReady&&axisReady)
         stats.blockedByParent+=Number(!parentReady)
         stats.currentQualified+=Number(validated)
-        if(validated){stats.validatedProfit+=metrics.profit;stats.validatedLoss+=metrics.loss;stats.validatedCount+=metrics.count}
-        stats.currentProfit+=metrics.profit;stats.currentLoss+=metrics.loss;stats.currentCount+=metrics.count
+        if(validated){stats.validatedProfit+=metrics.profit;stats.validatedLoss+=metrics.loss;stats.validatedCount+=metrics.pfSampleCount??metrics.count}
+        stats.currentProfit+=metrics.profit;stats.currentLoss+=metrics.loss;stats.currentCount+=metrics.pfSampleCount??metrics.count
       }
       if (lanes.length < laneLimit) lanes.push({ id: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, direction: lane.direction, coordination: lane.coordination, ...metrics, current,admissionReady:parentReady&&axisReady,validated,isOpen:Boolean(lane.open),netPnl: lane.netPnl })
       if (lane.open && (!options.positionStage || options.positionStage === lane.stage) && positions.length < positionLimit) positions.push({ ...lane.open, laneId: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, coordination: lane.coordination })

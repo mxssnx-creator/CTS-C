@@ -201,6 +201,27 @@ export class TerminalRuntime {
       retainEvents(events,this.engine.processTick(trade.symbol,trade.price,trade.timestamp,true,this.control.warmed.includes(trade.symbol)?"all":"micro"))
     }
     if(events.length)this.persist(events,false)
+    this.pumpExecution()
+  }
+  /** Wake execution on stream ticks without waiting for the quote/history cycle.
+   * One in-flight cycle; venue pacing and durable intent claims still apply. */
+  private pumpExecution(reconcile=false){
+    if(!this.control.running)return
+    this.ensureLease()
+    if(!this.executionTask){
+        const events:EngineEvent[]=[]
+        const pending=this.engine.pendingIntents().filter(i=>this.control.exchangeExecution||i.kind==='close')
+        if(!reconcile&&!pending.length)return
+        const submittedIntentIds=new Set(pending.filter(i=>this.store.intent(stableClientOrderId(i.connectionId,i.id))).map(i=>i.id))
+        const plan=planExecutionIntents(pending,{activePositionIds:this.engine.activePositionIds(),submittedIntentIds,now:Date.now(),limit:1})
+        for(const rejection of plan.rejected){this.engine.markExecution(rejection.id,{status:'rejected',error:rejection.error});const intent=pending.find(i=>i.id===rejection.id)!;events.push({type:'execution',laneId:intent.laneId,stage:'live',timestamp:Date.now(),status:'rejected',reason:rejection.error})}
+        if(plan.rejected.length)this.persist(events.splice(0))
+        this.executionTask=this.executor.process(plan.ready).then(updates=>this.serial(async()=>{
+          const pendingById=new Map(this.engine.pendingIntents().map(i=>[i.id,i])),audit:EngineEvent[]=[]
+          for(const update of updates)if(update.status!=='unknown'&&pendingById.has(update.id)){this.engine.markExecution(update.id,{...update,status:update.status});audit.push({type:'execution',laneId:pendingById.get(update.id)!.laneId,stage:'live',timestamp:Date.now(),status:update.status,reason:update.error})}
+          if(audit.length)this.persist(audit)
+        })).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Executor unavailable'}).finally(()=>{this.executionTask=undefined})
+      }
   }
   private prefetchHistory() {
     if(!this.control.running)return
@@ -314,18 +335,7 @@ export class TerminalRuntime {
       }
       if(quotes.length)this.control.lastTick=now;if(!dataGap)this.control.lastError=this.quoteError?.message??null
       this.persist(events.splice(0),false)
-      if(!this.executionTask){
-        const pending=this.engine.pendingIntents().filter(i=>this.control.exchangeExecution||i.kind==='close')
-        const submittedIntentIds=new Set(pending.filter(i=>this.store.intent(stableClientOrderId(i.connectionId,i.id))).map(i=>i.id))
-        const plan=planExecutionIntents(pending,{activePositionIds:this.engine.activePositionIds(),submittedIntentIds,now:Date.now(),limit:1})
-        for(const rejection of plan.rejected){this.engine.markExecution(rejection.id,{status:'rejected',error:rejection.error});const intent=pending.find(i=>i.id===rejection.id)!;events.push({type:'execution',laneId:intent.laneId,stage:'live',timestamp:Date.now(),status:'rejected',reason:rejection.error})}
-        if(plan.rejected.length)this.persist(events.splice(0))
-        this.executionTask=this.executor.process(plan.ready).then(updates=>this.serial(async()=>{
-          const pendingById=new Map(this.engine.pendingIntents().map(i=>[i.id,i])),audit:EngineEvent[]=[]
-          for(const update of updates)if(update.status!=='unknown'&&pendingById.has(update.id)){this.engine.markExecution(update.id,{...update,status:update.status});audit.push({type:'execution',laneId:pendingById.get(update.id)!.laneId,stage:'live',timestamp:Date.now(),status:update.status,reason:update.error})}
-          if(audit.length)this.persist(audit)
-        })).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Executor unavailable'}).finally(()=>{this.executionTask=undefined})
-      }
+      this.pumpExecution(true)
       this.prefetchHistory()
       this.consumeHistory(events)
       this.refreshAccount()
@@ -339,6 +349,7 @@ export class TerminalRuntime {
     const catalogKeys=['microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
     for(const [key,value] of Object.entries(input)) {
+      if(key==='stageBlocks'){next.stageBlocks=structuredClone(value) as EngineSettings['stageBlocks'];continue}
       if(key==='stageGateMode'){next.stageGateMode=value as EngineSettings['stageGateMode'];continue}
       if(key==='liveEntryMode'){next.liveEntryMode=value as EngineSettings['liveEntryMode'];continue}
       if(catalogKeys.includes(key)){next.catalog[key]=value;continue}

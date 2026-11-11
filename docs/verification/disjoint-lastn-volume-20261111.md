@@ -1,0 +1,23 @@
+# Disjoint Last-N and relational volume continuation — 2026-11-11
+
+The older long block, following short block and newest minimal block use separate settled positions. A 20/10/3 policy needs 33 observations; the negative short/minimal conditions do not enter the positive long PF. Unknown observations occupy their slot and cannot qualify. Position costs are deducted once before signed block evaluation. Shared prefix sums bound retention to the largest requested total, 95 for this grid.
+
+The requested grid is long 10–70 by 5, short 5/8/11/14/17/20, minimal 1–5, with both short and minimal signs: 1,560 policies. The user's illustrative short=10 remains accepted as a custom count. All 1,560 policies are checked against a scalar oracle; this does not mean every native engine runs 1,560 concurrent policy lanes. Existing native policy selection/fan-out limits remain. This is an explicit remaining implementation/scale boundary, not a claim of completed exhaustive native execution.
+
+Recovered interrupted work adds neutral 1.0 relational volume weights by indication/type, strategy, range and symbol, with sliders and serialized settings. Matching weights multiply once; independent protection-family switches and imported Tactic/Inverse calculations are retained. A neutral factor preserves current sizing; no profitable ratio optimization is claimed.
+
+## Validation and remaining acceptance
+
+Full-grid portable scalar parity, causal stage histories, costs, policy identity and unknown/insufficient samples are covered. Existing held positions retain captured economics. Native performance claims are limited to tested scopes. No exchange orders, account mutation or production deployment was performed in this continuation. Positive funded/venue PF and exhaustive concurrent-policy throughput are not established. Source correctness and future profitability are different acceptance criteria.
+
+Stage block settings participate in full configuration identities and captured parent proofs. Each derived stage uses its own history; Live mirrors newly accepted Real positions. Current/validated PF uses only the primary long block rather than contaminating it with negative coordination blocks. Existing checkpoints without a stage mode retain legacy behavior; new UI settings use processed sets. Remote causal execution/journal changes through 2b39fe6 are preserved. Full suite: 238 tests pass; TypeScript and production build pass.
+
+Bounded observed-market study: 50 symbols, 72h warmup plus 24h subsequent prices; one Trend/Micro TP3/SL0.6/fixed/1m configuration, both sides and Normal/Axis/Block/DCA. Four signed 20/10/3 profiles and overlapping baseline are all reported; no winning forward profile is selected. Costs assume 0.05% taker per leg plus slippage at 10% of fees. Every qualified Real entry was mirrored (100% for all nonempty profiles); raw Real→Live percentages were much lower because raw Real includes gathering/failed qualification history. Subsequent modeled Live PF was 0.275–0.388 for nonempty signed profiles, below 1. The all-positive profile did not reach Real. No profitable defaults are promoted. These are reused retrospective minute bars, not untouched validation, order-book simulation or venue fills. See the persisted study report; script scripts/disjoint-stage-study.ts reproduces it from research-data/ctsc-50-20261111.zip.
+
+Project-order ownership audit: unique defaults CTSA (CTS-A), CTSB (CTS-A-O), CTSX (CTS-X), G plus connection (CTS-G), kn/kt plus system/connection hash (CTS-K-N), and ctsc plus stable identity hash (CTS-C). Cross-project entry/control IDs are rejected. AO/X reject overrides using another project or connection reserved tag. Existing captured ownership bindings are not rewritten. A tag alone is not permission to adopt foreign positions; native lifecycle ownership/receipt checks remain. Custom run tags must remain deployment-unique.
+
+## Trailing-control continuation
+
+The 100 ms trade-stream callback now dispatches pending execution/close intents immediately through the existing single in-flight executor, without waiting for the one-second quote/history cycle. Idle stream ticks do not poll the venue; a slow request does not create an executor backlog. Runtime tests: 19 pass. Trailing still has a native static backstop plus locally detected trailing exits; autonomous venue trailing-order parity is not implemented in this change.
+
+Native venue latency, persistent all-config lane fan-out, cross-process account-wide pacing and profitable forward execution remain explicit acceptance boundaries. No full-completion claim is made.

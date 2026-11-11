@@ -1,4 +1,6 @@
 "use client"
+import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
+import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
 import {VolumeRatioSliders} from "../../shared/cts-volume/sliders.tsx";
 
@@ -180,6 +182,8 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <div className="mb-5">{enumField("liveEntryMode", "Live entries", [{ value: "independent", label: "Independent signal entries · legacy baseline" }, { value: "real-mirror", label: "Mirror fresh qualified Real entries" }])}</div>
             <p className="terminal-muted mb-5 text-xs">Real remains the final current PF gate. Mirroring links each new Live position to its fresh Real entry and uses Real evidence for Axis, without another Live evidence gate. Independent processed sets always mirror Real. Mode changes preserve prior outcomes.</p>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{NUMERIC_FIELDS.map(numberField)}</div>
+            {(["base","main","real"] as const).map(stage=><BlockPolicyFields key={stage} label={stage+" Last-N blocks"} value={(draft.stageBlocks as Partial<Record<string,BlockPolicy>>|undefined)?.[stage]} onChange={policy=>{const next={...(draft.stageBlocks as Partial<Record<string,BlockPolicy>>??{})};if(policy)next[stage]=policy;else delete next[stage];change("stageBlocks",next)}}/>)}
+
             <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.autoPfEnabled===true} onChange={e=>change('autoPfEnabled',e.target.checked)}/>Auto PF by configuration TP distance</label>
             <p className="terminal-muted my-3 text-xs">Required PF = max(stage floor, min(cap, 1 + TP distance rounded down to 0.1% × slope)). Computed once per configuration; samples and losses remain unchanged.</p>
             <div className="grid gap-5 sm:grid-cols-2">{AUTO_PF_FIELDS.map(numberField)}</div>
