@@ -1,0 +1,359 @@
+{
+  "cutoff": 1794416400000,
+  "start": 1794070800000,
+  "symbols": [
+    "BTC-USDT",
+    "ETH-USDT",
+    "SOL-USDT",
+    "XRP-USDT",
+    "BCH-USDT",
+    "DOGE-USDT",
+    "LINK-USDT",
+    "ADA-USDT",
+    "LTC-USDT",
+    "XTZ-USDT",
+    "DOT-USDT",
+    "AVAX-USDT",
+    "THETA-USDT",
+    "ALGO-USDT",
+    "AXS-USDT",
+    "DYDX-USDT",
+    "CELR-USDT",
+    "SAND-USDT",
+    "KSM-USDT",
+    "VET-USDT",
+    "SUSHI-USDT",
+    "NEAR-USDT",
+    "ATOM-USDT",
+    "BSV-USDT",
+    "UNI-USDT",
+    "FIL-USDT",
+    "AAVE-USDT",
+    "ENJ-USDT",
+    "MANA-USDT",
+    "CHZ-USDT",
+    "TRX-USDT",
+    "SKL-USDT",
+    "ZRX-USDT",
+    "SNX-USDT",
+    "CRV-USDT",
+    "YFI-USDT",
+    "1INCH-USDT",
+    "COMP-USDT",
+    "GRT-USDT",
+    "MASK-USDT",
+    "CVC-USDT",
+    "AR-USDT",
+    "ENS-USDT",
+    "BAT-USDT",
+    "IOTX-USDT",
+    "CTSI-USDT",
+    "IMX-USDT",
+    "XLM-USDT",
+    "ZEC-USDT",
+    "DASH-USDT"
+  ],
+  "datasets": [
+    {
+      "symbol": "BTC-USDT",
+      "file": "BTC-USDT.json",
+      "sha256": "95ecea4603d7d4ff914bf22f01b9c01fb1d56b64824211c245d527360d456ec2",
+      "bars": 5760
+    },
+    {
+      "symbol": "ETH-USDT",
+      "file": "ETH-USDT.json",
+      "sha256": "4d62f6a1fc5f04420cdc450e14faeb1ba39e2f89fba2f69689cdb98ee724d8a7",
+      "bars": 5760
+    },
+    {
+      "symbol": "SOL-USDT",
+      "file": "SOL-USDT.json",
+      "sha256": "4d12225673d0fe70fe4f17d414ea8a492ed4e838e06e8714090dd532e2a689da",
+      "bars": 5760
+    },
+    {
+      "symbol": "XRP-USDT",
+      "file": "XRP-USDT.json",
+      "sha256": "85d5f11cf942863271adc3f9192108192cdbc56b384a6bc16e2507b34a99f221",
+      "bars": 5760
+    },
+    {
+      "symbol": "BCH-USDT",
+      "file": "BCH-USDT.json",
+      "sha256": "434e9c0250accbdbe1bcd8e252982ed51467e1db130a6ea9559d87438e9e5ded",
+      "bars": 5760
+    },
+    {
+      "symbol": "DOGE-USDT",
+      "file": "DOGE-USDT.json",
+      "sha256": "1739df17fd59c5f42de71adbbae5afd23a935b98aebc2b935ea92eb63c53d563",
+      "bars": 5760
+    },
+    {
+      "symbol": "LINK-USDT",
+      "file": "LINK-USDT.json",
+      "sha256": "c17dce703402c4b0594bb1f922ba43dd7da59fbc771ed4d044a5e036c939c04e",
+      "bars": 5760
+    },
+    {
+      "symbol": "ADA-USDT",
+      "file": "ADA-USDT.json",
+      "sha256": "0f5137d6598c405b55dc18acc9055309bfed8113e225e1cf432016fcdd0a7579",
+      "bars": 5760
+    },
+    {
+      "symbol": "LTC-USDT",
+      "file": "LTC-USDT.json",
+      "sha256": "1a4ae54c1f2e64cb338aa36139b9fcbc18495099cdb1fa66a69600f77c66c57f",
+      "bars": 5760
+    },
+    {
+      "symbol": "XTZ-USDT",
+      "file": "XTZ-USDT.json",
+      "sha256": "7a5ddf8cb8bdc5d6fdbd9b7566ef122792074fa5b6058ee6a7e369b122cc970f",
+      "bars": 5760
+    },
+    {
+      "symbol": "DOT-USDT",
+      "file": "DOT-USDT.json",
+      "sha256": "ded57dcaf40e49965372420f8409b2c957762f2a7cf63d8a4ea4ced9de96fb3a",
+      "bars": 5760
+    },
+    {
+      "symbol": "AVAX-USDT",
+      "file": "AVAX-USDT.json",
+      "sha256": "c4aa0590782c0e60a807837c81fb1ab1cdbaba03191927f183113ca6f87d6548",
+      "bars": 5760
+    },
+    {
+      "symbol": "THETA-USDT",
+      "file": "THETA-USDT.json",
+      "sha256": "b59e1d47ea1087e7ea3e98eee73fae11ea6d753680f5bb65e6be2271d348f484",
+      "bars": 5760
+    },
+    {
+      "symbol": "ALGO-USDT",
+      "file": "ALGO-USDT.json",
+      "sha256": "42e1cd5bf564b1ecc4e1e2118772ec07b2aff975f6315ddc7877e24bad8c0523",
+      "bars": 5760
+    },
+    {
+      "symbol": "AXS-USDT",
+      "file": "AXS-USDT.json",
+      "sha256": "1efb3d0def76132b859ef2b6e2a2bb7fa161e96d861fe2a86388b32d9a81f691",
+      "bars": 5760
+    },
+    {
+      "symbol": "DYDX-USDT",
+      "file": "DYDX-USDT.json",
+      "sha256": "db9c61f5f52b772a2a960d2bb220ff01205c6e0f5f1c03eb9dc5565b103a6811",
+      "bars": 5760
+    },
+    {
+      "symbol": "CELR-USDT",
+      "file": "CELR-USDT.json",
+      "sha256": "e94933ddd3306e8fd07cec27e2abfd40fa869462e57d984ca62b61cdb047d66a",
+      "bars": 5760
+    },
+    {
+      "symbol": "SAND-USDT",
+      "file": "SAND-USDT.json",
+      "sha256": "ecf12760235c9793c3e655f35f236ae0760e8aa3e639a03428a8fd35950935fb",
+      "bars": 5760
+    },
+    {
+      "symbol": "KSM-USDT",
+      "file": "KSM-USDT.json",
+      "sha256": "5453b89979ff295a4b7a877b2bd65622bd466a7eb3523e01289478a281fa99df",
+      "bars": 5760
+    },
+    {
+      "symbol": "VET-USDT",
+      "file": "VET-USDT.json",
+      "sha256": "9ba0ceb5b2b2825703a415c0bee0ef6878b3bf51a644f9c4e2c7f0048d6252b7",
+      "bars": 5760
+    },
+    {
+      "symbol": "SUSHI-USDT",
+      "file": "SUSHI-USDT.json",
+      "sha256": "e3b0dfe108a13a65ab5c9cfc7d965807b09af3b5f0d43e02802867bc46602dfb",
+      "bars": 5760
+    },
+    {
+      "symbol": "NEAR-USDT",
+      "file": "NEAR-USDT.json",
+      "sha256": "45c7006a9af22288663df5149e942db1791545f59cf552413a1dd15603855f36",
+      "bars": 5760
+    },
+    {
+      "symbol": "ATOM-USDT",
+      "file": "ATOM-USDT.json",
+      "sha256": "104eedf47c6b1155e5ae0e8969c4e910e57aac82060f628c10b3cb7cc9e67d85",
+      "bars": 5760
+    },
+    {
+      "symbol": "BSV-USDT",
+      "file": "BSV-USDT.json",
+      "sha256": "46428c4656f48da8f20ef300197b1c7edebf42f26ce328a1b72025bd99b6f059",
+      "bars": 5760
+    },
+    {
+      "symbol": "UNI-USDT",
+      "file": "UNI-USDT.json",
+      "sha256": "41946582a659d7637afc955944fc2b98b86177c4d04aa3538a7d378d44281fc9",
+      "bars": 5760
+    },
+    {
+      "symbol": "FIL-USDT",
+      "file": "FIL-USDT.json",
+      "sha256": "650a81ca67403814e3ad478245678765ac51d3533c0292135a8f4de8eee145fd",
+      "bars": 5760
+    },
+    {
+      "symbol": "AAVE-USDT",
+      "file": "AAVE-USDT.json",
+      "sha256": "70f43c4121a70fbc8434900f67b08b841a18e154a50cac859c8f262e656f8f58",
+      "bars": 5760
+    },
+    {
+      "symbol": "ENJ-USDT",
+      "file": "ENJ-USDT.json",
+      "sha256": "aeb56e7e8cca7a457218c2ba20fa4c4a46a6c9512a038c37f779cbc458c96176",
+      "bars": 5760
+    },
+    {
+      "symbol": "MANA-USDT",
+      "file": "MANA-USDT.json",
+      "sha256": "1644a1fedaa14d2d6b31f73b637408bc7d4accc414d76261cc3bb6434485931b",
+      "bars": 5760
+    },
+    {
+      "symbol": "CHZ-USDT",
+      "file": "CHZ-USDT.json",
+      "sha256": "cc4e1b852c127ca91db984f2fb377be18b3ab429179c4db43d944eb2a8da7971",
+      "bars": 5760
+    },
+    {
+      "symbol": "TRX-USDT",
+      "file": "TRX-USDT.json",
+      "sha256": "44e9a649d3203239b6179e91f47324c7006894c9e66cb35d2451c127b67dc497",
+      "bars": 5760
+    },
+    {
+      "symbol": "SKL-USDT",
+      "file": "SKL-USDT.json",
+      "sha256": "8746c3cbf6f0c9888f509b2339e1f2b97775c1cfede2e77e4965501164ea4428",
+      "bars": 5760
+    },
+    {
+      "symbol": "ZRX-USDT",
+      "file": "ZRX-USDT.json",
+      "sha256": "a599514196167face18d5f85bc2285429956fb6884283ecef0bc31bb2ea0f965",
+      "bars": 5760
+    },
+    {
+      "symbol": "SNX-USDT",
+      "file": "SNX-USDT.json",
+      "sha256": "627ed99ac7f6230b49ce219adb8b402eebe51a77d0e15231dc8bcb9fa2b0dc84",
+      "bars": 5760
+    },
+    {
+      "symbol": "CRV-USDT",
+      "file": "CRV-USDT.json",
+      "sha256": "e72cafc1dc3b6e88803478cb1d83048327b97cb3b350bd1b23532b1afecd54f6",
+      "bars": 5760
+    },
+    {
+      "symbol": "YFI-USDT",
+      "file": "YFI-USDT.json",
+      "sha256": "cd2281d68364ac60bd578254b12eb83f61942bfbb7016f172e57df0eb0828b7d",
+      "bars": 5760
+    },
+    {
+      "symbol": "1INCH-USDT",
+      "file": "1INCH-USDT.json",
+      "sha256": "69d1247397f778b3b1cfbb4ad3b6310b705c915828ddd305e2b2962f75747fae",
+      "bars": 5760
+    },
+    {
+      "symbol": "COMP-USDT",
+      "file": "COMP-USDT.json",
+      "sha256": "11dea2dbf0176d562f54d41158d0bd695a81126d8651280ba19c040e77fe5079",
+      "bars": 5760
+    },
+    {
+      "symbol": "GRT-USDT",
+      "file": "GRT-USDT.json",
+      "sha256": "cfe79c604d21b777b03616ab9da6fb4230201cfe733ffc3c1d85b59cf4a3d5f3",
+      "bars": 5760
+    },
+    {
+      "symbol": "MASK-USDT",
+      "file": "MASK-USDT.json",
+      "sha256": "fb4819d807be54597c4f851bf5bf7b26eaa7340aa4a906200717619960de007b",
+      "bars": 5760
+    },
+    {
+      "symbol": "CVC-USDT",
+      "file": "CVC-USDT.json",
+      "sha256": "c67a4573d3d3e972c4018836806091542ae8ff03d13ac1b09a6a261c42074d48",
+      "bars": 5760
+    },
+    {
+      "symbol": "AR-USDT",
+      "file": "AR-USDT.json",
+      "sha256": "f560501570ce3688a4a9d82caef7dbabc174c3791c7d9061819c803867c26da1",
+      "bars": 5760
+    },
+    {
+      "symbol": "ENS-USDT",
+      "file": "ENS-USDT.json",
+      "sha256": "a6fdb12f27a246175f970fa5475576a9b5e1161d53b7ce1040ac4a32fe6b0f1d",
+      "bars": 5760
+    },
+    {
+      "symbol": "BAT-USDT",
+      "file": "BAT-USDT.json",
+      "sha256": "392748bbbd713e31ba09ae9ef9b9153efc43b9b4c7407427451cb0dcd65a7ce5",
+      "bars": 5760
+    },
+    {
+      "symbol": "IOTX-USDT",
+      "file": "IOTX-USDT.json",
+      "sha256": "1e873ecf5459b7ae5cba2e88514a411c05af0906819dc9f87fd3104028808ee0",
+      "bars": 5760
+    },
+    {
+      "symbol": "CTSI-USDT",
+      "file": "CTSI-USDT.json",
+      "sha256": "e813ff29e63edb5c9c6f7b23e582268f4bb1cd0f8e0c1d900745659868cc3b93",
+      "bars": 5760
+    },
+    {
+      "symbol": "IMX-USDT",
+      "file": "IMX-USDT.json",
+      "sha256": "25aa931de6ab0b3e01171d79941bea6104789a4f29282112d40cc6f00985e1dd",
+      "bars": 5760
+    },
+    {
+      "symbol": "XLM-USDT",
+      "file": "XLM-USDT.json",
+      "sha256": "b832bdbf4dfce77a4a4a15e6e01df500b0b829cee181dcd11d04157e17de46bd",
+      "bars": 5760
+    },
+    {
+      "symbol": "ZEC-USDT",
+      "file": "ZEC-USDT.json",
+      "sha256": "92801020e4845c600492f5cb7713136b69796f5da8f5e1eafcbaa8ed2452d080",
+      "bars": 5760
+    },
+    {
+      "symbol": "DASH-USDT",
+      "file": "DASH-USDT.json",
+      "sha256": "38f645efeaa9897e0c3c82a1e8307a74ea3fb719eb3d50ac3b4fc08485c82ba5",
+      "bars": 5760
+    }
+  ],
+  "excluded": []
+}
