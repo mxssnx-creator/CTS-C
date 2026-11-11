@@ -100,6 +100,13 @@ export function createSignalEvaluator(type: string, step: number): (price: numbe
 /** Only complete, contiguous, UTC-aligned one-minute source bars form a higher-timeframe signal. */
 export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'|'indicationSourceId'>):Direction|undefined{
   const minutes=config.signalTimeframeMinutes??1
+  if(minutes<1){
+    if(state.lastSourceTimestamp!==undefined&&bar.timestamp-state.lastSourceTimestamp!==10000){
+      for(const key of Object.keys(state))delete (state as unknown as Record<string,unknown>)[key]
+      Object.assign(state,newSignalState());sourceStreams.delete(state)
+    }
+    state.lastSourceTimestamp=bar.timestamp
+  }
   const evaluate=(closed:Candle):Direction|undefined=>{
     if(!config.indicationSourceId)return advanceSignal(state,closed.close,config.type,config.position_cost_step,closed)
     const rows=state.portedBars??=[]
@@ -110,7 +117,7 @@ export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick
     const direction=entryOnsets(output.states[config.indicationSourceId]).at(-1)??0
     return direction>0?'long':direction<0?'short':undefined
   }
-  if(minutes===1)return evaluate(bar)
+  if(minutes<=1)return evaluate(bar)
   const span=minutes*60000,bucket=Math.floor((bar.timestamp-1)/span)*span
   if(!state.frame||state.frame.bucket!==bucket)state.frame={bucket,candle:{...bar},count:1,lastTimestamp:bar.timestamp,complete:bar.timestamp===bucket+60000}
   else{
@@ -181,7 +188,7 @@ export function replayStrategy(
 ): PseudoPosition[] {
   if (!TACTICS.has(config.type)) throw new Error(`Unsupported replay tactic: ${config.type}`)
   const step = config.position_cost_step
-  if(config.signalTimeframeMinutes!==undefined&&![1,5,15,30].includes(config.signalTimeframeMinutes))throw new Error('Unsupported signal timeframe')
+  if(config.signalTimeframeMinutes!==undefined&&![1/6,1,5,15,30].includes(config.signalTimeframeMinutes))throw new Error('Unsupported signal timeframe')
   if (!Number.isInteger(step) || step < 2 || step > 10_000 ||
       !Number.isFinite(config.takeprofit) || config.takeprofit <= 0 ||
       !Number.isFinite(config.stoploss) || config.stoploss <= 0 || config.stoploss >= 1 ||

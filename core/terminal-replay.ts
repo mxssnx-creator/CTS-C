@@ -22,19 +22,19 @@ function* replaySteps(symbol: string, candles: MarketCandle[], settings: Record<
   if(!Number.isFinite(barSeconds)||barSeconds<0)throw new Error("Invalid replay interval")
   const train = candles.slice(0, split).map(c => ({ ...c, timestamp: (c.time+barSeconds) * 1000 }))
   const test = candles.slice(split).map(c => ({ ...c, timestamp: (c.time+barSeconds) * 1000 }))
-  const configs = generateStrategyCatalog("terminal-research", settings)
-  const minSamples = Math.max(1, Math.min(200, Number(settings.mainEvalPosCount) || 8))
+  const configs = generateStrategyCatalog("terminal-research", settings).filter(c=>barSeconds===10?(c.signalTimeframeMinutes??1)<1:(c.signalTimeframeMinutes??1)>=1)
+  const minSamples = Math.max(1, Math.min(200, Number(settings.prevPosWindow??settings.mainEvalPosCount) || 20))
   const minPf = Math.max(1, Number(settings.baseProfitFactor) || 1.05)
   const evaluated = [] as {config:StrategyConfig;score:ReturnType<typeof metrics>;enough:boolean;passed:boolean}[]
   const trainTraces=new Map<string,ReturnType<typeof strategySignalTrace>>(),testTraces=new Map<string,ReturnType<typeof strategySignalTrace>>()
   const trace=(config:StrategyConfig,holdout=false)=>{
-    const key=JSON.stringify([config.type,config.position_cost_step,config.signalTimeframeMinutes??1]),cache=holdout?testTraces:trainTraces
+    const key=JSON.stringify([config.type,config.indicationSourceId??null,config.position_cost_step,config.signalTimeframeMinutes??1]),cache=holdout?testTraces:trainTraces
     let value=cache.get(key)
     if(!value){value=strategySignalTrace(holdout?test:train,config,holdout?train:[]);cache.set(key,value)}return value
   }
   for(const config of configs){
     const score = metrics(replayStrategy(symbol, train, config,train.length*2,[],trace(config)))
-    evaluated.push({ config, score, enough: score.trades >= minSamples, passed: score.trades >= minSamples && (score.pf ?? 0) >= minPf })
+    evaluated.push({ config, score, enough: score.trades >= minSamples, passed: score.trades >= minSamples && (score.pf ?? 0) >= Math.max(minPf,config.autoPfFloor??0) })
     yield
   }
   const selected: typeof evaluated = []

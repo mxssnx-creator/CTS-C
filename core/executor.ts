@@ -260,12 +260,19 @@ export class DemoExecutor {
     const symbol = normalizeSymbol(intent.symbol), contract = await this.contract(symbol)
     let owned = this.lot(intent)
     if(intent.minimumAddRatio!==undefined&&(!Number.isFinite(intent.minimumAddRatio)||intent.minimumAddRatio<=0))throw new Error('Invalid relative addition size')
+    if(intent.entryAllocationRatio!==undefined&&(!Number.isFinite(intent.entryAllocationRatio)||intent.entryAllocationRatio<1||intent.entryAllocationRatio>10))throw new Error('Invalid entry allocation ratio')
     const minimumRatio=intent.kind==='entry'?Math.min(1,intent.minimumAddRatio??1):1
+    const allocation=intent.kind==='entry'?(intent.entryAllocationRatio??1):1
     const requested=intent.requestedQuantity*(intent.kind==='add'?(owned?.entryQuantityScale??1):1)
-    const openingQuantity=intent.kind==='close'?0:quantityAtPrecision(intent.kind==='add'?requested:Math.max(requested,contract.minQuantity/minimumRatio,contract.minNotional/intent.price/minimumRatio),contract.quantityPrecision,'up')
+    const openingQuantity=intent.kind==='close'?0:quantityAtPrecision(intent.kind==='add'?requested:quantityAtPrecision(Math.max(requested/allocation,contract.minQuantity/minimumRatio,contract.minNotional/intent.price/minimumRatio),contract.quantityPrecision,'up')*allocation,contract.quantityPrecision,'up')
     if(intent.kind==='add'&&(openingQuantity+EPSILON<contract.minQuantity||openingQuantity*intent.price+EPSILON<contract.minNotional))throw new Error('Scaled addition is below the exchange minimum; its intended ratio cannot be placed')
     // Reject excessive new risk before touching an existing lot's protective orders.
     if(intent.kind!=='close'&&intent.maxOrderNotional&&openingQuantity*intent.price>intent.maxOrderNotional+EPSILON)throw new Error('Exchange-normalized size exceeds the configured order notional cap')
+    if(intent.kind!=='close'){
+      const tick=10**-contract.pricePrecision
+      if(intent.price*intent.stopLossPct/100+Number.EPSILON<tick)throw new Error('Stop-loss distance is below one exchange price tick; select a larger step or ratio')
+      if(intent.exitMode==='fixed'&&intent.price*intent.takeProfitPct/100+Number.EPSILON<tick)throw new Error('Take-profit distance is below one exchange price tick')
+    }
     if (owned && (owned.laneId !== intent.laneId || owned.symbol !== symbol || owned.direction !== intent.direction)) throw new Error("Execution intent does not own this lot")
     if (owned && intent.kind === "entry") throw new Error("This position already owns a lot; use a qualified add intent")
     if (this.related(intent).some((row) => payload(row).role !== "protection" && this.active(row))) throw new ExecutionDeferred("Earlier order for this lot still awaits a final fill")

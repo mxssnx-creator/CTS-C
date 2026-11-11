@@ -15,8 +15,8 @@ export function resolveTradingCostPct(options: {
 } = {}): number {
   const valid = (value: number | undefined, fallback: number) =>
     value !== undefined && Number.isFinite(value) && value >= 0 ? value : fallback
-  const maker = valid(options.makerFeePct, 0.05)
-  const taker = valid(options.takerFeePct, 0.08)
+  const maker = valid(options.makerFeePct, 0.02)
+  const taker = valid(options.takerFeePct, 0.05)
   const fees = (options.entryLiquidity === "maker" ? maker : taker) +
     (options.exitLiquidity === "maker" ? maker : taker)
   return fees * (1 + valid(options.slippagePctOfFees, 10) / 100)

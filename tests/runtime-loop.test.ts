@@ -91,6 +91,25 @@ test("runtime write callbacks recheck paused and closed paper positions for entr
   })
 })
 
+test('offline observed warmup checkpoints each symbol, resumes duplicates and preserves lost-lease fencing',async()=>{
+  await isolated(async runtime=>{
+    const internal=runtime as any,symbol=runtime.engine.settings.symbols[0]
+    const end=Math.floor(Date.now()/60000)*60000-60000
+    const bars=Array.from({length:48},(_,i)=>{const close=100+Math.sin(i/3);return {timestamp:end-(47-i)*60000,open:close,high:close,low:close,close,volume:1}})
+    await assert.rejects(runtime.warmObservedHistory(symbol,bars),/stopped runtime/)
+    runtime.control.running=false;runtime.control.exchangeExecution=false
+    await runtime.warmObservedHistory(symbol,bars)
+    const saved=runtime.store.loadEngineState()!
+    assert.equal(saved.lastTimestamp[symbol],end);assert.equal(saved.intents.length,0)
+    const count=saved.processedCandles;await runtime.warmObservedHistory(symbol,bars)
+    assert.equal(runtime.store.loadEngineState()!.processedCandles,count)
+    await assert.rejects(runtime.warmObservedHistory(symbol,[{...bars[0],timestamp:end+120000}]),/complete contiguous/)
+    runtime.store.releaseLease(internal.owner)
+    await assert.rejects(runtime.warmObservedHistory(symbol,bars),/lease expired/)
+    assert.equal(runtime.store.loadEngineState()!.processedCandles,count)
+  })
+})
+
 test("shutdown prevents a delayed executor callback from reacquiring ownership or overwriting state", async () => {
   await isolated(async (runtime) => {
     const internal = runtime as any, blocked = deferred<any[]>()
@@ -296,7 +315,7 @@ test('cold history advances during a blocked quote read while fresh live bars wa
   assert.ok(runtime.engine.lastProcessedAt('BTC-USDT')!==null,'closed observed history must progress while quotes are pending')
   assert.equal(runtime.engine.lastProcessedAt('ETH-USDT'),now-60000,'a fresh executable bar waits for normal quote-cycle processing')
   assert.equal(runtime.engine.pendingIntents().length,0)
-  blocked.resolve([]);await within(task);if(r.executionTask)await r.executionTask
+  blocked.resolve([{symbol:'ETH-USDT',price:100,timestamp:Date.now()}]);await within(task);await r.quoteTask;await within(r.tick());if(r.executionTask)await r.executionTask
   assert.equal(runtime.engine.lastProcessedAt('ETH-USDT'),now)
  })
 })
@@ -308,7 +327,7 @@ test('cold recovery during delayed quotes matches a full observed pass without t
   runtime.engine=new TradingEngine({symbols:['BTC-USDT'],stageGateMode:'processed-sets',stageLastN:{base:1,main:1,real:1},stageMinPF:{base:0,main:0,real:0},catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}})
   const data=Array.from({length:256},(_,i)=>{const close=100+9*Math.sin(i/11);return {timestamp:now-(255-i)*60000,open:close,high:close,low:close,close,volume:1}}),reference=new TradingEngine(runtime.engine.settings)
   reference.processCandles('BTC-USDT',data);r.warmJobs.set('BTC-USDT',{data,plan:{count:256,cursor:null,cutoff:now},live:false})
-  const task=r.tick();for(let i=0;i<100&&runtime.engine.lastProcessedAt('BTC-USDT')!==now;i++)await new Promise(resolve=>setTimeout(resolve,20))
+  const task=r.tick();await within(task);for(let i=0;i<100&&runtime.engine.lastProcessedAt('BTC-USDT')!==now;i++)await within(r.tick())
   assert.equal(runtime.engine.lastProcessedAt('BTC-USDT'),now);assert.equal(runtime.control.warmed.includes('BTC-USDT'),true)
   blocked.resolve([]);await within(task);if(r.executionTask)await r.executionTask
   const actual=JSON.parse(runtime.engine.serializeState()),expected=JSON.parse(reference.serializeState());actual.startedAt=expected.startedAt=0;assert.deepEqual(actual,expected)
@@ -337,6 +356,7 @@ test('a stale or pre-close quote cannot authorize a fresh executable history bar
   const bar=(timestamp:number)=>({timestamp,open:100,high:100,low:100,close:100,volume:1});runtime.engine.processCandles(symbol,[bar(now-60000)])
   r.marks.set(symbol,{price:100,timestamp:now-60000});r.warmJobs.set(symbol,{data:[bar(now)],plan:{count:100,cursor:now-60000,cutoff:now},live:true})
   let allowed:boolean|undefined;const process=runtime.engine.processCandles.bind(runtime.engine);runtime.engine.processCandles=(s,b,o)=>{allowed=o?.allowExecution;return process(s,b,o)}
-  await r.tick();if(r.executionTask)await r.executionTask;assert.equal(allowed,false);assert.equal(runtime.engine.pendingIntents().length,0)
+  await r.tick();if(r.executionTask)await r.executionTask;assert.equal(allowed,undefined);assert.equal(runtime.engine.lastProcessedAt(symbol),now-60000);assert.equal(runtime.engine.pendingIntents().length,0)
+  r.marks.set(symbol,{price:100,timestamp:Date.now()});await r.tick();assert.equal(allowed,true);assert.equal(runtime.engine.lastProcessedAt(symbol),now)
  })
 })

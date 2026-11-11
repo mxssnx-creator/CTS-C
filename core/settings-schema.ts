@@ -4,10 +4,10 @@ import { strategyProcessing, validateProcessingByRange } from "./strategy-proces
 import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import type { EngineSettings } from "./types"
 
-export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide"]
+export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"]
 export const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
-export const STEPS = Array.from({ length: 28 }, (_, index) => index + 3)
-export const RATIOS = Array.from({ length: 11 }, (_, index) => Number(((index + 1) * 0.2).toFixed(1)))
+export const STEPS = Array.from({ length: 29 }, (_, index) => index + 2)
+export const RATIOS = Array.from({ length: 21 }, (_, index) => Number(((index + 2) * 0.1).toFixed(1)))
 export const BALANCED_STEPS = [3, 5, 8, 12, 18, 24, 30]
 export const BALANCED_RATIOS = [0.6, 1, 1.4]
 export const MODES = ["fixed", "trailing", "trailing-only"]
@@ -19,12 +19,14 @@ export const DEFAULTS: Record<string, unknown> = {
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
   variantBlockEnabled: true, variantDcaEnabled: true, axisPrevEnabled: true,
   axisPrevious: 8, axisLast: 3, axisOutcome: "any",axisReferenceStage:'same-stage',
+  blockBehavior: "pyramid", blockSize: 3, blockPauseRounds: 1, blockMaxMultiplier: 3,
+  autoPfEnabled: false, autoPfRatio: .2, autoPfMax: 2, microTradeStream: false,
   blockSteps: 3, blockMode: "shared", dcaSteps: 2, dcaDistancePct: 1, dcaMultiplier: 2,
   normalVolumeRatio: 1, axisVolumeRatio: 1, blockVolumeFactor: 1, dcaVolumeRatio: 1, maxOrderNotional: 0,
-  strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
-  blockVolumeRatio: 0.2, makerFeePct: 0.05, takerFeePct: 0.08, slippagePctOfFees: 10,
+  microTrailRatio: .5, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
+  blockVolumeRatio: 0.2, makerFeePct: 0.02, takerFeePct: 0.05, slippagePctOfFees: 10,
   symbolCount: 100, historyCandles: 1440, volumeFactor: 0.01, baseNotional: 100,
-  strategyEnabledRanges: RANGES, strategyTpSteps: BALANCED_STEPS, strategySlRatios: BALANCED_RATIOS,
+  strategyEnabledRanges: RANGES.filter(r=>r!=="Low-Range"), strategyTpSteps: BALANCED_STEPS, strategySlRatios: BALANCED_RATIOS,
   strategyExitModes: MODES, strategyIndicationTypes: [...CORE_INDICATIONS],
   strategyIndicationSources:[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES],
   strategySignalPeriods:[20],strategySignalTimeframes:[1],
@@ -42,16 +44,23 @@ export const COST_FIELDS = [
   { key: "takerFeePct", label: "Taker fee (%)", min: 0, max: 20, step: 0.001 },
   { key: "slippagePctOfFees", label: "Slippage (% of fees)", min: 0, max: 100, step: 0.1 },
 ]
+export const AUTO_PF_FIELDS = [
+  {key:"autoPfRatio",label:"Auto PF slope per 1% TP",min:0,max:2,step:.05},
+  {key:"autoPfMax",label:"Auto PF maximum",min:1.01,max:10,step:.01},
+]
 export const COORDINATION_FIELDS = [
+  {key:"blockSize",label:"Positions per Block round",min:1,max:100,step:1},
+  {key:"blockPauseRounds",label:"Pause rounds after net recovery",min:0,max:100,step:1},
+  {key:"blockMaxMultiplier",label:"Maximum Block budget multiplier",min:1,max:10,step:.1},
   { key: "axisPrevious", label: "Axis previous samples", min: 1, max: 250, step: 1 },
   { key: "axisLast", label: "Axis recent samples", min: 1, max: 250, step: 1 },
-  { key: "blockSteps", label: "Block additions", min: 1, max: 20, step: 1 },
+  { key: "blockSteps", label: "Block maximum increase steps", min: 1, max: 20, step: 1 },
   { key: "blockVolumeRatio", label: "Block volume ratio", min: 0.01, max: 10, step: 0.01 },
   { key: "dcaSteps", label: "DCA additions", min: 1, max: 20, step: 1 },
   { key: "dcaDistancePct", label: "DCA adverse distance (%)", min: 0.001, max: 100, step: 0.001 },
   { key: "dcaMultiplier", label: "DCA addition multiplier", min: 0.01, max: 10, step: 0.01 },
 ]
-const ENUM_FIELDS: Record<string, readonly string[]> = { stageGateMode:['continuous-ancestors','processed-sets'],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
+const ENUM_FIELDS: Record<string, readonly string[]> = { blockBehavior:["pyramid","rounds"], stageGateMode:['continuous-ancestors','processed-sets'],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
@@ -63,9 +72,10 @@ const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
   strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
   strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),
-  strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1,5,15,30],
+  strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1/6,1,5,15,30],
 }
 export const FACTOR_FIELDS = [
+  { key:"microTrailRatio", label:"Micro / Low-Range trail width factor",min:.05,max:10,step:.05 },
   { key: "normalVolumeRatio", label: "Normal budget ratio", min: 0.001, max: 100, step: 0.001 },
   { key: "axisVolumeRatio", label: "Axis budget ratio", min: 0.001, max: 100, step: 0.001 },
   { key: "blockVolumeFactor", label: "Block budget ratio", min: 0.001, max: 100, step: 0.001 },
@@ -75,21 +85,22 @@ export const FACTOR_FIELDS = [
   { key: "strategyTrailRatio", label: "Trail / SL distance ratio", min: 0.05, max: 10, step: 0.05 },
   { key: "holdTimeFactor", label: "Maximum hold factor", min: 0.05, max: 10, step: 0.05 },
 ]
-export const ALL_NUMERIC_FIELDS = [...NUMERIC_FIELDS, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
+export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
 
 export function configurationCount(values: Record<string, unknown>) {
   const ranges = values.strategyEnabledRanges as string[]
-  const steps = (values.strategyTpSteps as number[]).filter(step => ranges.includes(RANGES[RANGE_BOUNDS.findIndex(bound => step <= bound)]))
   const types=values.strategyIndicationTypes as string[],technical=types.filter(t=>(TECHNICAL_INDICATIONS as readonly string[]).includes(t)).length
-  const cells = steps.reduce((sum, step) => {
-    const range = RANGES[RANGE_BOUNDS.findIndex(bound => step <= bound)] as import("./types").StrategyRange
-    const modes = (values.strategyExitModes as string[]).filter(mode => mode === "fixed" || strategyProcessing(values, {range}).trailing)
-    return sum + modes.length
-  }, 0)
+  let cells=0
+  for(const step of values.strategyTpSteps as number[])for(const range of [RANGES[RANGE_BOUNDS.findIndex(bound=>step<=bound)],...(step<=8?["Low-Range"]:[])]){
+    if(!ranges.includes(range))continue
+    const modes=(values.strategyExitModes as string[]).filter(mode=>mode==='fixed'||strategyProcessing(values,{range:range as import('./types').StrategyRange}).trailing)
+    const ratios=(values.strategySlRatios as number[]).filter(r=>!['Micro','Low-Range'].includes(range)||r<=1.6)
+    cells+=modes.length*ratios.length
+  }
   const portedTypes=types.filter(t=>t==='Tactic'||t==='Inverse')
   const sourceIds=values.strategyIndicationSources as string[]
   const extra=portedTypes.reduce((n,t)=>n+sourceIds.filter(id=>PORTED_CATALOG.some(s=>s.id===id&&s.kind===t.toLowerCase())).length*(values.strategySignalTimeframes as number[]).filter(tf=>t!=='Inverse'||tf!==30).length,0)
-  return cells * (values.strategySlRatios as number[]).length * (types.length-technical-portedTypes.length+extra+technical*(values.strategySignalPeriods as number[]).length*(values.strategySignalTimeframes as number[]).length)
+  return cells * ((types.length-technical-portedTypes.length)*(values.strategySignalTimeframes as number[]).length+extra+technical*(values.strategySignalPeriods as number[]).length*(values.strategySignalTimeframes as number[]).length)
 }
 
 export function validateConfiguration(input: unknown, { partial = false, formNumbers = false } = {}): Record<string, unknown> {
@@ -161,6 +172,7 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
     baseProfitFactor:s.stageMinPF.base,mainProfitFactor:s.stageMinPF.main,realProfitFactor:s.stageMinPF.real,
     variantBlockEnabled:s.coordinations.block.enabled,variantDcaEnabled:s.coordinations.dca.enabled,axisPrevEnabled:s.coordinations.axis.enabled,
     blockVolumeRatio:s.coordinations.block.ratio,axisPrevious:s.coordinations.axis.previous,axisLast:s.coordinations.axis.last,axisOutcome:s.coordinations.axis.outcome,axisReferenceStage:s.coordinations.axis.reference??'same-stage',
+    blockBehavior:s.coordinations.block.behavior??"pyramid",blockSize:s.coordinations.block.size??3,blockPauseRounds:s.coordinations.block.pauseRounds??1,blockMaxMultiplier:s.coordinations.block.maxMultiplier??3,
     blockSteps:s.coordinations.block.steps,blockMode:s.coordinations.block.mode,dcaSteps:s.coordinations.dca.steps,dcaDistancePct:s.coordinations.dca.distancePct,dcaMultiplier:s.coordinations.dca.multiplier}
 }
 
