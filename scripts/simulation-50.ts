@@ -7,6 +7,8 @@ import {resolve,join} from 'node:path'
 import {once} from 'node:events'
 import {pipeline} from 'node:stream/promises'
 import {createGzip} from 'node:zlib'
+import {setPriority} from 'node:os'
+import {selectTrainingConfigurations} from '../core/training-selection'
 import {BingxVstClient,BINGX_VST_HOST} from '../core/bingx'
 import {TradingEngine,validateObservedCandles,STAGES} from '../core/engine'
 import {generateStrategyCatalog} from '../core/catalog'
@@ -21,11 +23,12 @@ type Totals=ReturnType<typeof empty>
 const totalKeys=Object.keys(empty()) as (keyof Totals)[]
 const add=(a:Totals,b:Totals)=>{for(const k of totalKeys)a[k]+=b[k]}
 const measured=(a:Totals)=>({...a,...describeProfitFactor(a.profit,a.loss,a.closes),modeledOrderActions:a.entries+a.additions+a.closes})
-const coverageEmpty=()=>({sets:0,enough:0,qualified:0,admissionReady:0,validatedSamples:0,validatedSets:0,validatedProfit:0,validatedLoss:0,unfinished:0})
+const coverageEmpty=()=>({sets:0,enough:0,qualified:0,admissionReady:0,validatedSamples:0,validatedSets:0,validatedProfit:0,validatedLoss:0,ownQualifiedSets:0,ownQualifiedSamples:0,ownQualifiedProfit:0,ownQualifiedLoss:0,unfinished:0})
 type Coverage=ReturnType<typeof coverageEmpty>
 const addCoverage=(a:Coverage,b:Coverage)=>{for(const k of Object.keys(a) as (keyof Coverage)[])a[k]+=b[k]}
 const safeName=(s:string)=>s.replace(/[^a-zA-Z0-9_.-]/g,'_')
-const profiles=[{name:'original-20-8-8',real:8,liveEntryMode:'independent' as const},{name:'capacity-20-8-1',real:1,liveEntryMode:'real-mirror' as const}]
+const baseProfiles=[{name:'original-20-8-8',real:8,liveEntryMode:'independent' as const},{name:'capacity-20-8-1',real:1,liveEntryMode:'real-mirror' as const}]
+const profiles=[...baseProfiles,...baseProfiles.map(p=>({...p,name:'prehistory-selected-'+p.name,frozenPrehistory:true}))]
 const dimensions=['symbol','type','range','coordination','direction','exitMode','tpStep','slRatio','source'] as const
 type Dimension=typeof dimensions[number]
 type Settings={sourceHash:string;warmup:number;hours:number;fees:{makerFeePct:number;takerFeePct:number};catalog:Record<string,unknown>}
@@ -33,7 +36,7 @@ type Manifest={cutoff:number;start:number;symbols:string[];datasets:{symbol:stri
 type Job={id:string;symbol:string;type:string;root:string;output:string;settings:Settings;dataset:Manifest['datasets'][number]}
 async function atomic(path:string,value:unknown){const tmp=path+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2));await rename(tmp,path)}
 
-async function sourceDigest(){const manifest=JSON.parse(await readFile('shared/cts-indications/source-manifest.json','utf8'));const files=['core/engine.ts','core/catalog.ts','core/replay.ts','core/metrics.ts','core/exits.ts','core/technical-signals.ts','core/strategy-processing.ts','shared/cts-volume/ratios.ts','shared/cts-indications/index.ts','shared/cts-indications/catalog.ts','shared/cts-indications/source-manifest.json','scripts/simulation-50.ts',...Object.keys(manifest.sha256).map(p=>'shared/cts-indications/origin/'+p)];return hash((await Promise.all(files.map(async p=>p+'\n'+await readFile(resolve(p),'utf8')))).join('\n'))}
+async function sourceDigest(){const manifest=JSON.parse(await readFile('shared/cts-indications/source-manifest.json','utf8'));const files=['core/engine.ts','core/catalog.ts','core/replay.ts','core/metrics.ts','core/exits.ts','core/technical-signals.ts','core/strategy-processing.ts','core/training-selection.ts','shared/cts-volume/ratios.ts','shared/cts-indications/index.ts','shared/cts-indications/catalog.ts','shared/cts-indications/source-manifest.json','scripts/simulation-50.ts',...Object.keys(manifest.sha256).map(p=>'shared/cts-indications/origin/'+p)];return hash((await Promise.all(files.map(async p=>p+'\n'+await readFile(resolve(p),'utf8')))).join('\n'))}
 async function prepare(root:string,count:number,warmup:number,hours:number):Promise<Manifest>{
  await mkdir(root,{recursive:true})
  try{const previous=JSON.parse(await readFile(join(root,'manifest.json'),'utf8')) as Manifest;if(previous.symbols.length!==count||previous.datasets.some(d=>d.bars!==warmup+hours*60))throw Error('Existing market manifest has different dimensions');return previous}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e}
@@ -67,20 +70,22 @@ async function prepare(root:string,count:number,warmup:number,hours:number):Prom
 }
 
 async function runJob(job:Job){
- const started=performance.now(),raw=await readFile(join(job.root,job.dataset.file),'utf8');if(hash(raw)!==job.dataset.sha256)throw Error('Observed dataset digest mismatch')
+ const started=performance.now(),usage=process.resourceUsage(),raw=await readFile(join(job.root,job.dataset.file),'utf8');if(hash(raw)!==job.dataset.sha256)throw Error('Observed dataset digest mismatch')
  const bars=JSON.parse(raw) as Candle[];validateObservedCandles(bars)
- const catalog={...job.settings.catalog,...job.settings.fees,strategyIndicationTypes:[job.type]},configs=generateStrategyCatalog('bingx-x02',catalog),byId=new Map(configs.map(c=>[c.id,c])),results=[]
- for(const profile of profiles){
+ const catalog={...job.settings.catalog,...job.settings.fees,strategyIndicationTypes:[job.type]},configs=generateStrategyCatalog('bingx-x02',catalog),byId=new Map(configs.map(c=>[c.id,c])),results=[],trainingSelections=[],calculationProof=[]
+ const make=(name:string,frozenPrehistory:boolean,configurations:number)=>({profile:name,frozenPrehistory,configurations,totals:Object.fromEntries(STAGES.map(s=>[s,empty()])) as Record<Stage,Totals>,groups:new Map<string,Totals>(),strategies:new Map<string,Totals>(),strategyCoverage:new Map<string,{sets:number;enough:number}>(),hourly:[] as any[],coverageGroups:new Map<string,{sets:number;enough:number}>()})
+ for(const profile of baseProfiles){
   let engine=new TradingEngine({symbols:[job.symbol],catalog,stageGateMode:'continuous-ancestors',liveEntryMode:profile.liveEntryMode,stageLastN:{base:20,main:8,real:profile.real},stageMinPF:{base:1.1,main:1.1,real:1.1}})
   engine.processCandles(job.symbol,bars.slice(0,job.settings.warmup),{eventLimit:0})
-  const trained=engine.exportState();for(const lane of Object.values(trained.lanes))delete lane.open
+  const trained=engine.exportState(),selection=selectTrainingConfigurations(Object.values(trained.lanes),configs,job.symbol);trainingSelections.push({profile:profile.name,...selection});const selected=new Set(selection.selectedIds)
+  for(const lane of Object.values(trained.lanes))delete lane.open
   engine=TradingEngine.fromOwnedCheckpoint(trained)
-  const totals=Object.fromEntries(STAGES.map(s=>[s,empty()])) as Record<Stage,Totals>,groups=new Map<string,Totals>(),strategies=new Map<string,Totals>(),strategyCoverage=new Map<string,{sets:number;enough:number}>(),hourly:any[]=[],coverageGroups=new Map<string,{sets:number;enough:number}>()
+  const accumulators=[make(profile.name,false,configs.length),make('prehistory-selected-'+profile.name,true,selected.size)]
   const folder=join(job.output,'trades',safeName(job.symbol),safeName(job.type));await mkdir(folder,{recursive:true})
-  const stream=createGzip({level:6}),done=pipeline(stream,createWriteStream(join(folder,profile.name+'.ndjson.gz')));void done.catch(()=>{})
-  stream.write(JSON.stringify({kind:'cts-c-paper-trade-ledger',profile,sourceHash:job.settings.sourceHash,symbol:job.symbol,indication:job.type,ordersSubmitted:0})+'\n')
+  const stream=createGzip({level:1}),done=pipeline(stream,createWriteStream(join(folder,profile.name+'.ndjson.gz')));void done.catch(()=>{})
+  stream.write(JSON.stringify({kind:'cts-c-paper-trade-ledger',profile,sourceHash:job.settings.sourceHash,symbol:job.symbol,indication:job.type,prehistorySelectedIds:selection.selectedIds,ordersSubmitted:0})+'\n')
   for(let hour=0;hour<job.settings.hours;hour++){
-   const first=job.settings.warmup+hour*60,events=engine.processCandles(job.symbol,bars.slice(first,first+60)),hourTotals=Object.fromEntries(STAGES.map(s=>[s,empty()])) as Record<Stage,Totals>,hourGroups=new Map<string,Totals>();let lines=''
+   const first=job.settings.warmup+hour*60,events=engine.processCandles(job.symbol,bars.slice(first,first+60)),hours=accumulators.map(()=>({stages:Object.fromEntries(STAGES.map(s=>[s,empty()])) as Record<Stage,Totals>,groups:new Map<string,Totals>()}));let lines=''
    for(const event of events){
     if(!['opened','added','closed'].includes(event.type))continue
     const lane=JSON.parse(event.laneId),config=byId.get(lane[2]);if(!config)throw Error('An event escaped its exact configuration')
@@ -88,36 +93,56 @@ async function runJob(job:Job){
     if(event.type==='opened')delta.entries++
     if(event.type==='added')delta.additions++
     if(event.trade){const t=event.trade;if(t.stage!=='base'&&(!t.admission?.length||t.admission.some(p=>!p.qualified)))throw Error('Unproven post-Base trade entered the forward ledger');delta.closes=1;delta.wins=Number(t.netReturnPct>0);delta.profit=Math.max(0,t.netReturnPct);delta.loss=Math.max(0,-t.netReturnPct);delta.netPnl=t.netPnl;delta.cost=t.cost;delta.notional=t.notional;lines+=JSON.stringify(t)+'\n'}
-    add(totals[event.stage],delta);add(hourTotals[event.stage],delta)
     const tags:Record<Dimension,string>={symbol:job.symbol,type:job.type,range:config.range!,coordination:lane[4],direction:lane[3],exitMode:config.exitMode!,tpStep:String(config.tpStep),slRatio:String(config.slRatio),source:config.indicationSourceId??job.type}
-    const strategyKey=JSON.stringify([event.stage,tags.range,tags.coordination,tags.exitMode]),strategyRow=strategies.get(strategyKey)??empty();add(strategyRow,delta);strategies.set(strategyKey,strategyRow)
-    for(const dimension of dimensions){const key=JSON.stringify([event.stage,dimension,tags[dimension]]),row=groups.get(key)??empty();add(row,delta);groups.set(key,row)}
-    for(const dimension of ['range','coordination','direction','exitMode'] as const){const key=JSON.stringify([event.stage,dimension,tags[dimension]]),row=hourGroups.get(key)??empty();add(row,delta);hourGroups.set(key,row)}
+    for(const [index,a]of accumulators.entries()){
+     if(a.frozenPrehistory&&!selected.has(config.id))continue
+     add(a.totals[event.stage],delta);add(hours[index].stages[event.stage],delta)
+     const sk=JSON.stringify([event.stage,tags.range,tags.coordination,tags.exitMode]),sr=a.strategies.get(sk)??empty();add(sr,delta);a.strategies.set(sk,sr)
+     for(const dim of dimensions){const key=JSON.stringify([event.stage,dim,tags[dim]]),row=a.groups.get(key)??empty();add(row,delta);a.groups.set(key,row)}
+     for(const dim of ['range','coordination','direction','exitMode'] as const){const key=JSON.stringify([event.stage,dim,tags[dim]]),row=hours[index].groups.get(key)??empty();add(row,delta);hours[index].groups.set(key,row)}
+    }
    }
    if(lines&&!stream.write(lines))await once(stream,'drain')
-   const snap=engine.snapshot({laneLimit:hour===job.settings.hours-1?Infinity:0,positionLimit:0})
-   const coverage=Object.fromEntries(snap.stages.map(s=>[s.stage,{sets:s.currentLanes,enough:s.currentEnoughSamples,qualified:s.currentQualified,admissionReady:s.admissionReady,validatedSamples:s.validatedWindow?.samples??0,validatedSets:s.validatedWindow?.sets??0,validatedProfit:s.validatedWindow?.profit??0,validatedLoss:s.validatedWindow?.loss??0,unfinished:s.open}])) as Record<Stage,Coverage>
-   hourly.push({hour,stages:hourTotals,coverage,groups:[...hourGroups].map(([key,totals])=>({key,totals}))})
-   if(hour===job.settings.hours-1)for(const lane of snap.lanes){const c=byId.get(lane.configId)!;const tags:Record<Dimension,string>={symbol:job.symbol,type:job.type,range:c.range!,coordination:lane.coordination,direction:lane.direction,exitMode:c.exitMode!,tpStep:String(c.tpStep),slRatio:String(c.slRatio),source:c.indicationSourceId??job.type};const strategyKey=JSON.stringify([lane.stage,tags.range,tags.coordination,tags.exitMode]),strategyRow=strategyCoverage.get(strategyKey)??{sets:0,enough:0};strategyRow.sets++;strategyRow.enough+=Number(lane.enoughSamples);strategyCoverage.set(strategyKey,strategyRow);for(const dimension of dimensions){const key=JSON.stringify([lane.stage,dimension,tags[dimension]]),r=coverageGroups.get(key)??{sets:0,enough:0};r.sets++;r.enough+=Number(lane.enoughSamples);coverageGroups.set(key,r)}}
+   const snap=engine.snapshot({laneLimit:Infinity,positionLimit:0})
+   for(const [index,a]of accumulators.entries()){
+    const coverage=Object.fromEntries(STAGES.map(s=>[s,coverageEmpty()])) as Record<Stage,Coverage>
+    for(const lane of snap.lanes){
+     if(!lane.current||a.frozenPrehistory&&!selected.has(lane.configId))continue
+     const r=coverage[lane.stage];r.sets++;r.enough+=Number(lane.enoughSamples);r.qualified+=Number(lane.validated);r.admissionReady+=Number(lane.admissionReady);r.unfinished+=Number(lane.isOpen)
+     if(lane.qualified){r.ownQualifiedSets++;r.ownQualifiedSamples+=lane.count;r.ownQualifiedProfit+=lane.profit??0;r.ownQualifiedLoss+=lane.loss??0}
+     if(lane.validated){r.validatedSets++;r.validatedSamples+=lane.count;r.validatedProfit+=lane.profit??0;r.validatedLoss+=lane.loss??0}
+     if(hour===job.settings.hours-1){
+      const c=byId.get(lane.configId)!,tags:Record<Dimension,string>={symbol:job.symbol,type:job.type,range:c.range!,coordination:lane.coordination,direction:lane.direction,exitMode:c.exitMode!,tpStep:String(c.tpStep),slRatio:String(c.slRatio),source:c.indicationSourceId??job.type}
+      const sk=JSON.stringify([lane.stage,tags.range,tags.coordination,tags.exitMode]),sr=a.strategyCoverage.get(sk)??{sets:0,enough:0};sr.sets++;sr.enough+=Number(lane.enoughSamples);a.strategyCoverage.set(sk,sr)
+      for(const dim of dimensions){const key=JSON.stringify([lane.stage,dim,tags[dim]]),row=a.coverageGroups.get(key)??{sets:0,enough:0};row.sets++;row.enough+=Number(lane.enoughSamples);a.coverageGroups.set(key,row)}
+     }
+    }
+    a.hourly.push({hour,stages:hours[index].stages,coverage,groups:[...hours[index].groups].map(([key,totals])=>({key,totals}))})
+   }
   }
+  const finalCheck=engine.snapshot({laneLimit:0,positionLimit:0});if(finalCheck.processedCandles!==bars.length||engine.lastProcessedAt(job.symbol)!==bars.at(-1)!.timestamp)throw Error('Indication did not consume the complete observed series');calculationProof.push({profile:profile.name,processedCandles:finalCheck.processedCandles,lastTimestamp:engine.lastProcessedAt(job.symbol)})
   stream.end();await done
-  results.push({profile:profile.name,totals,strategyGroups:[...strategies].map(([key,totals])=>({key,totals})),strategyCoverage:[...strategyCoverage].map(([key,value])=>({key,...value})),groups:[...groups].map(([key,totals])=>({key,totals})),coverageGroups:[...coverageGroups].map(([key,value])=>({key,...value})),hourly})
+  for(const a of accumulators)results.push({profile:a.profile,frozenPrehistory:a.frozenPrehistory,configurations:a.configurations,totals:a.totals,strategyGroups:[...a.strategies].map(([key,totals])=>({key,totals})),strategyCoverage:[...a.strategyCoverage].map(([key,value])=>({key,...value})),groups:[...a.groups].map(([key,totals])=>({key,totals})),coverageGroups:[...a.coverageGroups].map(([key,value])=>({key,...value})),hourly:a.hourly})
  }
- return {id:job.id,symbol:job.symbol,type:job.type,sourceHash:job.settings.sourceHash,datasetSha256:job.dataset.sha256,configurations:configs.length,results,performance:{elapsedMs:performance.now()-started,maxRssKiB:process.resourceUsage().maxRSS}}
+ const after=process.resourceUsage()
+ return {id:job.id,symbol:job.symbol,type:job.type,sourceHash:job.settings.sourceHash,datasetSha256:job.dataset.sha256,configurations:configs.length,calculationProof,trainingSelections,results,performance:{elapsedMs:performance.now()-started,userCpuMs:(after.userCPUTime-usage.userCPUTime)/1000,systemCpuMs:(after.systemCPUTime-usage.systemCPUTime)/1000,maxRssKiB:after.maxRSS}}
 }
 
 function mergeRows(target:Map<string,Totals>,rows:{key:string;totals:Totals}[],prefix?:unknown[]){for(const row of rows){const key=prefix?JSON.stringify([...prefix,...JSON.parse(row.key)]):row.key,value=target.get(key)??empty();add(value,row.totals);target.set(key,value)}}
 async function main(){
  const root=resolve(arg('--data')),output=resolve(arg('--output')),count=Number(arg('--symbols','50')),warmup=Number(arg('--warmup','4320')),hours=Number(arg('--hours','24')),concurrency=Number(arg('--workers','2'))
+ const shards=Number(arg('--shards','1')),shardIndex=Number(arg('--shard-index','0'))
+ if(!Number.isInteger(shards)||shards<1||shards>50||!Number.isInteger(shardIndex)||shardIndex<0||shardIndex>=shards||process.argv.includes('--assemble-only')&&shards!==1)throw Error('Invalid simulation shard')
  if(!Number.isInteger(count)||count<1||count>100||!Number.isInteger(warmup)||warmup<100||warmup>4320||!Number.isInteger(hours)||hours<1||hours>48||!Number.isInteger(concurrency)||concurrency<1||concurrency>4)throw Error('Invalid bounded simulation dimensions')
  await mkdir(output,{recursive:true});await mkdir(join(output,'completed'),{recursive:true})
  const feeEvidence=JSON.parse(await readFile(resolve(arg('--fee-evidence')),'utf8'));if(feeEvidence.connection!=='bingx-x02'||feeEvidence.ordersSubmitted!==0||!feeEvidence.fees)throw Error('Verified x02 fee evidence is required')
  const settings:Settings={sourceHash:await sourceDigest(),warmup,hours,fees:feeEvidence.fees,catalog:{strategyTpSteps:[3,5,8,12,18,24,30],strategySlRatios:[.6,1,1.4],strategyExitModes:['fixed','trailing','trailing-only'],strategySignalPeriods:[20],strategySignalTimeframes:[1],slippagePctOfFees:10}}
- const manifest=await prepare(root,count,warmup,hours),metadata={kind:'cts-c-50-symbol-observed-stage-simulation',generatedAt:new Date().toISOString(),settings,profiles,manifest,feeEvidence,ordersSubmitted:0,actualExchangeExecutionPF:null,automaticPromotion:false}
+ const manifest=await prepare(root,count,warmup,hours),metadata={kind:'cts-c-50-symbol-observed-stage-simulation',generatedAt:new Date().toISOString(),settings,profiles,manifest,feeEvidence,workerLimits:{concurrency,heapMiB:640,nice:10},ordersSubmitted:0,actualExchangeExecutionPF:null,automaticPromotion:false}
  await atomic(join(output,'run.json'),metadata)
  if(process.argv.includes('--prepare-only')){console.log(JSON.stringify({phase:'history-ready',symbols:manifest.symbols.length,manifest:join(root,'manifest.json')}));return}
- const jobs=manifest.datasets.flatMap(dataset=>INDICATIONS.map(type=>({id:safeName(dataset.symbol+'__'+type),symbol:dataset.symbol,type,root,output,settings,dataset}))),results=new Set<string>(),pending:Job[]=[]
+ const jobs=manifest.datasets.flatMap(dataset=>INDICATIONS.map(type=>({id:safeName(dataset.symbol+'__'+type),symbol:dataset.symbol,type,root,output,settings,dataset}))).filter((_,i)=>i%shards===shardIndex),results=new Set<string>(),pending:Job[]=[]
  for(const job of jobs){try{const done=JSON.parse(await readFile(join(output,'completed',job.id+'.json'),'utf8'));if(done.sourceHash!==settings.sourceHash||done.datasetSha256!==job.dataset.sha256)throw Error('Existing replay checkpoint belongs to different source or data');results.add(job.id)}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')pending.push(job);else throw e}}
+ if(process.argv.includes('--assemble-only')&&pending.length)throw Error('Cannot assemble incomplete replay: '+pending.length+' missing jobs')
  let cursor=0,active=0;const started=performance.now(),children=new Set<ChildProcess>()
  const progress=()=>console.log(JSON.stringify({phase:'strategy-replay',completed:results.size,total:jobs.length,active,elapsedSeconds:Math.round((performance.now()-started)/1000)}))
  const timer=setInterval(progress,15000)
@@ -128,21 +153,22 @@ async function main(){
   child.on('error',reject);child.on('exit',(code,signal)=>{if(!finished)reject(Error('Simulation worker stopped: '+code+'/'+signal))});next()
  })))}finally{clearInterval(timer);for(const child of children)child.kill('SIGTERM')}
  if(results.size!==jobs.length)throw Error('Simulation did not complete every symbol/indication job')
+ if(shards>1){await atomic(join(output,'shard-'+shardIndex+'.json'),{sourceHash:settings.sourceHash,shardIndex,shards,completedJobs:results.size,jobs:[...results],complete:true});console.log(JSON.stringify({phase:'shard-complete',shardIndex,shards,jobs:results.size}));return}
  const summaries=[]
  for(const profile of profiles){
   const totals=Object.fromEntries(STAGES.map(s=>[s,empty()])) as Record<Stage,Totals>,groups=new Map<string,Totals>(),strategyGroups=new Map<string,Totals>(),strategyCoverage=new Map<string,{sets:number;enough:number}>(),typeHourCoverage=new Map<string,Coverage>(),typeGroups=new Map<string,Totals>(),hourGroups=new Map<string,Totals>(),typeHourGroups=new Map<string,Totals>(),typeCoverGroups=new Map<string,{sets:number;enough:number}>(),coverGroups=new Map<string,{sets:number;enough:number}>(),hourly=Array.from({length:hours},(_,hour)=>({hour,stages:Object.fromEntries(STAGES.map(s=>[s,empty()])) as Record<Stage,Totals>,coverage:Object.fromEntries(STAGES.map(s=>[s,coverageEmpty()])) as Record<Stage,Coverage>}))
   let configs=0,maxWorkerRssKiB=0,engineMs=0
   for(const id of results){
    const result=JSON.parse(await readFile(join(output,'completed',id+'.json'),'utf8'))
-   const r=result.results.find((r:any)=>r.profile===profile.name);configs+=result.configurations;maxWorkerRssKiB=Math.max(maxWorkerRssKiB,result.performance.maxRssKiB);engineMs+=result.performance.elapsedMs
+   const r=result.results.find((r:any)=>r.profile===profile.name);configs+=r.configurations;maxWorkerRssKiB=Math.max(maxWorkerRssKiB,result.performance.maxRssKiB);engineMs+=result.performance.elapsedMs
    for(const stage of STAGES)add(totals[stage],r.totals[stage]);mergeRows(groups,r.groups);mergeRows(typeGroups,r.groups,[result.type]);mergeRows(strategyGroups,r.strategyGroups,[result.type]);for(const c of r.strategyCoverage){const key=JSON.stringify([result.type,...JSON.parse(c.key)]),v=strategyCoverage.get(key)??{sets:0,enough:0};v.sets+=c.sets;v.enough+=c.enough;strategyCoverage.set(key,v)}
    for(const c of r.coverageGroups){const row=coverGroups.get(c.key)??{sets:0,enough:0};row.sets+=c.sets;row.enough+=c.enough;coverGroups.set(c.key,row);const typeKey=JSON.stringify([result.type,...JSON.parse(c.key)]),typeRow=typeCoverGroups.get(typeKey)??{sets:0,enough:0};typeRow.sets+=c.sets;typeRow.enough+=c.enough;typeCoverGroups.set(typeKey,typeRow)}
    for(const h of r.hourly){for(const stage of STAGES){add(hourly[h.hour].stages[stage],h.stages[stage]);addCoverage(hourly[h.hour].coverage[stage],h.coverage[stage]);const typeKey=JSON.stringify([h.hour,result.type,stage]),typeRow=typeHourCoverage.get(typeKey)??coverageEmpty();addCoverage(typeRow,h.coverage[stage]);typeHourCoverage.set(typeKey,typeRow)}mergeRows(hourGroups,h.groups,[h.hour]);mergeRows(typeHourGroups,h.groups,[h.hour,result.type]);mergeRows(hourGroups,STAGES.map(stage=>({key:JSON.stringify([stage,'type',result.type]),totals:h.stages[stage]})),[h.hour])}
   }
   summaries.push({profile,configurationsAcrossSymbols:configs,stages:Object.fromEntries(STAGES.map(stage=>[stage,measured(totals[stage])])),hourly:hourly.map(h=>({...h,stages:Object.fromEntries(STAGES.map(stage=>[stage,measured(h.stages[stage])]))})),groups:[...groups].map(([key,value])=>({key,...measured(value)})),indicationStrategies:[...strategyGroups].map(([key,value])=>({key,...measured(value)})),indicationStrategyCoverage:[...strategyCoverage].map(([key,value])=>({key,...value,enoughSamplesPct:value.sets?100*value.enough/value.sets:null})),typeHourlyCoverage:[...typeHourCoverage].map(([key,value])=>({key,...value})),typeGroups:[...typeGroups].map(([key,value])=>({key,...measured(value)})),typeCoverageGroups:[...typeCoverGroups].map(([key,value])=>({key,...value,enoughSamplesPct:value.sets?100*value.enough/value.sets:null})),typeHourlyGroups:[...typeHourGroups].map(([key,value])=>({key,...measured(value)})),hourlyGroups:[...hourGroups].map(([key,value])=>({key,...measured(value)})),coverageGroups:[...coverGroups].map(([key,value])=>({key,...value,enoughSamplesPct:value.sets?100*value.enough/value.sets:null})),performance:{maxWorkerRssKiB,summedJobWallMs:engineMs}})
  }
- const complete={...metadata,completedAt:new Date().toISOString(),completedJobs:results.size,types:[...INDICATIONS],summaries,methodology:'Observed BingX VST closed one-minute candles only, 72h prehistory and 24h forward unless explicitly overridden. All 19 indication families calculate independently, with balanced TP steps 3/5/8/12/18/24/30, SL/TP 0.6/1/1.4, three exits, long/short and Normal/Axis/Block/DCA. Tactic and Inverse use the ten declared default imported sources; all 1190 selectable source identities are separately covered by functional golden-state tests. Higher timeframes and the full Cartesian catalog are separately tested, not all enabled in this bounded run. Each policy warms its own stages from prehistory; unfinished warmup positions are discarded. Every subsequent loss remains in the forward ledger. Symbol admission uses available contracts and complete history only, never returns. No shortlist is chosen from this forward period. Enough-samples percentages divide current created sets with their own required completed samples by current created sets; zero sets means unavailable, not 0% passing. Validated-window PF is current selection evidence and is separate from all admitted forward closes. Model fills occur at observed closes and deduct verified taker fees plus fee-relative slippage once; exchange minimum sizing, latency, funding and native protective fills are not simulated. Correlated lane cash totals and 10,000-unit closed-only paper equity do not represent an executable exchange portfolio. Actual exchange PF is unavailable in this no-write simulation. Defaults are not promoted automatically.'}
+ const complete={...metadata,completedAt:new Date().toISOString(),completedJobs:results.size,types:[...INDICATIONS],summaries,methodology:'Observed BingX VST closed one-minute candles only, 72h prehistory and 24h forward unless explicitly overridden. All 19 indication families calculate independently, with balanced TP steps 3/5/8/12/18/24/30, SL/TP 0.6/1/1.4, three exits, long/short and Normal/Axis/Block/DCA. Tactic and Inverse use the ten declared default imported sources; all 1190 selectable source identities are separately covered by functional golden-state tests. Higher timeframes and the full Cartesian catalog are separately tested, not all enabled in this bounded run. Each policy warms its own stages from prehistory; unfinished warmup positions are discarded. Every subsequent loss remains in the forward ledger. Symbol admission uses available contracts and complete history only, never returns. No shortlist is chosen from this forward period. The prehistory-selected summaries are a frozen subset of these independent configuration lanes, selected from Base/Normal prehistory outcomes only, with at least 20 closes and PF 1.1 and up to three configurations per range within each indication family. Their forward losses remain included; full-catalog outcomes are shown alongside. They are not a shared-capital exchange portfolio. Enough-samples percentages divide current created sets with their own required completed samples by current created sets; zero sets means unavailable, not 0% passing. Validated-window PF is current selection evidence and is separate from all admitted forward closes. Model fills occur at observed closes and deduct verified taker fees plus fee-relative slippage once; exchange minimum sizing, latency, funding and native protective fills are not simulated. Correlated lane cash totals and 10,000-unit closed-only paper equity do not represent an executable exchange portfolio. Actual exchange PF is unavailable in this no-write simulation. Defaults are not promoted automatically.'}
  await atomic(join(output,'summary.json'),complete);progress();console.log(JSON.stringify({phase:'complete',output:join(output,'summary.json'),profiles:summaries.map(s=>({name:s.profile.name,stages:s.stages}))}))
 }
-if(process.argv.includes('--worker'))process.on('message',(job:Job)=>{void runJob(job).then(result=>{process.send?.({result});(globalThis as any).gc?.()}).catch(e=>process.send?.({error:e instanceof Error?e.message:'Worker failed'}))})
+if(process.argv.includes('--worker')){try{setPriority(0,10)}catch{};process.on('message',(job:Job)=>{void runJob(job).then(result=>{process.send?.({result});(globalThis as any).gc?.()}).catch(e=>process.send?.({error:e instanceof Error?e.message:'Worker failed'}))})}
 else void main().catch(e=>{console.error(e instanceof Error?e.message:'Simulation failed');process.exitCode=1})

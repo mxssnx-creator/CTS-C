@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {TradingEngine,validateEngineSettings} from '../core/engine'
 import {generateStrategyCatalog} from '../core/catalog'
-import {advancePortedSources,advanceConfiguredSignal,newSignalState,PORTED_HISTORY_LIMIT,replayStrategy} from '../core/replay'
+import {advancePortedSources,advanceConfiguredSignal,historicalPortedSignals,newSignalState,PORTED_HISTORY_LIMIT,replayStrategy} from '../core/replay'
 import {DEFAULTS,configurationCount,validateConfiguration} from '../core/settings-schema'
 import {runTerminalReplay} from '../core/terminal-replay'
 import {INDICATIONS} from '../core/indications'
@@ -14,6 +14,22 @@ import type {Candle} from '../core/types'
 const rows=waveBars(720)
 const bars:Candle[]=rows.map(b=>({...b,timestamp:b.timestamp+60000}))
 const noAdjustments={axis:{enabled:false,previous:2,last:1,outcome:'any' as const},block:{enabled:false,steps:2,ratio:.2,mode:'shared' as const},dca:{enabled:false,steps:2,distancePct:1,multiplier:2}}
+
+test('historical vectors preserve source ticks through rebases, higher frames, duplicate overlap and future extensions',()=>{
+ const ids=['inverse-known-ema-9-21','tactic-dca-bounce-8-percent-0.5-1-0.25']
+ for(const minutes of [1,5,15]){
+  const input=waveBars(minutes===1?PORTED_HISTORY_LIMIT+12:720).map(b=>({...b,timestamp:b.timestamp+60000})),ticks=newSignalState(),expected=input.map(bar=>advancePortedSources(ticks,bar,minutes,ids,{symbol:'SOL-USDT'})),batch=newSignalState(),actual=historicalPortedSignals(batch,input,minutes,ids,'SOL-USDT')
+  for(const [i,bar] of input.entries())for(const id of ids)assert.equal(actual.get(bar.timestamp)?.get(id),expected[i].get(id),id+'/'+minutes+'/'+i)
+  assert.deepEqual(batch,ticks)
+  const prefix=historicalPortedSignals(newSignalState(),input.slice(0,317),minutes,ids,'SOL-USDT');for(const [time,values]of prefix)assert.deepEqual(actual.get(time),values)
+ }
+ assert.throws(()=>historicalPortedSignals(newSignalState(),bars,1,['inverse-pair-btc-spread-20'],'SOL-USDT'))
+ const catalog={strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Inverse'],strategyIndicationSources:['inverse-known-ema-9-21'],strategySignalTimeframes:[1,5]}
+ const cfg={symbols:['SOL-USDT'],catalog,stageLastN:{base:2,main:2,real:2},stageMinPF:{base:0,main:0,real:0},coordinations:noAdjustments},whole=new TradingEngine(cfg),streamed=new TradingEngine(cfg)
+ const events=whole.processCandles('SOL-USDT',bars),reference=bars.flatMap(b=>streamed.processCandles('SOL-USDT',[b]));assert.deepEqual(events,reference)
+ const strip=(e:TradingEngine)=>{const {startedAt,...state}=e.exportState();return JSON.parse(JSON.stringify(state))};assert.deepEqual(strip(whole),strip(streamed))
+ const first=new TradingEngine(cfg);first.processCandles('SOL-USDT',bars.slice(0,317));const restarted=TradingEngine.fromSerialized(first.serializeState());restarted.processCandles('SOL-USDT',bars.slice(300));assert.deepEqual(strip(restarted),strip(whole))
+})
 
 test('every indication source, range, exit, ratio, period and supported timeframe remains represented without truncation',()=>{
  const ranges=['Micro','Minimal','Short','Normal','Long','Wide'],steps=[3,8,12,18,24,30]

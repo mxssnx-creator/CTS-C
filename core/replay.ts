@@ -136,6 +136,27 @@ export function advancePortedSources(state:SignalState,bar:Candle,minutes:number
   }
   return result
 }
+/** Causal historical vectors, segmented at exactly the same bounded-history rebase boundaries as ticks.
+ * Reference-dependent sources keep the observation-by-observation path. */
+export function historicalPortedSignals(state:SignalState,bars:readonly Candle[],minutes:number,ids:readonly string[],symbol:string):Map<number,Map<string,Direction|undefined>>{
+  if(ids.some(id=>/pair-|market-/.test(id)))throw new Error('Reference-dependent sources require observed-prefix evaluation')
+  const result=new Map<number,Map<string,Direction|undefined>>(),rows=state.portedBars??=[],pending:{timestamp:number;index:number}[]=[]
+  const flush=()=>{
+    if(!pending.length)return
+    const output=portedStates(symbol,minutes,rows,ids)
+    for(const p of pending){const values=new Map<string,Direction|undefined>();for(const id of ids){const v=output.states[id][p.index];values.set(id,v>0?'long':v<0?'short':undefined)}result.set(p.timestamp,values)}
+    pending.length=0
+  }
+  for(const bar of bars){
+    const closed=configuredClosedBar(state,bar,minutes);if(!closed)continue
+    const timestamp=closed.timestamp-minutes*60000
+    if(rows.at(-1)&&timestamp<=rows.at(-1)!.timestamp)continue
+    if(rows.length>=PORTED_HISTORY_LIMIT){flush();rows.splice(0,Math.floor(PORTED_HISTORY_LIMIT/2))}
+    rows.push({...closed,timestamp});pending.push({timestamp:bar.timestamp,index:rows.length-1})
+  }
+  flush();sourceStreams.delete(state)
+  return result
+}
 export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'|'indicationSourceId'>,context?:SourceContext):Direction|undefined{
   const minutes=config.signalTimeframeMinutes??1
   if(config.indicationSourceId)return advancePortedSources(state,bar,minutes,[config.indicationSourceId],context).get(config.indicationSourceId)

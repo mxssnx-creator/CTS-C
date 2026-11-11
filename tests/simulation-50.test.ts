@@ -20,10 +20,10 @@ test('bounded simulation worker preserves each trade, hourly totals and sample d
    child.once('message',(message:any)=>{clearTimeout(timer);if(message.error)reject(Error(message.error));else resolveJob(message.result)})
    child.send({id:'synthetic-fixture',symbol:'BTC-USDT',type:'Trend',root:directory,output:directory,dataset:{symbol:'BTC-USDT',file:'BTC-USDT.json',bars:160,sha256:createHash('sha256').update(body).digest('hex')},settings:{sourceHash:'synthetic-fixture',warmup:100,hours:1,fees:{makerFeePct:.02,takerFeePct:.05},catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategySignalPeriods:[20],strategySignalTimeframes:[1]}}})
   })
-  assert.equal(result.results.length,2);assert.equal(result.configurations,1)
+  assert.equal(result.results.length,4);assert.equal(result.configurations,1)
   for(const profile of result.results){
-   const lines=gunzipSync(await readFile(join(directory,'trades','BTC-USDT','Trend',profile.profile+'.ndjson.gz'))).toString().trim().split('\n').map(s=>JSON.parse(s)),header=lines.shift()!
-   assert.equal(header.ordersSubmitted,0);assert.equal(header.sourceHash,'synthetic-fixture')
+   let lines=gunzipSync(await readFile(join(directory,'trades','BTC-USDT','Trend',profile.profile.replace('prehistory-selected-','')+'.ndjson.gz'))).toString().trim().split('\n').map(s=>JSON.parse(s)),header=lines.shift()!
+   assert.equal(header.ordersSubmitted,0);assert.equal(header.sourceHash,'synthetic-fixture');if(profile.frozenPrehistory){const ids=new Set(header.prehistorySelectedIds);lines=lines.filter(t=>ids.has(t.configId))}
    for(const stage of ['base','main','real','live']){
     const trades=lines.filter(t=>t.stage===stage),totals=profile.totals[stage],hour=profile.hourly[0]
     assert.equal(trades.length,totals.closes);assert.deepEqual(hour.stages[stage],totals)
@@ -34,6 +34,6 @@ test('bounded simulation worker preserves each trade, hourly totals and sample d
    }
   }
   assert.ok(result.results[0].totals.base.closes>0)
-  assert.deepEqual(result.results[0].totals.base,result.results[1].totals.base)
+  assert.deepEqual(result.results[0].totals.base,result.results[2].totals.base)
  }finally{child.disconnect();child.kill('SIGTERM');await rm(directory,{recursive:true,force:true})}
 })

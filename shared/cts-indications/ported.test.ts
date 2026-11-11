@@ -36,6 +36,10 @@ test('source calculations are causal and append-stream states equal the full ora
  const known=portedStates('SOL-USDT',1,Array.from({length:120},(_,i)=>({timestamp:rows[0].timestamp+i*60000,open:100+i,high:100.5+i,low:99.5+i,close:100+i,volume:10})),['inverse-known-ema-9-21']);
  assert.equal(known.states['inverse-known-ema-9-21'].at(-1),-1,'rising EMA is inverted before entry, never a return sign flip');
 });
+test('all self-contained imported sources preserve every prefix with shared streaming math',()=>{
+ const rows=waveBars(720),ids=PORTED_INDICATIONS.filter(s=>!/pair-|market-/.test(s.id)).map(s=>s.id),full=portedStates('SOL-USDT',1,rows,ids),stream=new StreamMath()
+ for(const n of [80,160,240,480,720]){const prefix=portedStates('SOL-USDT',1,rows.slice(0,n),ids,[],stream);for(const id of ids)assert.deepEqual(prefix.states[id],full.states[id].slice(0,n),id+' at '+n)}
+});
 test('gaps reset warmup; incomplete higher candles, missing references, and unsupported lanes never invent signals',()=>{
  const rows=waveBars(240),ids=['inverse-known-ema-9-21','inverse-pair-btc-spread-20'];
  const missing=portedStates('SOL-USDT',1,rows,[ids[1]]);assert.equal(missing.available[ids[1]],false);assert.ok(missing.states[ids[1]].every(x=>x===0));
