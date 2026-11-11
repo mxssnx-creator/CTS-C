@@ -92,6 +92,7 @@ export interface ExecutionIntent {
   maxOrderNotional?:number
   qualificationId?:string
   minimumAddRatio?:number
+  entryAllocationRatio?:number
   realPositionId?:string
 }
 export interface EngineEvent { type: "opened" | "added" | "closed" | "qualified" | "execution"; status?:string; reason?:string; laneId: string; timestamp: number; stage: Stage; trade?: ClosedTrade }

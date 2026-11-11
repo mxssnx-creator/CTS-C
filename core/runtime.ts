@@ -82,9 +82,26 @@ export class TerminalRuntime {
     this.control={...this.control,...this.store.get<Control>('control'),warmed:[]}
   }
   async quiesce(){
-    await this.serial(async()=>this.stop())
+    let failure:unknown
+    try{await this.serial(async()=>this.stop())}catch(error){failure=error}
     await this.executionTask
     await this.serial(async()=>{})
+    if(failure)throw failure
+  }
+  assertOwnership(){this.ensureLease()}
+  /** Offline observed-history preparation, with bounded work and a checkpoint
+   * per symbol. It cannot enable entries or silently renew a lost lease. */
+  async warmObservedHistory(symbol:string,candles:Candle[]){
+    if(this.control.running||this.control.exchangeExecution)throw new Error('Offline history warmup requires a stopped runtime')
+    validateObservedCandles(candles)
+    const latest=Math.floor(Date.now()/60000)*60000
+    if(candles.some((bar,i)=>bar.timestamp>latest||bar.timestamp%60000!==0||(i>0&&bar.timestamp-candles[i-1].timestamp!==60000)))throw new Error('Warmup requires complete contiguous one-minute observations')
+    for(let offset=0;offset<candles.length;offset+=8){
+      this.ensureLease()
+      this.engine.processCandles(symbol,candles.slice(offset,offset+8),{allowExecution:false,eventLimit:0})
+      await new Promise<void>(resolve=>setImmediate(resolve))
+    }
+    this.persist()
   }
   shutdown(){this.tradeStream?.stop();clearTimeout(this.tradeTimer);clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false;this.leaseLost=true;this.control.running=false}
   serial<T>(operation:()=>Promise<T>): Promise<T> { const next=this.sequence.catch(()=>{}).then(operation); this.sequence=next; return next }

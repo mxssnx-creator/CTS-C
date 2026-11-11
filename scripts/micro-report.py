@@ -17,6 +17,7 @@ p.add_argument('--executor-log', required=True)
 p.add_argument('--output', required=True)
 p.add_argument('--verification')
 a = p.parse_args()
+target=Path(a.output);target.parent.mkdir(parents=True,exist_ok=True)
 study = json.loads(Path(a.study).read_text())
 live = json.loads(Path(a.live).read_text()) if a.live and Path(a.live).exists() else None
 raw = Path(a.executor_log).read_text()
@@ -42,7 +43,11 @@ def table(headers, rows, search=False):
     return ('<div class="scroll"><table' + (' class="searchable"' if search else '') + '><thead><tr>' + ''.join(f'<th>{esc(h)}</th>' for h in headers) + '</tr></thead><tbody>' + ''.join('<tr>' + ''.join(f'<td>{esc(c)}</td>' for c in row) + '</tr>' for row in rows) + '</tbody></table></div>')
 
 plt.rcParams.update({'font.family':'DejaVu Sans', 'font.size':10, 'figure.facecolor':'#142034', 'axes.facecolor':'#142034', 'axes.edgecolor':'#506079', 'axes.labelcolor':'#d9e6f7', 'text.color':'#d9e6f7', 'xtick.color':'#b8c9df', 'ytick.color':'#b8c9df', 'grid.color':'#35475e', 'svg.fonttype':'none'})
+chart_index=0
 def svg(fig):
+    global chart_index
+    chart_index+=1
+    fig.savefig(target.with_name(target.stem+f'-chart-{chart_index}.png'),dpi=130,bbox_inches='tight')
     out = io.StringIO()
     fig.savefig(out, format='svg', bbox_inches='tight')
     plt.close(fig)
@@ -148,5 +153,5 @@ document=f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="vi
 <details><summary>Every selected configuration / coordination / stage</summary><p><input id="filter" placeholder="Filter symbol-independent configuration groups"></p>{table(['Range / indication / TP / SL / exit / coordination / stage','Closes','PF','Net PnL','Entries','Adds'],detail_rows,True)}</details>
 <h2>Verification and provenance</h2><pre>{esc(json.dumps(verification,indent=2))}</pre><p>Study cutoff (milliseconds): {study['manifest']['cutoff']}; generated: {esc(study['generatedAt'])}. Raw candles, SHA-256 hashes, frozen choices and negative outcomes accompany the evidence archive. Model money totals are correlated hypothetical lanes, not account equity. Funding, liquidation, queue position and depth are outside the replay model.</p>
 <h3>Primary references checked during implementation</h3>{source_links}<p class="muted">Sources support feed format and fees. They do not support profitability claims.</p></main><script>document.getElementById('filter').addEventListener('input',e=>{{const q=e.target.value.toLowerCase();document.querySelectorAll('table.searchable tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q))}})</script></html>'''
-target=Path(a.output);target.parent.mkdir(parents=True,exist_ok=True);target.write_text(document)
+target.write_text(document)
 print(json.dumps({'report':str(target),'bytes':target.stat().st_size,'symbols':study['completedSymbols'],'configurations':grid,'sampleCoveragePercent':100*enough/grid,'trainingQualifiedPercent':100*qualified/grid,'liveRecordIncluded':live is not None}))

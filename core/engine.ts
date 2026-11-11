@@ -171,6 +171,7 @@ export class TradingEngine {
       stageLastN: { ...previous.stageLastN, ...input.stageLastN }, stageMinPF: { ...previous.stageMinPF, ...input.stageMinPF },
       coordinations: { axis: { ...previous.coordinations.axis, ...input.coordinations?.axis }, block: { ...previous.coordinations.block, ...input.coordinations?.block }, dca: { ...previous.coordinations.dca, ...input.coordinations?.dca } },
     })
+    if(JSON.stringify(previous)===JSON.stringify(this.state.settings))return
     this.configs = generateStrategyCatalog(this.state.settings.connectionId, this.state.settings.catalog, "1970-01-01T00:00:00.000Z")
     this.refreshSymbolCatalogs()
     this.refreshCoordinationIds()
@@ -379,7 +380,7 @@ export class TradingEngine {
   }
   private mark(lane: LaneState, candle: Candle, ordered=false): EngineEvent | undefined {
     const open = lane.open
-    if (!open || candle.timestamp<=open.openedAt || candle.timestamp<lane.lastTimestamp || (!ordered&&candle.timestamp===lane.lastTimestamp)) return
+    if (!open || candle.timestamp<open.openedAt || (!ordered&&candle.timestamp===open.openedAt) || candle.timestamp<lane.lastTimestamp || (!ordered&&candle.timestamp===lane.lastTimestamp)) return
     this.dirtyLaneIds.add(lane.id)
     lane.lastTimestamp = candle.timestamp
     const sign = lane.direction === "long" ? 1 : -1
@@ -419,6 +420,7 @@ export class TradingEngine {
       timestamp: candle.timestamp, price: candle.close, notional: requestedQuantity * candle.close,
       takeProfitPct: position.takeProfitPct, stopLossPct: position.stopLossPct, exitMode: position.exitMode,maxOrderNotional:position.maxOrderNotional,qualificationId:position.admission?.length?hashId(JSON.stringify(position.admission)):undefined,
       ...(((lane.coordination==='block'&&position.sizing?.block.behavior!=='rounds')||lane.coordination==='dca')?{minimumAddRatio:lane.coordination==='block'?position.sizing?.block.ratio:position.sizing?.dca.multiplier}:{}),...(position.parentPositionId?{realPositionId:position.parentPositionId}:{}),source: "real-qualified", status: "pending" })
+    if(kind==='entry'&&lane.coordination==='block'&&position.sizing?.block.behavior==='rounds')this.state.intents.at(-1)!.entryAllocationRatio=position.notional/position.sizing.baseBudget
   }
   processCandles(symbolInput: string, candles: Candle[], options: { allowExecution?: boolean;eventLimit?:number;barSeconds?:10|60 } = {}): EngineEvent[] {
     const symbol = normalizeSymbol(symbolInput), s = this.state.settings

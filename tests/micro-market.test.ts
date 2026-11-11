@@ -3,7 +3,7 @@ import {test} from 'node:test'
 import {gzipSync} from 'node:zlib'
 import {generateStrategyCatalog} from '../core/catalog'
 import {resolveTradingCostPct} from '../core/metrics'
-import {TradeBarBuilder,decodeTradeMessage} from '../core/trade-stream'
+import {TradeBarBuilder,decodeTradeMessage,BingxTradeStream,TRADE_STREAM_URLS} from '../core/trade-stream'
 import {TradingEngine} from '../core/engine'
 import {blockRoundBudget,consumeBlockPause,settleBlockRound} from '../core/block-rounds'
 import {DEFAULTS,configurationCount} from '../core/settings-schema'
@@ -83,4 +83,28 @@ test('thin trailing ratchets at actual observations on both directions',()=>{
     const closed=observedExit({...p,peak:armed.peak,price:100+sign*.2,timestamp:3,trailingActive:true,trailingStopPrice:armed.stop})
     assert.equal(closed.reason,'trailing_stop');assert.equal(closed.stop,armed.stop)
   }
+})
+test('an ordered new trade in the entry millisecond manages a stop while the entry candle cannot close itself',()=>{
+  const e=new TradingEngine({symbols:['BTC-USDT'],catalog:{strategyEnabledRanges:['Micro'],strategyTpSteps:[2],strategySlRatios:[.2],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}})
+  let opened:ReturnType<TradingEngine['snapshot']>['positions'][number]|undefined
+  for(let i=0;i<100&&!opened;i++){const price=100+i*.01;e.processCandles('BTC-USDT',[{timestamp:1790000000000+i*60000,open:price,high:price,low:price,close:price,volume:1}]);opened=e.snapshot().positions[0]}
+  assert.ok(opened)
+  const price=opened.entryPrice*(opened.direction==='long'?.99:1.01)
+  assert.deepEqual(e.processTick('BTC-USDT',price,opened.openedAt),[])
+  assert.ok(e.processTick('BTC-USDT',price,opened.openedAt,true).some(event=>event.type==='closed'))
+})
+test('each of the three 50-symbol WebSockets has an independent heartbeat and reconnect resets queued continuity',t=>{
+  t.mock.timers.enable({apis:['Date','setTimeout','setInterval'],now:1790000000000})
+  const sockets:any[]=[],urls:string[]=[]
+  const stream=new BingxTradeStream('bingx-x02',url=>{urls.push(url);const socket={sent:[] as string[],send(data:string){this.sent.push(data)},close(){},onopen:null,onmessage:null,onclose:null,onerror:null};sockets.push(socket);return socket as unknown as WebSocket})
+  try{
+    stream.start(Array.from({length:50},(_,i)=>`B${i}-USDT`));for(const socket of sockets)socket.onopen()
+    assert.equal(stream.status.connected,true);assert.deepEqual(sockets.map(s=>s.sent.length),[20,20,10]);assert.ok(urls.every(u=>u===TRADE_STREAM_URLS['bingx-x02']))
+    t.mock.timers.tick(29000);sockets[0].onmessage({data:'Ping'});assert.equal(sockets[0].sent.at(-1),'Pong')
+    sockets[0].onmessage({data:JSON.stringify({code:0,dataType:'B0-USDT@trade',data:[{s:'B0-USDT',T:Date.now(),p:'100',q:'1'}]})})
+    assert.equal(stream.status.received,1)
+    t.mock.timers.tick(6000)
+    assert.equal(stream.status.connected,false);assert.equal(stream.status.reconnects,1);assert.match(stream.status.error!,/heartbeat/);assert.deepEqual(stream.drain(),[])
+    t.mock.timers.tick(2000);assert.equal(sockets.length,6)
+  }finally{stream.stop();t.mock.timers.reset()}
 })

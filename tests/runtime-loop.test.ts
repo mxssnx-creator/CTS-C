@@ -91,6 +91,25 @@ test("runtime write callbacks recheck paused and closed paper positions for entr
   })
 })
 
+test('offline observed warmup checkpoints each symbol, resumes duplicates and preserves lost-lease fencing',async()=>{
+  await isolated(async runtime=>{
+    const internal=runtime as any,symbol=runtime.engine.settings.symbols[0]
+    const end=Math.floor(Date.now()/60000)*60000-60000
+    const bars=Array.from({length:48},(_,i)=>{const close=100+Math.sin(i/3);return {timestamp:end-(47-i)*60000,open:close,high:close,low:close,close,volume:1}})
+    await assert.rejects(runtime.warmObservedHistory(symbol,bars),/stopped runtime/)
+    runtime.control.running=false;runtime.control.exchangeExecution=false
+    await runtime.warmObservedHistory(symbol,bars)
+    const saved=runtime.store.loadEngineState()!
+    assert.equal(saved.lastTimestamp[symbol],end);assert.equal(saved.intents.length,0)
+    const count=saved.processedCandles;await runtime.warmObservedHistory(symbol,bars)
+    assert.equal(runtime.store.loadEngineState()!.processedCandles,count)
+    await assert.rejects(runtime.warmObservedHistory(symbol,[{...bars[0],timestamp:end+120000}]),/complete contiguous/)
+    runtime.store.releaseLease(internal.owner)
+    await assert.rejects(runtime.warmObservedHistory(symbol,bars),/lease expired/)
+    assert.equal(runtime.store.loadEngineState()!.processedCandles,count)
+  })
+})
+
 test("shutdown prevents a delayed executor callback from reacquiring ownership or overwriting state", async () => {
   await isolated(async (runtime) => {
     const internal = runtime as any, blocked = deferred<any[]>()

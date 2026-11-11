@@ -106,6 +106,24 @@ test('notional cap includes exchange minimums and rejects additions before cance
  assert.equal(status(await executor.process([close]),close.id),'acknowledged');assert.equal(executor.lots()[0].quantity,0)
 })
 
+test('Block round allocation multiplies the normalized base quantity and still observes the cap',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close())
+ const venue=new Venue(),executor=new DemoExecutor(store,venue)
+ const entry=intent({requestedQuantity:.0014,entryAllocationRatio:1.4,maxOrderNotional:2})
+ assert.equal(status(await executor.process([entry]),entry.id),'acknowledged')
+ assert.equal(Number(venue.markets()[0].quantity),.014,'minimum base .01 must be multiplied by 1.4')
+ assert.equal(executor.lots()[0].quantity,.014)
+})
+
+test('sub-tick micro protection is rejected before any exchange entry or protection cancellation',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close())
+ const venue=new Venue(),executor=new DemoExecutor(store,venue)
+ const entry=intent({stopLossPct:.001})
+ const updates=await executor.process([entry])
+ assert.equal(status(updates,entry.id),'rejected');assert.match(updates[0].error!,/price tick/)
+ assert.equal(venue.submitted.length,0);assert.equal(venue.canceled.length,0);assert.equal(executor.lots().length,0)
+})
+
 test('an account-scoped executor rejects intents from another connection before market access',async t=>{
  const store=new StateStore(':memory:');t.after(()=>store.close())
  const venue=new Venue(),executor=new DemoExecutor(store,venue,{connectionId:'bingx-x01'})
