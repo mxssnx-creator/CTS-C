@@ -1,15 +1,13 @@
 name: Frozen 50-symbol stage evidence
 on:
-  pull_request:
-    paths: ['research-data/**', '.github/workflows/research-50.yml']
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: ctsc-research-50-${{ github.event.pull_request.number }}
+  group: ctsc-research-50-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   replay:
-    if: github.head_ref == 'agent/ctsc-live-real-parity-20261111'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
@@ -82,8 +80,8 @@ jobs:
           cp market/manifest.json publish/market-manifest.json
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git switch --orphan agent/ctsc-50-results-20261111
-          git rm -rf .
+          git switch --orphan agent/ctsc-50-results-${GITHUB_RUN_ID}
+          git rm -rf --ignore-unmatch .
           git add publish
           git commit -m 'Record complete frozen 50-symbol replay and independent ledger audit'
-          git push origin HEAD:refs/heads/agent/ctsc-50-results-20261111
+          git push origin HEAD:refs/heads/agent/ctsc-50-results-${GITHUB_RUN_ID}

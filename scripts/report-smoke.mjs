@@ -14,6 +14,8 @@ try{
  await page.waitForFunction(()=>document.querySelector('#controls')?.disabled===false)
  assert.equal(await page.locator('#matrix tbody tr').count(),228)
  assert.equal(await page.locator('#hourly tbody tr').count(),24)
+ assert.equal(await page.locator('#families tbody tr').count(),19)
+ assert.equal(await page.locator('#heatmap tbody tr').count(),19)
  for(let p=0;p<summary.summaries.length;p++){
   await page.locator('#policy').selectOption(String(p))
   for(const type of summary.types){await page.locator('#type').selectOption(type);assert.equal(await page.locator('#matrix tbody tr').count(),12);assert.equal(await page.locator('.chart svg').count(),6)}
