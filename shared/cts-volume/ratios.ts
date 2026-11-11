@@ -28,7 +28,7 @@ export function relationalVolumeSettings(raw:unknown,strict=false):RelationalVol
  }
  return out;
 }
-export interface VolumeContext {indicationType?:string;indication?:string;strategy?:string;range?:string;symbol?:string}
+export interface VolumeContext {indicationType?:string|readonly string[];indication?:string;strategy?:string|readonly string[];range?:string|readonly string[];symbol?:string}
 /** Apply once to entry notional. Held quantities, unit returns and qualification windows remain immutable. */
 export function relationalVolumeFactor(settings:unknown,context:VolumeContext):number{
  if(settings===undefined||settings===null)return 1;
@@ -37,8 +37,8 @@ export function relationalVolumeFactor(settings:unknown,context:VolumeContext):n
 /** Reuse a validated rule set in the engine; no parsing or cloning in its hot path. */
 export function normalizedVolumeFactor(s:RelationalVolumeRatios,context:VolumeContext):number{
  if(!s.enabled)return 1;
- const bindings:Record<VolumeBucket,string|undefined>={indicationTypes:context.indicationType,indications:context.indication,strategies:context.strategy,ranges:context.range,symbols:context.symbol};
+ const bindings:Record<VolumeBucket,string|readonly string[]|undefined>={indicationTypes:context.indicationType,indications:context.indication,strategies:context.strategy,ranges:context.range,symbols:context.symbol};
  let factor=s.overall;
- for(const bucket of VOLUME_BUCKETS){const key=bindings[bucket];if(key!==undefined)factor*=s[bucket][keyOf(key)]??1;}
+ for(const bucket of VOLUME_BUCKETS){const value=bindings[bucket];if(value!==undefined)for(const key of new Set((typeof value==='string'?[value]:value).map(keyOf)))factor*=s[bucket][key]??1;}
  return Math.min(s.maxMultiplier,Math.max(.000001,factor));
 }

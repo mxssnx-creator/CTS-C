@@ -6,7 +6,7 @@ import {advancePortedSources,advanceConfiguredSignal,historicalPortedSignals,new
 import {DEFAULTS,configurationCount,validateConfiguration} from '../core/settings-schema'
 import {runTerminalReplay} from '../core/terminal-replay'
 import {INDICATIONS} from '../core/indications'
-import {portedStates} from '../shared/cts-indications'
+import {portedStates,entryOnsets} from '../shared/cts-indications'
 import {PORTED_CATALOG,DEFAULT_INVERSE_SOURCES,DEFAULT_TACTIC_SOURCES} from '../shared/cts-indications/catalog'
 import {waveBars} from '../shared/cts-indications/fixtures'
 import type {Candle} from '../core/types'
@@ -47,7 +47,7 @@ test('every indication source, range, exit, ratio, period and supported timefram
 test('all imported sources have distinct identities across supported timeframes and match the Settings count',()=>{
  const values={...DEFAULTS,strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Tactic','Inverse'],strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),strategySignalTimeframes:[1,5,15,30]}
  const configs=generateStrategyCatalog('bingx-x02',values)
- assert.equal(configs.length,586*4+604*3)
+ assert.equal(configs.length,2314*4+604*3)
  assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)
  assert.equal(configurationCount(values),configs.length)
  assert.equal(configs.filter(c=>c.type==='Inverse'&&c.signalTimeframeMinutes===30).length,0)
@@ -59,7 +59,7 @@ test('the close-time adapter matches the imported open-time oracle for every def
  const ids=[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES],expected=portedStates('SOL-USDT',1,rows,ids)
  const state=newSignalState(),actual=Object.fromEntries(ids.map(id=>[id,[] as number[]]))
  for(const bar of bars){const out=advancePortedSources(state,bar,1,ids,{symbol:'SOL-USDT'});for(const id of ids)actual[id].push(out.get(id)==='long'?1:out.get(id)==='short'?-1:0)}
- for(const id of ids)assert.deepEqual(actual[id],Array.from(expected.states[id]),id)
+ for(const id of ids)assert.deepEqual(actual[id],Array.from(entryOnsets(expected.states[id])),id)
  assert.equal(state.portedBars![0].timestamp,rows[0].timestamp)
  assert.equal(state.portedBars!.at(-1)!.timestamp,rows.at(-1)!.timestamp)
 })

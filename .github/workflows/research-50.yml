@@ -64,6 +64,10 @@ jobs:
           python3 scripts/audit-simulation.py --root result --output result/audit.json
           python3 scripts/render-simulation-report.py --input result/summary.json --output result/CTS-C-50-symbol-results-20261111.html --commit "$GITHUB_SHA"
           gzip -k result/summary.json
+      - run: npx playwright-core install --with-deps chromium
+      - run: node scripts/report-smoke.mjs result/CTS-C-50-symbol-results-20261111.html result/summary.json
+        env:
+          CTS_UI_OUTPUT: result/ui
       - uses: actions/upload-artifact@v4
         if: always()
         with:

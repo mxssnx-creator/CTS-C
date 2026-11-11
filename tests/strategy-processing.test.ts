@@ -74,3 +74,11 @@ test('relational weights apply once, keep captured fills, and isolate changed sy
  for(const event of events.filter(x=>x.type==='opened')){const l=e.exportState().lanes[event.laneId];if(l.open){const reserve=l.coordination==='block'&&cfg.coordinations.block.mode==='shared'?1+cfg.coordinations.block.steps*cfg.coordinations.block.ratio:1;assert.ok(Math.abs(l.open.sizing!.baseBudget-2*cfg.baseNotional*cfg.volumeFactor)<1e-10);assert.ok(Math.abs(l.open.fills[0].price*l.open.fills[0].quantity-2*cfg.baseNotional*cfg.volumeFactor/reserve)<1e-10)}}
  assert.throws(()=>e.updateSettings({catalog:{...cfg.catalog,relationalVolumeRatios:{overall:Infinity}}}))
 })
+
+test('Trailing off freezes a held stop without inventing a take-profit or loosening existing protection',async()=>{
+ const {observedExit}=await import('../core/exits.ts');
+ for(const direction of ['long','short']as const){const sign=direction==='long'?1:-1,base={direction,entryPrice:100,peak:100+sign*8,price:100+sign*10,takeProfitPct:3,stopLossPct:2,exitMode:'trailing-only' as const,openedAt:1,timestamp:60001,maxHoldMinutes:0,trailingActive:true,trailingStopPrice:100+sign*5,trailingEnabled:false};
+  const frozen=observedExit(base);assert.equal(frozen.stop,base.trailingStopPrice);assert.equal(frozen.peak,base.peak);assert.equal(frozen.reason,undefined);
+  assert.equal(observedExit({...base,price:base.trailingStopPrice-sign*.01}).reason,'trailing_stop');
+ }
+});

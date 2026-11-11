@@ -34,3 +34,6 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
  }
  return {states,available};
 }
+
+/** Emit a direction once at its onset; inversion is already calculated in the source. */
+export function entryOnsets(states:Int8Array):Int8Array{const out=new Int8Array(states.length);for(let i=1;i<states.length;i++)if(states[i]!==0&&states[i]!==states[i-1])out[i]=states[i];return out;}

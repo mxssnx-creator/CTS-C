@@ -132,7 +132,7 @@ export function advancePortedSources(state:SignalState,bar:Candle,minutes:number
     const selected=ids.filter(id=>/pair-|market-/.test(id)===usesReferences)
     if(!selected.length)continue
     const output=portedStates(context.symbol,minutes,rows,selected,usesReferences?peers:[],usesReferences?undefined:cached.stream)
-    for(const id of selected){const v=output.states[id].at(-1)??0;result.set(id,v>0?'long':v<0?'short':undefined)}
+    for(const id of selected){const series=output.states[id],v=series.at(-1)??0,previous=series.at(-2)??0;result.set(id,v!==previous?(v>0?'long':v<0?'short':undefined):undefined)}
   }
   return result
 }
@@ -144,7 +144,7 @@ export function historicalPortedSignals(state:SignalState,bars:readonly Candle[]
   const flush=()=>{
     if(!pending.length)return
     const output=portedStates(symbol,minutes,rows,ids)
-    for(const p of pending){const values=new Map<string,Direction|undefined>();for(const id of ids){const v=output.states[id][p.index];values.set(id,v>0?'long':v<0?'short':undefined)}result.set(p.timestamp,values)}
+    for(const p of pending){const values=new Map<string,Direction|undefined>();for(const id of ids){const series=output.states[id],v=series[p.index],previous=series[p.index-1]??0;values.set(id,p.index>0&&v!==previous?(v>0?'long':v<0?'short':undefined):undefined)}result.set(p.timestamp,values)}
     pending.length=0
   }
   for(const bar of bars){

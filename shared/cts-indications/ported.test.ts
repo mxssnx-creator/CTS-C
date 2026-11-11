@@ -8,12 +8,12 @@ import {dcaTacticConfigs,dcaTacticId,dcaTacticState,DCA_TACTIC_GRID} from "./ori
 import {aggregateClosedBars,alignedSourceStates} from "./aligned.ts";
 import {waveBars,declineBars} from "./fixtures.ts";
 
-test('all 1190 imported source identities match the CTS-A-O golden states',()=>{
+test('all 2918 imported source identities match the CTS-A-O golden states',()=>{
  const bars=waveBars(),peers=[{symbol:'BTC-USDT',bars:waveBars().map(b=>({...b,close:b.close*.99,open:b.open*.99,high:b.high*.99,low:b.low*.99}))},{symbol:'ETH-USDT',bars:waveBars()}];
  const result=portedStates('SOL-USDT',1,bars,PORTED_INDICATIONS.map(s=>s.id),peers);
  const golden=JSON.parse(readFileSync(new URL('./golden.json',import.meta.url),'utf8'));
- assert.equal(PORTED_INDICATIONS.filter(s=>s.kind==='inverse').length,604);assert.equal(dcaTacticConfigs().length,576);
- assert.equal(new Set(PORTED_INDICATIONS.map(s=>s.id)).size,1190);
+ assert.equal(PORTED_INDICATIONS.filter(s=>s.kind==='inverse').length,604);assert.equal(dcaTacticConfigs().length,2304);
+ assert.equal(new Set(PORTED_INDICATIONS.map(s=>s.id)).size,2918);
  for(const s of PORTED_INDICATIONS)assert.equal(createHash('sha256').update(result.states[s.id]).digest('hex'),golden.states[s.id],s.id);
 });
 test('decline levels and recovery ratios are independent, mirrored before entry, and preserve all existing Tactics',()=>{
