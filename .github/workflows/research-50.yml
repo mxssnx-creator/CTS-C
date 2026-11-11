@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: ctsc-research-50-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   replay:
     runs-on: ubuntu-24.04

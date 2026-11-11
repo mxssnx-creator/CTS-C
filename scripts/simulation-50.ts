@@ -22,6 +22,9 @@ const empty=()=>({closes:0,wins:0,profit:0,loss:0,netPnl:0,cost:0,notional:0,ent
 type Totals=ReturnType<typeof empty>
 const totalKeys=Object.keys(empty()) as (keyof Totals)[]
 const add=(a:Totals,b:Totals)=>{for(const k of totalKeys)a[k]+=b[k]}
+const getTotals=(m:Map<string,Totals>,key:string)=>{let row=m.get(key);if(!row){row=empty();m.set(key,row)}return row}
+const closeKeys=['closes','wins','profit','loss','netPnl','cost','notional'] as const
+function applyEvent(t:Totals,d:Totals,kind:string){if(kind==='opened')t.entries++;else if(kind==='added')t.additions++;else for(const k of closeKeys)t[k]+=d[k]}
 const measured=(a:Totals)=>({...a,...describeProfitFactor(a.profit,a.loss,a.closes),modeledOrderActions:a.entries+a.additions+a.closes})
 const coverageEmpty=()=>({sets:0,enough:0,qualified:0,admissionReady:0,validatedSamples:0,validatedSets:0,validatedProfit:0,validatedLoss:0,ownQualifiedSets:0,ownQualifiedSamples:0,ownQualifiedProfit:0,ownQualifiedLoss:0,unfinished:0})
 type Coverage=ReturnType<typeof coverageEmpty>
@@ -81,6 +84,7 @@ async function runJob(job:Job){
   for(const lane of Object.values(trained.lanes))delete lane.open
   engine=TradingEngine.fromOwnedCheckpoint(trained)
   const accumulators=[make(profile.name,false,configs.length),make('prehistory-selected-'+profile.name,true,selected.size)]
+  const bindings=new Map<string,{config:StrategyConfig;stage:Stage;targets:Totals[];participants:number[];hourKeys:string[];hour:number;hourTargets:Totals[]}>()
   const folder=join(job.output,'trades',safeName(job.symbol),safeName(job.type));await mkdir(folder,{recursive:true})
   const stream=createGzip({level:1}),done=pipeline(stream,createWriteStream(join(folder,profile.name+'.ndjson.gz')));void done.catch(()=>{})
   stream.write(JSON.stringify({kind:'cts-c-paper-trade-ledger',profile,sourceHash:job.settings.sourceHash,symbol:job.symbol,indication:job.type,prehistorySelectedIds:selection.selectedIds,ordersSubmitted:0})+'\n')
@@ -90,19 +94,21 @@ async function runJob(job:Job){
    const events=engine.processCandles(job.symbol,bars.slice(offset,offset+5))
    for(const event of events){
     if(!['opened','added','closed'].includes(event.type))continue
-    const lane=JSON.parse(event.laneId),config=byId.get(lane[2]);if(!config)throw Error('An event escaped its exact configuration')
+    let binding=bindings.get(event.laneId)
+    if(!binding){
+     const lane=JSON.parse(event.laneId),config=byId.get(lane[2]);if(!config||lane[5]!==event.stage)throw Error('An event escaped its exact configuration')
+     const tags:Record<Dimension,string>={symbol:job.symbol,type:job.type,range:config.range!,coordination:lane[4],direction:lane[3],exitMode:config.exitMode!,tpStep:String(config.tpStep),slRatio:String(config.slRatio),source:config.indicationSourceId??job.type},sk=JSON.stringify([event.stage,tags.range,tags.coordination,tags.exitMode]),keys=dimensions.map(dim=>JSON.stringify([event.stage,dim,tags[dim]])),hourKeys=(['range','coordination','direction','exitMode']as const).map(dim=>JSON.stringify([event.stage,dim,tags[dim]])),targets:Totals[]=[],participants:number[]=[]
+     for(const [index,a]of accumulators.entries()){if(a.frozenPrehistory&&!selected.has(config.id))continue;participants.push(index);targets.push(a.totals[event.stage],getTotals(a.strategies,sk),...keys.map(key=>getTotals(a.groups,key)))}
+     binding={config,stage:event.stage,targets,participants,hourKeys,hour:-1,hourTargets:[]};bindings.set(event.laneId,binding)
+    }
+    if(binding.hour!==hour){binding.hour=hour;binding.hourTargets=binding.participants.flatMap(i=>[hours[i].stages[binding!.stage],...binding!.hourKeys.map(key=>getTotals(hours[i].groups,key))])}
+
     const delta=empty()
     if(event.type==='opened')delta.entries++
     if(event.type==='added')delta.additions++
     if(event.trade){const t=event.trade;if(t.stage!=='base'&&(!t.admission?.length||t.admission.some(p=>!p.qualified)))throw Error('Unproven post-Base trade entered the forward ledger');delta.closes=1;delta.wins=Number(t.netReturnPct>0);delta.profit=Math.max(0,t.netReturnPct);delta.loss=Math.max(0,-t.netReturnPct);delta.netPnl=t.netPnl;delta.cost=t.cost;delta.notional=t.notional;lines+=JSON.stringify(t)+'\n'}
-    const tags:Record<Dimension,string>={symbol:job.symbol,type:job.type,range:config.range!,coordination:lane[4],direction:lane[3],exitMode:config.exitMode!,tpStep:String(config.tpStep),slRatio:String(config.slRatio),source:config.indicationSourceId??job.type}
-    for(const [index,a]of accumulators.entries()){
-     if(a.frozenPrehistory&&!selected.has(config.id))continue
-     add(a.totals[event.stage],delta);add(hours[index].stages[event.stage],delta)
-     const sk=JSON.stringify([event.stage,tags.range,tags.coordination,tags.exitMode]),sr=a.strategies.get(sk)??empty();add(sr,delta);a.strategies.set(sk,sr)
-     for(const dim of dimensions){const key=JSON.stringify([event.stage,dim,tags[dim]]),row=a.groups.get(key)??empty();add(row,delta);a.groups.set(key,row)}
-     for(const dim of ['range','coordination','direction','exitMode'] as const){const key=JSON.stringify([event.stage,dim,tags[dim]]),row=hours[index].groups.get(key)??empty();add(row,delta);hours[index].groups.set(key,row)}
-    }
+    for(const target of binding.targets)applyEvent(target,delta,event.type)
+    for(const target of binding.hourTargets)applyEvent(target,delta,event.type)
    }
    if(lines&&!stream.write(lines))await once(stream,'drain');lines=''
    }
