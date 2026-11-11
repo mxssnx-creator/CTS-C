@@ -26,7 +26,7 @@ export const DEFAULTS: Record<string, unknown> = {
   autoPfEnabled: false, autoPfRatio: .2, autoPfMax: 2, microTradeStream: false,
   blockSteps: 3, blockMode: "shared", dcaSteps: 2, dcaDistancePct: 1, dcaMultiplier: 2,
   normalVolumeRatio: 1, axisVolumeRatio: 1, blockVolumeFactor: 1, dcaVolumeRatio: 1, maxOrderNotional: 0,
-  microTrailRatio: .5, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
+  microTrailRatio: .5, microMinSlDistancePct: .1, microMinTrailDistancePct: .05, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
   blockVolumeRatio: 0.2, makerFeePct: 0.02, takerFeePct: 0.05, slippagePctOfFees: 10,
   symbolCount: 100, historyCandles: 4320, volumeFactor: 0.01, baseNotional: 100,
   strategyEnabledRanges: RANGES.filter(r=>r!=="Low-Range"), strategyTpSteps: BALANCED_STEPS, strategySlRatios: BALANCED_RATIOS,
@@ -78,6 +78,8 @@ const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1/6,1,5,15,30],
 }
 export const FACTOR_FIELDS = [
+  { key:"microMinSlDistancePct", label:"Micro / Low-Range minimum SL (% of entry)",min:0,max:10,step:.01 },
+  { key:"microMinTrailDistancePct", label:"Micro / Low-Range minimum trailing gap (% of entry)",min:0,max:10,step:.01 },
   { key:"microTrailRatio", label:"Micro / Low-Range trail width factor",min:.05,max:10,step:.05 },
   { key: "normalVolumeRatio", label: "Normal budget ratio", min: 0.001, max: 100, step: 0.001 },
   { key: "axisVolumeRatio", label: "Axis budget ratio", min: 0.001, max: 100, step: 0.001 },

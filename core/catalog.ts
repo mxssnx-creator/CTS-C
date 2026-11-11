@@ -50,6 +50,8 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   if (cost <= 0) throw new Error("Cost-step strategy requires a positive round-trip cost")
   const factor=(key:string,fallback=1)=>{const value=Number(settings[key]??fallback);if(!Number.isFinite(value)||value<.05||value>10)throw new Error(`Invalid ${key}`);return value}
   const tpFactor=factor('strategyTpFactor'),slFactor=factor('strategySlFactor'),trailRatio=factor('strategyTrailRatio'),microTrailRatio=factor('microTrailRatio',.5),holdFactor=factor('holdTimeFactor')
+  const microDistance=(key:string,fallback:number)=>{const value=Number(settings[key]??fallback);if(!Number.isFinite(value)||value<0||value>10)throw new Error(`Invalid ${key}`);return value}
+  const microMinSl=microDistance('microMinSlDistancePct',.1)/100,microMinTrail=microDistance('microMinTrailDistancePct',.05)
   const selectedSources=values(settings,'strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES]).map(String)
   const sourceKinds=new Map<string,string>(PORTED_CATALOG.map(s=>[s.id,s.kind]))
   if(selectedSources.some(id=>!sourceKinds.has(id)))throw new Error('Unknown Tactic / Inverse source')
@@ -69,8 +71,9 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
      for(const period of technical?periods:[type==='RSI_Band'?14:20])for(const timeframe of timeframes){
       if(type==='Inverse'&&![1,5,15].includes(timeframe))continue
       const takeprofit = cost / 100 * step*tpFactor
-      const stoploss = takeprofit * ratio*slFactor
-      const trailDistancePct=stoploss*100*trailRatio*((range==="Micro"||range==="Low-Range")?microTrailRatio:1)
+      const micro=range==="Micro"||range==="Low-Range"
+      const stoploss = Math.max(takeprofit * ratio*slFactor,micro?microMinSl:0)
+      const trailDistancePct=Math.max(stoploss*100*trailRatio*(micro?microTrailRatio:1),micro?microMinTrail:0)
       if(takeprofit>=1||stoploss>=1||trailDistancePct>=100)throw new Error('TP, SL and trailing distances must be below 100%')
       const lookback = period
       const maxHoldMinutes = (range==="Low-Range"?15:holdMinutes[STRATEGY_RANGES.indexOf(range)])*holdFactor
