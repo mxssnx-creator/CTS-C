@@ -2,6 +2,14 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {closedHistory,planHistory,validateHistory} from '../core/history'
 
+test('three-day warmup uses capped venue pages and validates every completed minute',async()=>{
+ const start=1700000040000,cutoff=start+4320*60000,source=Array.from({length:4320},(_,i)=>({time:start+i*60000,open:100,high:101,low:99,close:100,volume:1}))
+ let reads=0
+ const plan=planHistory(4320,null,cutoff),result=await closedHistory({async candles(_s,_tf,limit,end){reads++;assert.ok(limit<=1000);return source.filter(b=>b.time<=end!).slice(-Math.min(1000,limit)).reverse()}},'BTC-USDT',4320,cutoff)
+ validateHistory('BTC-USDT',result,plan);assert.equal(reads,5);assert.equal(result.length,4320);assert.equal(result[0].timestamp,start+60000);assert.equal(result.at(-1)!.timestamp,cutoff)
+ assert.throws(()=>planHistory(4321,null,cutoff));assert.throws(()=>validateHistory('BTC-USDT',result.slice(1),plan))
+})
+
 test('initial history requires its full requested span while incremental recovery needs only the unseen gap',()=>{
  const cutoff=1700000640000,rows=Array.from({length:50},(_,i)=>({timestamp:cutoff-(49-i)*60000,open:100,high:100,low:100,close:100,volume:1}))
  assert.throws(()=>validateHistory('BTC-USDT',rows,{cursor:null,count:100,cutoff}),/50\/100/)

@@ -1,4 +1,4 @@
-import { portedStates, StreamMath,entryOnsets } from "../shared/cts-indications/index.ts"
+import { portedStates, StreamMath } from "../shared/cts-indications/index.ts"
 import type { Candle, PseudoPosition, SignalState } from "./types"
 import { calculatePriceMovePct, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { observedExit } from "./exits"
@@ -6,6 +6,8 @@ import { INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import {technicalSignal} from './technical-signals'
 
 const sourceStreams=new WeakMap<SignalState,{first:number;stream:StreamMath}>()
+export const PORTED_HISTORY_LIMIT=4320
+export type SourceContext={symbol:string;peers?:readonly {symbol:string;bars:readonly Candle[]}[]}
 
 export interface ReplayStrategyConfig {
   type: string
@@ -97,9 +99,9 @@ export function createSignalEvaluator(type: string, step: number): (price: numbe
   return (price,bar) => advanceSignal(state, price, type, step,bar)
 }
 
-/** Only complete, contiguous, UTC-aligned one-minute source bars form a higher-timeframe signal. */
-export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'|'indicationSourceId'>):Direction|undefined{
-  const minutes=config.signalTimeframeMinutes??1
+/** Engine timestamps denote closes; only complete, contiguous UTC source candles form a higher bar. */
+function configuredClosedBar(state:SignalState,bar:Candle,minutes:number):Candle|undefined{
+  if(![1/6,1,5,15,30].includes(minutes))throw new Error('Unsupported signal timeframe')
   if(minutes<1){
     if(state.lastSourceTimestamp!==undefined&&bar.timestamp-state.lastSourceTimestamp!==10000){
       for(const key of Object.keys(state))delete (state as unknown as Record<string,unknown>)[key]
@@ -107,17 +109,7 @@ export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick
     }
     state.lastSourceTimestamp=bar.timestamp
   }
-  const evaluate=(closed:Candle):Direction|undefined=>{
-    if(!config.indicationSourceId)return advanceSignal(state,closed.close,config.type,config.position_cost_step,closed)
-    const rows=state.portedBars??=[]
-    if(rows.at(-1)&&closed.timestamp-minutes*60000<=rows.at(-1)!.timestamp)return
-    rows.push({...closed,timestamp:closed.timestamp-minutes*60000});if(rows.length>4320)rows.splice(0,rows.length-4320)
-    let cached=sourceStreams.get(state);if(!cached||cached.first!==rows[0].timestamp){cached={first:rows[0].timestamp,stream:new StreamMath()};sourceStreams.set(state,cached)}
-    const output=portedStates('ASSET-USDT',minutes,rows,[config.indicationSourceId],[],cached.stream)
-    const direction=entryOnsets(output.states[config.indicationSourceId]).at(-1)??0
-    return direction>0?'long':direction<0?'short':undefined
-  }
-  if(minutes<=1)return evaluate(bar)
+  if(minutes<=1)return bar
   const span=minutes*60000,bucket=Math.floor((bar.timestamp-1)/span)*span
   if(!state.frame||state.frame.bucket!==bucket)state.frame={bucket,candle:{...bar},count:1,lastTimestamp:bar.timestamp,complete:bar.timestamp===bucket+60000}
   else{
@@ -127,7 +119,56 @@ export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick
   }
   const f=state.frame
   if(bar.timestamp!==bucket+span||!f.complete||f.count!==minutes)return
-  return evaluate(f.candle)
+  return f.candle
+}
+
+/** One bounded OHLCV buffer and one shared math cache per symbol/timeframe, independent output per source. */
+export function advancePortedSources(state:SignalState,bar:Candle,minutes:number,ids:readonly string[],context:SourceContext={symbol:'ASSET-USDT'}):Map<string,Direction|undefined>{
+  const result=new Map<string,Direction|undefined>(),closed=configuredClosedBar(state,bar,minutes)
+  if(!closed)return result
+  const openTimestamp=closed.timestamp-minutes*60000,rows=state.portedBars??=[]
+  if(rows.at(-1)&&openTimestamp<=rows.at(-1)!.timestamp)return result
+  rows.push({...closed,timestamp:openTimestamp})
+  // Rebase in blocks. Shifting one row per tick would invalidate every incremental indicator cache.
+  if(rows.length>PORTED_HISTORY_LIMIT)rows.splice(0,Math.floor(PORTED_HISTORY_LIMIT/2))
+  const peers=(context.peers??[]).filter(p=>p.symbol!==context.symbol).map(p=>({symbol:p.symbol,bars:p.bars.filter(b=>b.timestamp<=openTimestamp)}))
+  // Reference columns can become available asynchronously. Rebuild their math from this causal prefix.
+  let cached=sourceStreams.get(state)
+  if(!cached||cached.first!==rows[0].timestamp){cached={first:rows[0].timestamp,stream:new StreamMath()};sourceStreams.set(state,cached)}
+  for(const usesReferences of [false,true]){
+    const selected=ids.filter(id=>/pair-|market-/.test(id)===usesReferences)
+    if(!selected.length)continue
+    const output=portedStates(context.symbol,minutes,rows,selected,usesReferences?peers:[],usesReferences?undefined:cached.stream)
+    for(const id of selected){const series=output.states[id],v=series.at(-1)??0,previous=series.at(-2)??0;result.set(id,v!==previous?(v>0?'long':v<0?'short':undefined):undefined)}
+  }
+  return result
+}
+/** Causal historical vectors, segmented at exactly the same bounded-history rebase boundaries as ticks.
+ * Reference-dependent sources keep the observation-by-observation path. */
+export function historicalPortedSignals(state:SignalState,bars:readonly Candle[],minutes:number,ids:readonly string[],symbol:string):Map<number,Map<string,Direction|undefined>>{
+  if(ids.some(id=>/pair-|market-/.test(id)))throw new Error('Reference-dependent sources require observed-prefix evaluation')
+  const result=new Map<number,Map<string,Direction|undefined>>(),rows=state.portedBars??=[],pending:{timestamp:number;index:number}[]=[]
+  const flush=()=>{
+    if(!pending.length)return
+    const output=portedStates(symbol,minutes,rows,ids)
+    for(const p of pending){const values=new Map<string,Direction|undefined>();for(const id of ids){const series=output.states[id],v=series[p.index],previous=series[p.index-1]??0;values.set(id,p.index>0&&v!==previous?(v>0?'long':v<0?'short':undefined):undefined)}result.set(p.timestamp,values)}
+    pending.length=0
+  }
+  for(const bar of bars){
+    const closed=configuredClosedBar(state,bar,minutes);if(!closed)continue
+    const timestamp=closed.timestamp-minutes*60000
+    if(rows.at(-1)&&timestamp<=rows.at(-1)!.timestamp)continue
+    if(rows.length>=PORTED_HISTORY_LIMIT){flush();rows.splice(0,Math.floor(PORTED_HISTORY_LIMIT/2))}
+    rows.push({...closed,timestamp});pending.push({timestamp:bar.timestamp,index:rows.length-1})
+  }
+  flush();sourceStreams.delete(state)
+  return result
+}
+export function advanceConfiguredSignal(state:SignalState,bar:Candle,config:Pick<ReplayStrategyConfig,'type'|'position_cost_step'|'signalTimeframeMinutes'|'indicationSourceId'>,context?:SourceContext):Direction|undefined{
+  const minutes=config.signalTimeframeMinutes??1
+  if(config.indicationSourceId)return advancePortedSources(state,bar,minutes,[config.indicationSourceId],context).get(config.indicationSourceId)
+  const closed=configuredClosedBar(state,bar,minutes)
+  if(closed)return advanceSignal(state,closed.close,config.type,config.position_cost_step,closed)
 }
 
 function observedBar(row:any,price:number,time:number):Candle{
@@ -206,7 +247,7 @@ export function replayStrategy(
   for(const row of prehistory){
     const price=Number(row?.close??row?.price), time=timestampMs(row?.timestamp??row?.time)
     if(!Number.isFinite(price)||price<=0||!Number.isFinite(time)||time<=0||time<=previousTime)throw new Error("Invalid replay prehistory")
-    previousTime=time;if(!signalTrace)advanceConfiguredSignal(signalState,observedBar(row,price,time),config)
+    previousTime=time;if(!signalTrace)advanceConfiguredSignal(signalState,observedBar(row,price,time),config,{symbol})
   }
   const positions = new Map<Direction,{position:ReplayPosition;entryTime:number;peak:number;trailingActive?:boolean;trailingStopPrice?:number}>()
   const closed: ReplayPosition[] = []
@@ -220,7 +261,7 @@ export function replayStrategy(
     }
     previousTime = time
     const candle=observedBar(row,price,time)
-    const signal = signalTrace?signalTrace[index]:advanceConfiguredSignal(signalState,candle,config)
+    const signal = signalTrace?signalTrace[index]:advanceConfiguredSignal(signalState,candle,config,{symbol})
     if(signal!==undefined&&signal!=='long'&&signal!=='short')throw new Error('Invalid precomputed signal')
 
     const justClosed=new Set<Direction>()

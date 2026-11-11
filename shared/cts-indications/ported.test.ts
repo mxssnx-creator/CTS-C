@@ -4,7 +4,7 @@ import {createHash} from "node:crypto";
 import {readFileSync} from "node:fs";
 import {portedStates,PORTED_INDICATIONS,portedBars,StreamMath} from "./index.ts";
 import {SeriesCache} from "./origin/indications/cache.ts";
-import {dcaTacticConfigs,dcaTacticId,dcaTacticState} from "./origin/indications/dca-tactic.ts";
+import {dcaTacticConfigs,dcaTacticId,dcaTacticState,DCA_TACTIC_GRID} from "./origin/indications/dca-tactic.ts";
 import {aggregateClosedBars,alignedSourceStates} from "./aligned.ts";
 import {waveBars,declineBars} from "./fixtures.ts";
 
@@ -24,7 +24,7 @@ test('decline levels and recovery ratios are independent, mirrored before entry,
   assert.equal(dcaTacticState(new SeriesCache(portedBars('SOL-USDT',1,declineBars())),{...c,level:1}).at(-1),0);
  }
  assert.equal(PORTED_INDICATIONS.filter(s=>s.kind==='tactic'&&!s.id.startsWith('tactic-dca-')).length,10);
- assert.throws(()=>dcaTacticConfigs({lookbacks:[8],bases:['atr'],spacings:[0],levels:[1],recoveries:[.5],methods:['bounce']}));
+ assert.throws(()=>dcaTacticConfigs({...DCA_TACTIC_GRID,spacings:[0]}));
 });
 test('source calculations are causal and append-stream states equal the full oracle',()=>{
  const rows=waveBars(240),ids=[...dcaTacticConfigs().map(dcaTacticId),'inverse-known-ema-9-21','inverse-zscore-20'];
@@ -35,6 +35,10 @@ test('source calculations are causal and append-stream states equal the full ora
  }
  const known=portedStates('SOL-USDT',1,Array.from({length:120},(_,i)=>({timestamp:rows[0].timestamp+i*60000,open:100+i,high:100.5+i,low:99.5+i,close:100+i,volume:10})),['inverse-known-ema-9-21']);
  assert.equal(known.states['inverse-known-ema-9-21'].at(-1),-1,'rising EMA is inverted before entry, never a return sign flip');
+});
+test('all self-contained imported sources preserve every prefix with shared streaming math',()=>{
+ const rows=waveBars(720),ids=PORTED_INDICATIONS.filter(s=>!/pair-|market-/.test(s.id)).map(s=>s.id),full=portedStates('SOL-USDT',1,rows,ids),stream=new StreamMath()
+ for(const n of [80,160,240,480,720]){const prefix=portedStates('SOL-USDT',1,rows.slice(0,n),ids,[],stream);for(const id of ids)assert.deepEqual(prefix.states[id],full.states[id].slice(0,n),id+' at '+n)}
 });
 test('gaps reset warmup; incomplete higher candles, missing references, and unsupported lanes never invent signals',()=>{
  const rows=waveBars(240),ids=['inverse-known-ema-9-21','inverse-pair-btc-spread-20'];

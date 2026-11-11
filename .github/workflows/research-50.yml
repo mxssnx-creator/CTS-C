@@ -1,0 +1,87 @@
+name: Frozen 50-symbol stage evidence
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ctsc-research-50-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 24, cache: npm}
+      - run: npm ci --no-audit --no-fund
+      - name: Verify and extract frozen public candles
+        run: |
+          echo '195fbcbeb2cc2edc78d1c3b306a06560c413fe5620725a259f9c77c446d101b1  research-data/ctsc-50-20261111.zip' | sha256sum -c
+          python3 - <<'PY'
+          import zipfile,pathlib,json
+          with zipfile.ZipFile('research-data/ctsc-50-20261111.zip') as z:
+              if any(pathlib.PurePosixPath(n).is_absolute() or '..' in pathlib.PurePosixPath(n).parts for n in z.namelist()): raise ValueError('Unsafe archive')
+              z.extractall('market')
+          pathlib.Path('fees.json').write_text(json.dumps({'connection':'bingx-x02','ordersSubmitted':0,'fees':{'makerFeePct':0.02,'takerFeePct':0.05},'source':'Commission pair verified read-only locally; no credentials supplied to CI.'}))
+          PY
+      - name: Replay every assigned symbol and indication
+        run: node --import tsx scripts/simulation-50.ts --data market --output result --symbols 50 --warmup 4320 --hours 24 --workers 2 --shards 10 --shard-index ${{ matrix.shard }} --fee-evidence fees.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ctsc-50-shard-${{ matrix.shard }}
+          path: result
+          compression-level: 0
+          retention-days: 7
+  report:
+    needs: replay
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 24, cache: npm}
+      - run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with: {pattern: ctsc-50-shard-*, path: result, merge-multiple: true}
+      - run: |
+          python3 - <<'PY'
+          import zipfile,pathlib,json
+          with zipfile.ZipFile('research-data/ctsc-50-20261111.zip') as z:z.extractall('market')
+          pathlib.Path('fees.json').write_text(json.dumps({'connection':'bingx-x02','ordersSubmitted':0,'fees':{'makerFeePct':0.02,'takerFeePct':0.05},'source':'Commission pair verified read-only locally; no credentials supplied to CI.'}))
+          PY
+          node --import tsx scripts/simulation-50.ts --data market --output result --symbols 50 --warmup 4320 --hours 24 --workers 2 --assemble-only --fee-evidence fees.json
+          python3 scripts/audit-simulation.py --root result --output result/audit.json
+          python3 scripts/render-simulation-report.py --input result/summary.json --output result/CTS-C-50-symbol-results-20261111.html --commit "$GITHUB_SHA"
+          gzip -k result/summary.json
+      - run: npx playwright-core install --with-deps chromium
+      - run: node scripts/report-smoke.mjs result/CTS-C-50-symbol-results-20261111.html result/summary.json
+        env:
+          CTS_UI_OUTPUT: result/ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ctsc-50-complete-evidence
+          path: result
+          compression-level: 0
+          retention-days: 30
+      - name: Publish small public research summary
+        run: |
+          mkdir -p publish
+          cp result/summary.json.gz result/audit.json result/CTS-C-50-symbol-results-20261111.html publish/
+          cp market/manifest.json publish/market-manifest.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch --orphan agent/ctsc-50-results-${GITHUB_RUN_ID}
+          git rm -rf --ignore-unmatch .
+          git add publish
+          git commit -m 'Record complete frozen 50-symbol replay and independent ledger audit'
+          git push origin HEAD:refs/heads/agent/ctsc-50-results-${GITHUB_RUN_ID}

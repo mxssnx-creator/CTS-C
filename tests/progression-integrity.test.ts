@@ -14,9 +14,9 @@ test("research and engine produce identical independent long/short exits for all
     const catalog={strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:[mode],strategyIndicationTypes:[type]}
     const configs=generateStrategyCatalog("parity",catalog)
     const engine=new TradingEngine({connectionId:"parity",symbols:["BTC-USDT"],catalog,coordinations,stageLastN:{base:1000,main:1000,real:1000},maxSamples:1000})
-    engine.processCandles("BTC-USDT",bars)
+    const events=engine.processCandles("BTC-USDT",bars)
     for(const config of configs){
-    const actual=engine.snapshot().trades.filter(t=>t.stage==="base"&&t.configId===config.id).map(t=>({entry:t.openedAt,exit:t.closedAt,direction:t.direction,result:t.netReturnPct,reason:t.reason})).sort((a,b)=>a.exit-b.exit||a.direction.localeCompare(b.direction))
+    const actual=events.filter(e=>e.stage==='base'&&e.trade?.configId===config.id).map(e=>e.trade!).map(t=>({entry:t.openedAt,exit:t.closedAt,direction:t.direction,result:t.netReturnPct,reason:t.reason})).sort((a,b)=>a.exit-b.exit||a.direction.localeCompare(b.direction))
     const expected=replayStrategy("BTC-USDT",bars,config,5000).filter(p=>p.status==="closed").map(p=>({entry:Date.parse(p.entry_time),exit:Date.parse(p.exit_time!),direction:p.direction,result:p.result!,reason:(p as any).exit_reason})).sort((a,b)=>a.exit-b.exit||a.direction!.localeCompare(b.direction!))
     assert.equal(actual.length,expected.length,`${type}/${mode} close count`)
     for(let i=0;i<actual.length;i++){assert.deepEqual({...actual[i],result:0},{...expected[i],result:0});assert.ok(Math.abs(actual[i].result-expected[i].result)<1e-10)}

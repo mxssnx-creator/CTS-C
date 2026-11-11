@@ -9,7 +9,7 @@
     "dev": "node scripts/dev-server.mjs",
     "build": "next build",
     "start": "node scripts/start-server.mjs",
-    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test": "node --import tsx --test --test-concurrency=2 tests/*.test.ts shared/cts-indications/*.test.ts shared/cts-volume/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check:x02": "node --import tsx scripts/x02-preflight.ts",
     "test:runtime": "node scripts/runtime-smoke.mjs",

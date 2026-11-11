@@ -14,7 +14,7 @@ import {flatEngineSettings,validateConfiguration} from './settings-schema'
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
 interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null}
-const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:1440,lastTick:null,lastError:null,feeReadFailures:[],feeCheckedAt:null }
+const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:4320,lastTick:null,lastError:null,feeReadFailures:[],feeCheckedAt:null }
 function retainEvents(target:EngineEvent[],source:readonly EngineEvent[],limit=5000){
   if(source.length>=limit)target.length=0
   for(let i=Math.max(0,source.length-limit);i<source.length;i++)target.push(source[i])
@@ -34,6 +34,7 @@ export class TerminalRuntime {
   private leased=false
   private leaseRenewedAt=0
   private leaseLost=false
+  private hydratedCheckpointToken:string|null=null
   private heartbeat?:ReturnType<typeof setInterval>
   private checkpointAt=0
   private bufferedEvents:EngineEvent[]=[]
@@ -58,6 +59,7 @@ export class TerminalRuntime {
     this.client=this.createClient(connectionId)
     this.executor=new DemoExecutor(this.store,this.client,{connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:intent=>this.validateLiveIntent(intent)})
     const restored = this.store.loadEngineState()
+    this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
     this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId})
     if(this.engine.settings.connectionId!==connectionId)throw new Error('Engine checkpoint belongs to another connection')
     this.control = { ...DEFAULT_CONTROL, ...this.store.get<Control>('control'), warmed: [] }
@@ -72,13 +74,25 @@ export class TerminalRuntime {
       if(renew?this.store.renewLease(this.owner):this.store.ownsLease(this.owner)){if(renew)this.leaseRenewedAt=now;return}
       this.leaseLost=true;this.control.running=false;clearTimeout(this.timer);throw new Error('Another runtime owns execution or this runtime lease expired')
     }
-    if(!this.store.acquireLease(this.owner))throw new Error('Another CTS-C process owns this data directory')
+    let acquired=false
+    for(let attempt=0;attempt<3;attempt++){
+      if(!this.store.acquireLease(this.owner))throw new Error('Another CTS-C process owns this data directory')
+      if(this.hydratedCheckpointToken===this.store.checkpointToken()){
+        if(!this.store.renewLease(this.owner)){this.leaseLost=true;throw new Error('Runtime ownership expired during checkpoint verification')}
+        acquired=true;break
+      }
+      this.store.releaseLease(this.owner)
+      // Hydration can take longer than a lease on a large journal. Do it unowned, then
+      // verify the exact checkpoint generation after reacquiring before any mutation.
+      const restored=this.store.loadEngineState()
+      if(restored){if(restored.settings.connectionId!==this.connectionId)throw new Error('Engine checkpoint belongs to another connection');this.engine=TradingEngine.fromOwnedCheckpoint(restored)}
+      this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
+    }
+    if(!acquired)throw new Error('Checkpoint changed repeatedly before execution ownership')
     this.leased=true
     this.leaseRenewedAt=Date.now()
     this.heartbeat=setInterval(()=>{try{this.ensureLease()}catch(error){this.control.lastError=error instanceof Error?error.message:'Ownership lost';clearInterval(this.heartbeat)}},5000)
     this.heartbeat.unref?.()
-    const restored=this.store.loadEngineState()
-    if(restored)this.engine=TradingEngine.fromOwnedCheckpoint(restored)
     this.control={...this.control,...this.store.get<Control>('control'),warmed:[]}
   }
   async quiesce(){
@@ -326,9 +340,10 @@ export class TerminalRuntime {
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
     for(const [key,value] of Object.entries(input)) {
       if(key==='stageGateMode'){next.stageGateMode=value as EngineSettings['stageGateMode'];continue}
+      if(key==='liveEntryMode'){next.liveEntryMode=value as EngineSettings['liveEntryMode'];continue}
       if(catalogKeys.includes(key)){next.catalog[key]=value;continue}
       if(gateMap[key]){const[group,stage]=gateMap[key];next[group][stage]=Number(value);continue}
-      if(key==='historyCandles'){if(!Number.isInteger(value)||Number(value)<100||Number(value)>1440)throw new Error('History candles must be 100..1440');continue}
+      if(key==='historyCandles'){if(!Number.isInteger(value)||Number(value)<100||Number(value)>4320)throw new Error('History candles must be 100..4320');continue}
       if(key==='symbolCount'){if(!Number.isInteger(value)||Number(value)<1||Number(value)>500)throw new Error('Symbol count must be1..500');continue}
       const ratios:Record<string,'normal'|'axis'|'block'|'dca'>={normalVolumeRatio:'normal',axisVolumeRatio:'axis',blockVolumeFactor:'block',dcaVolumeRatio:'dca'}
       if(ratios[key]){next.volumeRatios! [ratios[key]]=Number(value);continue}

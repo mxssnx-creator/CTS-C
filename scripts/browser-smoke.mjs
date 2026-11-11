@@ -34,11 +34,20 @@ try{
  assert.ok(await page.getByRole('heading',{name:'Paper equity by close sequence'}).isVisible())
  await page.getByRole('button',{name:'Strategy lab',exact:true}).click()
  const main=page.getByLabel('Main completed samples',{exact:true})
- const weight=page.getByRole('slider',{name:'Indication type · Inverse volume ratio',exact:true});await weight.focus();await weight.press('Home');for(let i=0;i<19;i++)await weight.press('ArrowRight');
- const rangeWeight=page.getByRole('slider',{name:'Range · Micro volume ratio',exact:true});await rangeWeight.focus();await rangeWeight.press('Home');for(let i=0;i<14;i++)await rangeWeight.press('ArrowRight');
+ await page.getByRole('button',{name:'Prepare Tactic + Inverse',exact:true}).click()
+ await page.getByLabel('Tactic and Inverse source configurations',{exact:true}).selectOption(['tactic-dca-bounce-8-percent-0.5-1-0.25','inverse-known-ema-9-21'])
+ await page.getByLabel('Micro normal processing',{exact:true}).uncheck()
+ await page.getByLabel('Micro trailing processing',{exact:true}).uncheck()
+ await page.getByLabel('Live entries',{exact:true}).selectOption('real-mirror')
+ const overall=page.getByLabel('Overall volume ratio',{exact:true});await overall.focus();await overall.press('ArrowRight')
+ const weight=page.getByRole('slider',{name:'Indication type · Inverse volume ratio',exact:true});await weight.focus();await weight.press('Home');for(let i=0;i<19;i++)await weight.press('ArrowRight')
+ const rangeWeight=page.getByRole('slider',{name:'Range · Micro volume ratio',exact:true});await rangeWeight.focus();await rangeWeight.press('Home');for(let i=0;i<14;i++)await rangeWeight.press('ArrowRight')
  await main.fill('7');await page.getByLabel('Axis budget ratio',{exact:true}).fill('1.5');await page.getByLabel('TP distance factor',{exact:true}).fill('1.2');await page.getByRole('button',{name:'Save configuration',exact:true}).click()
  await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
- const saved=(await (await page.request.get(origin+'/api/terminal')).json()).settings;assert.equal(saved.mainEvalPosCount,'7');assert.equal(saved.axisVolumeRatio,'1.5');assert.equal(saved.strategyTpFactor,'1.2');const relative=JSON.parse(saved.relationalVolumeRatios);assert.equal(relative.indicationTypes.inverse,2);assert.equal(relative.ranges.micro,1.5);await page.getByRole('heading',{name:'Coordination versus Normal'}).waitFor()
+ const saved=(await (await page.request.get(origin+'/api/terminal')).json()).settings;assert.equal(saved.mainEvalPosCount,'7');assert.equal(saved.axisVolumeRatio,'1.5');assert.equal(saved.strategyTpFactor,'1.2');await page.getByRole('heading',{name:'Coordination versus Normal'}).waitFor()
+ assert.equal(saved.liveEntryMode,'real-mirror');assert.deepEqual(new Set(JSON.parse(saved.strategyIndicationSources)),new Set(['tactic-dca-bounce-8-percent-0.5-1-0.25','inverse-known-ema-9-21']));assert.deepEqual(JSON.parse(saved.strategyProcessingByRange),{Micro:{normal:false,trailing:false}});assert.equal(JSON.parse(saved.relationalVolumeRatios).overall,1.1)
+ assert.equal(JSON.parse(saved.relationalVolumeRatios).indicationTypes.inverse,2);assert.equal(JSON.parse(saved.relationalVolumeRatios).ranges.micro,1.5)
+ if(process.env.CTS_UI_OUTPUT){await mkdir(process.env.CTS_UI_OUTPUT,{recursive:true});await page.screenshot({path:join(process.env.CTS_UI_OUTPUT,'strategy-settings.png'),fullPage:true})}
  await main.fill('9');await page.waitForTimeout(5500);assert.equal(await main.inputValue(),'9')
  await page.getByRole('button',{name:'Discard unsaved strategy changes'}).click();assert.equal(await main.inputValue(),'7')
  await page.getByLabel('Import strategy configuration JSON').setInputFiles({name:'invalid.json',mimeType:'application/json',buffer:Buffer.from('{"apiSecret":"forbidden"}')})

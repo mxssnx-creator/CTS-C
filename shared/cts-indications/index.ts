@@ -11,7 +11,7 @@ export const PORTED_BY_ID=new Map(PORTED_INDICATIONS.map(s=>[s.id,s]));
 export const DEFAULT_TACTIC_SOURCES=["tactic-dca-bounce-8-percent-0.5-1-0.25","tactic-dca-trend-20-atr-1-2-0.5","tactic-dca-vwap-40-atr-1-3-0.5","tactic-dca-sweep-20-percent-0.5-2-0.25"];
 export const DEFAULT_INVERSE_SOURCES=["inverse-known-ema-9-21","inverse-turn-ema-9-21","inverse-zscore-20","inverse-impulse-20","inverse-failed-break-20","inverse-rsi2-turn-20"];
 export function portedBars(symbol:string,tfMin:number,rows:readonly PortedBar[]):Bars{
- if(![1,5,15,30].includes(tfMin))throw new Error("Unsupported indication timeframe");
+ if(![1/6,1,5,15,30].includes(tfMin))throw new Error("Unsupported indication timeframe");
  let prev=-Infinity;
  for(const r of rows){if(![r.timestamp,r.open,r.high,r.low,r.close,r.volume].every(Number.isFinite)||r.timestamp<=prev||r.timestamp<=0||r.low<=0||r.high<Math.max(r.open,r.close)||r.low>Math.min(r.open,r.close)||r.volume<0)throw new Error("Invalid closed-bar indication data");prev=r.timestamp;}
  const col=(k:keyof PortedBar)=>Float64Array.from(rows,r=>r[k]);
@@ -28,12 +28,12 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
  for(const id of new Set(ids)){
    if(!PORTED_BY_ID.has(id))throw new Error(`Unknown Tactic/Inverse source ${id}`);
    const pair=/^inverse-pair-(btc|eth)-/.exec(id);
-   available[id]=tfMin===30&&id.startsWith("inverse-")?false:pair?symbol!==pair[1].toUpperCase()+"-USDT"&&unique.has(pair[1].toUpperCase()+"-USDT")
+   available[id]=![1,5,15].includes(tfMin)&&id.startsWith("inverse-")?false:pair?symbol!==pair[1].toUpperCase()+"-USDT"&&unique.has(pair[1].toUpperCase()+"-USDT")
      :id.includes("market-")?marketBars.length>1:true;
    states[id]=available[id]?indicationState(id,k)??new Int8Array(b.n):new Int8Array(b.n);
  }
  return {states,available};
 }
 
-/** CTS-A-O Follow admission events: invert in the source, then emit once at each nonzero direction onset. */
+/** Emit a direction once at its onset; inversion is already calculated in the source. */
 export function entryOnsets(states:Int8Array):Int8Array{const out=new Int8Array(states.length);for(let i=1;i<states.length;i++)if(states[i]!==0&&states[i]!==states[i-1])out[i]=states[i];return out;}

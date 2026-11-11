@@ -15,6 +15,7 @@ export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
   stageGateMode: "continuous-ancestors",
+  liveEntryMode: "independent",
   baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
   variantBlockEnabled: true, variantDcaEnabled: true, axisPrevEnabled: true,
@@ -25,7 +26,7 @@ export const DEFAULTS: Record<string, unknown> = {
   normalVolumeRatio: 1, axisVolumeRatio: 1, blockVolumeFactor: 1, dcaVolumeRatio: 1, maxOrderNotional: 0,
   microTrailRatio: .5, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
   blockVolumeRatio: 0.2, makerFeePct: 0.02, takerFeePct: 0.05, slippagePctOfFees: 10,
-  symbolCount: 100, historyCandles: 1440, volumeFactor: 0.01, baseNotional: 100,
+  symbolCount: 100, historyCandles: 4320, volumeFactor: 0.01, baseNotional: 100,
   strategyEnabledRanges: RANGES.filter(r=>r!=="Low-Range"), strategyTpSteps: BALANCED_STEPS, strategySlRatios: BALANCED_RATIOS,
   strategyExitModes: MODES, strategyIndicationTypes: [...CORE_INDICATIONS],
   strategyIndicationSources:[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES],
@@ -60,11 +61,11 @@ export const COORDINATION_FIELDS = [
   { key: "dcaDistancePct", label: "DCA adverse distance (%)", min: 0.001, max: 100, step: 0.001 },
   { key: "dcaMultiplier", label: "DCA addition multiplier", min: 0.01, max: 10, step: 0.01 },
 ]
-const ENUM_FIELDS: Record<string, readonly string[]> = { blockBehavior:["pyramid","rounds"], stageGateMode:['continuous-ancestors','processed-sets'],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
+const ENUM_FIELDS: Record<string, readonly string[]> = { blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets'],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
-  { key: "historyCandles", label: "Warm-up candles per symbol", min: 100, max: 1440, step: 1 },
+  { key: "historyCandles", label: "Warm-up candles per symbol", min: 100, max: 4320, step: 1 },
   { key: "baseNotional", label: "Base notional (USDT)", min: 0.000001, max: 1_000_000_000, step: 0.000001 },
   { key: "volumeFactor", label: "Volume factor", min: 0.000001, max: 100, step: 0.000001 },
 ]
@@ -87,6 +88,7 @@ export const FACTOR_FIELDS = [
 ]
 export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
 
+const sourceKinds=new Map(PORTED_CATALOG.map(s=>[s.id,s.kind]))
 export function configurationCount(values: Record<string, unknown>) {
   const ranges = values.strategyEnabledRanges as string[]
   const types=values.strategyIndicationTypes as string[],technical=types.filter(t=>(TECHNICAL_INDICATIONS as readonly string[]).includes(t)).length
@@ -99,7 +101,7 @@ export function configurationCount(values: Record<string, unknown>) {
   }
   const portedTypes=types.filter(t=>t==='Tactic'||t==='Inverse')
   const sourceIds=values.strategyIndicationSources as string[]
-  const extra=portedTypes.reduce((n,t)=>n+sourceIds.filter(id=>PORTED_CATALOG.some(s=>s.id===id&&s.kind===t.toLowerCase())).length*(values.strategySignalTimeframes as number[]).filter(tf=>t!=='Inverse'||tf!==30).length,0)
+  const extra=portedTypes.reduce((n,t)=>n+sourceIds.filter(id=>sourceKinds.get(id)===t.toLowerCase()).length*(values.strategySignalTimeframes as number[]).filter(tf=>t!=='Inverse'||[1,5,15].includes(tf)).length,0)
   return cells * ((types.length-technical-portedTypes.length)*(values.strategySignalTimeframes as number[]).length+extra+technical*(values.strategySignalPeriods as number[]).length*(values.strategySignalTimeframes as number[]).length)
 }
 
@@ -140,13 +142,13 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
   }
   if (!partial) {
     if (output.axisPrevEnabled && Number(output.axisPrevious) + Number(output.axisLast) > 250) throw new Error("Axis previous and recent windows must total 250 samples or fewer.")
-    if (configurationCount(output) === 0) throw new Error("Choose at least one TP step within your selected ranges.")
+    if (configurationCount(output) === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
   }
   return output
 }
 
 export function hydrate(settings: Record<string, string>): Record<string, unknown> {
-  const result: Record<string, unknown> = { ...DEFAULTS }
+  const result: Record<string, unknown> = structuredClone(DEFAULTS)
   for (const [key, fallback] of Object.entries(DEFAULTS)) {
     if (settings[key] === undefined) continue
     if (key === "relationalVolumeRatios") {
@@ -166,7 +168,7 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
 export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;historyCandles:number}):Record<string,unknown>{
   const values:Record<string,unknown>={...structuredClone(DEFAULTS)}
   for(const [key,value] of Object.entries(s.catalog))if(Object.hasOwn(DEFAULTS,key))values[key]=value
-  return {...values,stageGateMode:s.stageGateMode??'continuous-ancestors',symbolCount:control.symbolCount,historyCandles:control.historyCandles,volumeFactor:s.volumeFactor,baseNotional:s.baseNotional,maxOrderNotional:s.maxOrderNotional??0,
+  return {...values,stageGateMode:s.stageGateMode??'continuous-ancestors',liveEntryMode:s.liveEntryMode??'independent',symbolCount:control.symbolCount,historyCandles:control.historyCandles,volumeFactor:s.volumeFactor,baseNotional:s.baseNotional,maxOrderNotional:s.maxOrderNotional??0,
     normalVolumeRatio:s.volumeRatios?.normal??1,axisVolumeRatio:s.volumeRatios?.axis??1,blockVolumeFactor:s.volumeRatios?.block??1,dcaVolumeRatio:s.volumeRatios?.dca??1,
     prevPosWindow:s.stageLastN.base,mainEvalPosCount:s.stageLastN.main,realEvalPosCount:s.stageLastN.real,
     baseProfitFactor:s.stageMinPF.base,mainProfitFactor:s.stageMinPF.main,realProfitFactor:s.stageMinPF.real,

@@ -1,6 +1,6 @@
-import {relationalVolumeSettings} from "../shared/cts-volume/ratios.ts";
 import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from "../shared/cts-indications/catalog.ts"
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
+import { relationalVolumeSettings } from "../shared/cts-volume/ratios"
 import type { StrategyConfig } from "./types"
 import { createHash } from "node:crypto"
 import { resolveTradingCostPct } from "./metrics"
@@ -67,7 +67,7 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
      if (exitMode !== "fixed" && !strategyProcessing(settings, {range}).trailing) continue
      const technical=(TECHNICAL_INDICATIONS as readonly string[]).includes(type),ported=!!indicationSourceId
      for(const period of technical?periods:[type==='RSI_Band'?14:20])for(const timeframe of timeframes){
-      if(type==='Inverse'&&timeframe===30)continue
+      if(type==='Inverse'&&![1,5,15].includes(timeframe))continue
       const takeprofit = cost / 100 * step*tpFactor
       const stoploss = takeprofit * ratio*slFactor
       const trailDistancePct=stoploss*100*trailRatio*((range==="Micro"||range==="Low-Range")?microTrailRatio:1)

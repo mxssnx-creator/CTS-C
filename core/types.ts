@@ -20,6 +20,7 @@ export interface PseudoPosition {
   direction?: Direction; indication_type?: string
 }
 export interface EngineSettings {
+  liveEntryMode?:'independent'|'real-mirror'
   stageGateMode?:'continuous-ancestors'|'processed-sets'
   connectionId: string; symbols: string[]; initialEquity: number; baseNotional: number; volumeFactor: number
   volumeRatios?:Record<Coordination,number>
@@ -106,7 +107,7 @@ export interface EngineState {
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]
 }
 export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; pfState: ProfitFactorState; netPnl: number; wins:number; fees:number|null; longOpen:number; shortOpen:number; currentLanes:number; currentEnoughSamples:number; currentQualified:number; admissionReady:number; blockedByParent:number; currentProfitFactor:number; currentPfState:ProfitFactorState
-  validatedWindow?:{samples:number;sets:number;profitFactor:number;pfState:ProfitFactorState}
+  validatedWindow?:{samples:number;sets:number;profitFactor:number;pfState:ProfitFactorState;profit?:number;loss?:number}
   admittedForward?:{closes:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;unprovenCloses:number}
 }
 export interface EngineSnapshot {
@@ -115,5 +116,5 @@ export interface EngineSnapshot {
   positions: (PaperPosition & { laneId: string; symbol: string; configId: string; stage: Stage; coordination: Coordination })[]
   trades: ClosedTrade[]; intents: ExecutionIntent[]; equityHistory: EngineState["equityHistory"]
   liveTrades: ClosedTrade[]
-  lanes: { id: string; symbol: string; configId: string; stage: Stage; direction: Direction; coordination: Coordination; count: number; required: number; enoughSamples: boolean; profitFactor: number; pfState: ProfitFactorState; qualified: boolean; netPnl: number }[]
+  lanes: { id: string; symbol: string; configId: string; stage: Stage; direction: Direction; coordination: Coordination; count: number; required: number; enoughSamples: boolean; profitFactor: number; pfState: ProfitFactorState; qualified: boolean; netPnl: number;profit?:number;loss?:number;current?:boolean;admissionReady?:boolean;validated?:boolean;isOpen?:boolean }[]
 }

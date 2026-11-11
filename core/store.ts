@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite"
+import {createHash} from 'node:crypto'
 import { mkdirSync, chmodSync } from "node:fs"
 import path from "node:path"
 import type {EngineState,StrategyConfig} from "./types"
@@ -7,6 +8,7 @@ export interface Intent { id: string; status: "reserved" | "accepted" | "rejecte
 export interface RuntimeLease { owner: string; expiresAt: number; fence: number }
 export class StateStore {
   readonly database: DatabaseSync
+  private loadedToken:string|null=null
   constructor(readonly filename: string) {
     if (filename !== ":memory:") { mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 }); chmodSync(path.dirname(filename), 0o700) }
     this.database = new DatabaseSync(filename)
@@ -37,17 +39,28 @@ export class StateStore {
     return row?.prefix.startsWith('{"checkpointFormat":"lane-rows-v1"')??false
   }
   loadEngineState():EngineState|null{
-    const row=this.database.prepare("SELECT data FROM records WHERE key='engine'").get() as {data:string}|undefined
-    if(!row)return null
+    const ownTransaction=!this.database.isTransaction
+    if(ownTransaction)this.database.exec('BEGIN')
+    try{
+    const row=this.engineRecord()
+    if(!row){this.loadedToken=null;if(ownTransaction)this.database.exec('COMMIT');return null}
     const decoded=JSON.parse(row.data),state:EngineState=decoded.checkpointFormat==='lane-rows-v1'?{...decoded.state,lanes:{}}:decoded
     if(decoded.checkpointFormat==='lane-rows-v1')for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){const lane=JSON.parse(item.data);if(lane.id!==item.id)throw new Error('Checkpoint lane identity mismatch');state.lanes[item.id]=lane}
     const configs=new Map<string,StrategyConfig>()
-    for(const lane of Object.values(state.lanes??{})){
+    for(const id in state.lanes??{}){const lane=state.lanes[id]
       const identity=JSON.stringify(lane.config),shared=configs.get(identity)
       if(shared)lane.config=shared;else configs.set(identity,lane.config)
     }
+    this.loadedToken=this.recordToken(row)
+    if(ownTransaction)this.database.exec('COMMIT')
     return state
+    }catch(error){if(ownTransaction)this.database.exec('ROLLBACK');throw error}
   }
+  private engineRecord(){return this.database.prepare("SELECT data,(SELECT data FROM records WHERE key='engine-revision') AS revision FROM records WHERE key='engine'").get() as {data:string;revision:string|null}|undefined}
+  private recordToken(row:{data:string;revision:string|null}){return (row.revision??'legacy')+':'+createHash('sha256').update(row.data).digest('hex')}
+  checkpointToken():string|null{const row=this.engineRecord();return row?this.recordToken(row):null}
+  loadedCheckpointToken():string|null{return this.loadedToken}
+  private advanceEngineRevision(){this.database.prepare("INSERT INTO records VALUES('engine-revision','1',?) ON CONFLICT(key) DO UPDATE SET data=CAST(CAST(data AS INTEGER)+1 AS TEXT),updated=excluded.updated").run(Date.now())}
   /** Migration rows stay invisible until the final metadata transaction. No full-state rewrite. */
   migrateLaneCheckpoint(metadata:string,lanes:Iterable<{id:string;data:string}>,events:unknown[],settings:unknown,guard:()=>void):void{
     if(this.hasLaneCheckpoint())throw new Error('Checkpoint is already migrated')
@@ -64,6 +77,7 @@ export class StateStore {
       const insert=this.database.prepare('INSERT INTO engine_lanes VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data')
       let count=0;for(const lane of lanes){insert.run(lane.id,lane.data);if(++count%500===0)guard()}
       this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run('{"checkpointFormat":"lane-rows-v1","state":'+metadata+'}',Date.now())
+      this.advanceEngineRevision()
       this.set('engine-settings',settings)
       const eventInsert=this.database.prepare('INSERT INTO events(data,created) VALUES(?,?)');for(const event of events)eventInsert.run(JSON.stringify(event),Date.now())
       this.database.exec('DELETE FROM events WHERE id < (SELECT COALESCE(MAX(id),0)-5000 FROM events)')
@@ -80,6 +94,7 @@ export class StateStore {
     this.database.exec("BEGIN IMMEDIATE")
     try {
       this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run(serialized, Date.now())
+      this.advanceEngineRevision()
       if(settings!==undefined)this.set('engine-settings',settings)
       const insert = this.database.prepare("INSERT INTO events(data,created) VALUES(?,?)")
       for (const event of events) insert.run(JSON.stringify(event), Date.now())
