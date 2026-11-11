@@ -10,6 +10,7 @@ export interface StrategyConfig {
   type: string; position_cost_step: number; takeprofit: number; stoploss: number; trailing: boolean
   range?: StrategyRange; tpStep?: number; slRatio?: number; exitMode?: ExitMode
   roundTripCostPct?: number; maxHoldMinutes?: number; trailDistancePct?:number
+  indicationSourceId?:string
   signalTimeframeMinutes?:number
 }
 export interface PseudoPosition {
@@ -57,6 +58,8 @@ export interface ClosedTrade {
   parentPositionId?:string
 }
 export interface LaneState {
+  /** Internal Normal reference, never funded or counted as active Live execution. */
+  calculationOnly?: boolean;
   id: string; symbol: string; configId: string; direction: Direction; stage: Stage; coordination: Coordination
   config: StrategyConfig; samples: number[]; closedCount: number; wins: number; netPnl: number; grossProfit: number; grossLoss: number
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
@@ -65,6 +68,7 @@ export interface LaneState {
   parentProof?:GateProof[]
 }
 export interface SignalState {
+  portedBars?: Candle[];
   count: number; prices: number[]; gains: number[]; losses: number[]; previousPrice?: number
   emaFast: number; emaSlow: number; emaSignal: number; avgGain: number; avgLoss: number
   previousSmaDiff?: number; previousHistogram?: number; previousRsi?: number; bandExcursion?: "below" | "above"

@@ -1,0 +1,10 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {TradingEngine,DEFAULT_ENGINE_SETTINGS} from '../core/engine.ts';import {DEFAULTS,validateConfiguration,hydrate} from '../core/settings-schema.ts';import {DEFAULT_RELATIONAL_VOLUME} from '../shared/cts-volume/ratios.ts';
+const bars=Array.from({length:240},(_,i)=>{const p=100+8*Math.sin(i/5);return {timestamp:1700000040000+i*60000,open:p,high:p,low:p,close:p,volume:100};});
+test('weights survive settings save/reload and affect cash sizing once while unit returns and other ranges stay equal',()=>{
+ const policy={...DEFAULT_RELATIONAL_VOLUME,indicationTypes:{ma_cross:2},ranges:{micro:1.5}};
+ const all={...DEFAULTS,relationalVolumeRatios:policy};assert.deepEqual(validateConfiguration(all),all);assert.deepEqual(hydrate(Object.fromEntries(Object.entries(all).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)]))),all);
+ const settings={...DEFAULT_ENGINE_SETTINGS,symbols:['BTC-USDT'],stageLastN:{base:2,main:2,real:2},stageMinPF:{base:0,main:0,real:0},catalog:{strategyTpSteps:[3,10],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['MA_Cross']}};
+ const a=new TradingEngine(settings),b=new TradingEngine({...settings,catalog:{...settings.catalog,relationalVolumeRatios:policy}});a.processCandles('BTC-USDT',bars);b.processCandles('BTC-USDT',bars);
+ const la=Object.values(a.exportState().lanes),lb=Object.values(b.exportState().lanes);assert.equal(la.length,lb.length);
+ let compared=0;for(const lane of la){const other=lb.find(x=>x.id===lane.id)!;assert.ok(other);assert.equal(other.closedCount,lane.closedCount);assert.equal(other.samples.length,lane.samples.length);for(let i=0;i<lane.samples.length;i++)assert.ok(Math.abs(other.samples[i]-lane.samples[i])<1e-9);const factor=lane.config.range==='Micro'?3:2;if(lane.closedCount>0){assert.ok(Math.abs(other.costTotal!-lane.costTotal!*factor)<1e-9);compared++;}if(lane.open){assert.ok(Math.abs(other.open!.notional/lane.open.notional-factor)<1e-9);compared++;}}assert.ok(compared>0);
+});

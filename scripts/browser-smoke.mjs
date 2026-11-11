@@ -34,9 +34,11 @@ try{
  assert.ok(await page.getByRole('heading',{name:'Paper equity by close sequence'}).isVisible())
  await page.getByRole('button',{name:'Strategy lab',exact:true}).click()
  const main=page.getByLabel('Main completed samples',{exact:true})
+ const weight=page.getByRole('slider',{name:'Indication type · Inverse volume ratio',exact:true});await weight.focus();await weight.press('Home');for(let i=0;i<19;i++)await weight.press('ArrowRight');
+ const rangeWeight=page.getByRole('slider',{name:'Range · Micro volume ratio',exact:true});await rangeWeight.focus();await rangeWeight.press('Home');for(let i=0;i<14;i++)await rangeWeight.press('ArrowRight');
  await main.fill('7');await page.getByLabel('Axis budget ratio',{exact:true}).fill('1.5');await page.getByLabel('TP distance factor',{exact:true}).fill('1.2');await page.getByRole('button',{name:'Save configuration',exact:true}).click()
  await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
- const saved=(await (await page.request.get(origin+'/api/terminal')).json()).settings;assert.equal(saved.mainEvalPosCount,'7');assert.equal(saved.axisVolumeRatio,'1.5');assert.equal(saved.strategyTpFactor,'1.2');await page.getByRole('heading',{name:'Coordination versus Normal'}).waitFor()
+ const saved=(await (await page.request.get(origin+'/api/terminal')).json()).settings;assert.equal(saved.mainEvalPosCount,'7');assert.equal(saved.axisVolumeRatio,'1.5');assert.equal(saved.strategyTpFactor,'1.2');const relative=JSON.parse(saved.relationalVolumeRatios);assert.equal(relative.indicationTypes.inverse,2);assert.equal(relative.ranges.micro,1.5);await page.getByRole('heading',{name:'Coordination versus Normal'}).waitFor()
  await main.fill('9');await page.waitForTimeout(5500);assert.equal(await main.inputValue(),'9')
  await page.getByRole('button',{name:'Discard unsaved strategy changes'}).click();assert.equal(await main.inputValue(),'7')
  await page.getByLabel('Import strategy configuration JSON').setInputFiles({name:'invalid.json',mimeType:'application/json',buffer:Buffer.from('{"apiSecret":"forbidden"}')})
@@ -64,7 +66,7 @@ try{
  await page.reload();await page.getByRole('heading',{name:'Stage diagnostics'}).waitFor()
  await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByLabel('Workspace password').waitFor()
  assert.deepEqual(errors,[])
- console.log(JSON.stringify({browserPassed:true,views:6,settingsSave:true,connectionIsolation:true,factorsRoundTrip:true,unsavedDraft:true,importExport:true,replayUiApiData:true,mobileWidth:390,errors,syntheticFixture:true,exchangeWrites:0}))
+ console.log(JSON.stringify({browserPassed:true,views:6,settingsSave:true,connectionIsolation:true,factorsRoundTrip:true,relationalVolumeSliders:true,unsavedDraft:true,importExport:true,replayUiApiData:true,mobileWidth:390,errors,syntheticFixture:true,exchangeWrites:0}))
 }finally{
  await browser?.close()
  if(child&&child.exitCode===null){const exit=once(child,'exit');child.kill('SIGTERM');await exit}

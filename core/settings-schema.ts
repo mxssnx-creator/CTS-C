@@ -1,3 +1,6 @@
+import {relationalVolumeSettings,DEFAULT_RELATIONAL_VOLUME} from "../shared/cts-volume/ratios.ts";
+import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from "../shared/cts-indications/catalog.ts"
+import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
 import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import type { EngineSettings } from "./types"
 
@@ -10,6 +13,7 @@ export const BALANCED_RATIOS = [0.6, 1, 1.4]
 export const MODES = ["fixed", "trailing", "trailing-only"]
 export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
+  relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
   stageGateMode: "continuous-ancestors",
   baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
@@ -22,6 +26,7 @@ export const DEFAULTS: Record<string, unknown> = {
   symbolCount: 100, historyCandles: 1440, volumeFactor: 0.01, baseNotional: 100,
   strategyEnabledRanges: RANGES, strategyTpSteps: BALANCED_STEPS, strategySlRatios: BALANCED_RATIOS,
   strategyExitModes: MODES, strategyIndicationTypes: [...CORE_INDICATIONS],
+  strategyIndicationSources:[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES],
   strategySignalPeriods:[20],strategySignalTimeframes:[1],
 }
 export const NUMERIC_FIELDS = [
@@ -57,6 +62,7 @@ export const EXECUTION_FIELDS = [
 const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
   strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
+  strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),
   strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1,5,15,30],
 }
 export const FACTOR_FIELDS = [
@@ -75,7 +81,15 @@ export function configurationCount(values: Record<string, unknown>) {
   const ranges = values.strategyEnabledRanges as string[]
   const steps = (values.strategyTpSteps as number[]).filter(step => ranges.includes(RANGES[RANGE_BOUNDS.findIndex(bound => step <= bound)]))
   const types=values.strategyIndicationTypes as string[],technical=types.filter(t=>(TECHNICAL_INDICATIONS as readonly string[]).includes(t)).length
-  return steps.length * (values.strategySlRatios as number[]).length * (values.strategyExitModes as string[]).length * (types.length-technical+technical*(values.strategySignalPeriods as number[]).length*(values.strategySignalTimeframes as number[]).length)
+  const cells = steps.reduce((sum, step) => {
+    const range = RANGES[RANGE_BOUNDS.findIndex(bound => step <= bound)] as import("./types").StrategyRange
+    const modes = (values.strategyExitModes as string[]).filter(mode => mode === "fixed" || strategyProcessing(values, {range}).trailing)
+    return sum + modes.length
+  }, 0)
+  const portedTypes=types.filter(t=>t==='Tactic'||t==='Inverse')
+  const sourceIds=values.strategyIndicationSources as string[]
+  const extra=portedTypes.reduce((n,t)=>n+sourceIds.filter(id=>PORTED_CATALOG.some(s=>s.id===id&&s.kind===t.toLowerCase())).length*(values.strategySignalTimeframes as number[]).filter(tf=>t!=='Inverse'||tf!==30).length,0)
+  return cells * (values.strategySlRatios as number[]).length * (types.length-technical-portedTypes.length+extra+technical*(values.strategySignalPeriods as number[]).length*(values.strategySignalTimeframes as number[]).length)
 }
 
 export function validateConfiguration(input: unknown, { partial = false, formNumbers = false } = {}): Record<string, unknown> {
@@ -94,7 +108,11 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     const arrayOptions = ARRAY_FIELDS[key]
     const enumOptions = ENUM_FIELDS[key]
     const field = ALL_NUMERIC_FIELDS.find(item => item.key === key)
-    if (arrayOptions) {
+    if (key === "relationalVolumeRatios") {
+      output[key]=relationalVolumeSettings(value,true)
+    } else if (key === "strategyProcessingByRange") {
+      output[key] = validateProcessingByRange(value)
+    } else if (arrayOptions) {
       if (!Array.isArray(value) || !value.length || value.some(item => !arrayOptions.includes(item)) || new Set(value).size !== value.length) throw new Error(`Choose valid, unique values for ${key}.`)
       output[key] = [...value]
     } else if (enumOptions) {
@@ -120,7 +138,11 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
   const result: Record<string, unknown> = { ...DEFAULTS }
   for (const [key, fallback] of Object.entries(DEFAULTS)) {
     if (settings[key] === undefined) continue
-    if (Array.isArray(fallback)) {
+    if (key === "relationalVolumeRatios") {
+      try{result[key]=relationalVolumeSettings(JSON.parse(settings[key]),true)}catch{}
+    } else if (key === "strategyProcessingByRange") {
+      try { result[key] = validateProcessingByRange(JSON.parse(settings[key])) } catch { /* Preserve defaults on invalid legacy data. */ }
+    } else if (Array.isArray(fallback)) {
       try { const parsed: unknown = JSON.parse(settings[key]); if (Array.isArray(parsed) && parsed.length) result[key] = parsed } catch { /* Keep a visible default for an invalid saved value. */ }
     } else if (typeof fallback === "boolean") result[key] = settings[key] === "true" || settings[key] === "1"
     else if (typeof fallback === "string") { if (ENUM_FIELDS[key]?.includes(settings[key])) result[key] = settings[key] }
