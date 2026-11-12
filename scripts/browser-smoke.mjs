@@ -28,9 +28,11 @@ try{
  browser=await chromium.launch({executablePath,headless:true,args:['--no-sandbox']})
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[]
  page.on('pageerror',error=>errors.push(error.message))
+ page.on('console',message=>{if(/Encountered two children with the same key|unique ["']key["'] prop/.test(message.text()))errors.push(message.text())})
  await page.goto(origin)
  await page.getByLabel('Workspace password').fill(password);await page.getByRole('button',{name:'Open workspace'}).click()
  await page.getByRole('heading',{name:'Stage diagnostics'}).waitFor()
+ assert.equal(await page.getByLabel('Public market quotes',{exact:true}).count(),1,'one market tape after initial render')
  assert.ok(await page.getByRole('heading',{name:'Paper equity by close sequence'}).isVisible())
  await page.getByRole('button',{name:'Strategy lab',exact:true}).click()
  const main=page.getByLabel('Main completed samples',{exact:true})
@@ -97,6 +99,7 @@ try{
  await page.getByRole('button',{name:'Integrations',exact:true}).click();await page.getByLabel('Search integrations').fill('unmatched');await page.getByText('No integration matches this search.').waitFor()
  await page.getByRole('button',{name:'Command center',exact:true}).click()
  await page.getByRole('heading',{name:'Execution comparison',exact:true}).waitFor()
+ assert.equal(await page.getByLabel('Public market quotes',{exact:true}).count(),1,'view, settings and connection changes must retain exactly one market tape')
  if(process.env.CTS_UI_OUTPUT){await mkdir(process.env.CTS_UI_OUTPUT,{recursive:true});await page.screenshot({path:join(process.env.CTS_UI_OUTPUT,'desktop.png'),fullPage:true})}
  await page.setViewportSize({width:390,height:844})
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'mobile page must not overflow horizontally')
