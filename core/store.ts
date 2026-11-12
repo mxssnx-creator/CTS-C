@@ -66,16 +66,22 @@ export class StateStore {
     if(this.hasLaneCheckpoint())throw new Error('Checkpoint is already migrated')
     guard();this.database.exec('DELETE FROM engine_lanes')
     const insert=this.database.prepare('INSERT INTO engine_lanes VALUES(?,?)')
-    let batch:{id:string;data:string}[]=[]
-    const flush=()=>{if(!batch.length)return;guard();this.database.exec('BEGIN IMMEDIATE');try{for(const row of batch)insert.run(row.id,row.data);guard();this.database.exec('COMMIT')}catch(error){this.database.exec('ROLLBACK');throw error}batch=[]}
-    for(const lane of lanes){batch.push(lane);if(batch.length>=500)flush()}
+    let batch:{id:string;data:string}[]=[],guardedAt=Date.now()
+    const timelyGuard=()=>{if(Date.now()-guardedAt>=500){guard();guardedAt=Date.now()}}
+    const flush=()=>{if(!batch.length)return;guard();this.database.exec('BEGIN IMMEDIATE');try{for(const row of batch){timelyGuard();insert.run(row.id,row.data)}guard();this.database.exec('COMMIT')}catch(error){this.database.exec('ROLLBACK');throw error}batch=[]}
+    for(const lane of lanes){timelyGuard();batch.push(lane);if(batch.length>=500)flush()}
     flush();this.saveLaneCheckpoint(metadata,[],events,settings,guard)
   }
   saveLaneCheckpoint(metadata:string,lanes:Iterable<{id:string;data:string}>,events:unknown[],settings:unknown,guard:()=>void):void{
     guard();this.database.exec('BEGIN IMMEDIATE')
     try{
       const insert=this.database.prepare('INSERT INTO engine_lanes VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data')
-      let count=0;for(const lane of lanes){insert.run(lane.id,lane.data);if(++count%500===0)guard()}
+      let count=0,guardedAt=Date.now();for(const lane of lanes){
+        // Serialization and large retained lane rows can take longer than a lease before 500 rows exist.
+        // Check elapsed work as well as count; an expired/stolen owner still fails before the row is written.
+        if(Date.now()-guardedAt>=500){guard();guardedAt=Date.now()}
+        insert.run(lane.id,lane.data);if(++count%500===0){guard();guardedAt=Date.now()}
+      }
       this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run('{"checkpointFormat":"lane-rows-v1","state":'+metadata+'}',Date.now())
       this.advanceEngineRevision()
       this.set('engine-settings',settings)

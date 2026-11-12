@@ -58,3 +58,31 @@ test("owner restart requires a new lease generation and engine JSON persists fai
     assert.throws(() => store.acquireLease("owner", 0, 10))
   } finally { store.close() }
 })
+
+for(const mode of ['migrate','incremental']as const)test(`${mode} checkpoint renews ownership by elapsed serialization work before a row-count batch fills`,t=>{
+ const store=new StateStore(':memory:');let now=10_000;t.mock.method(Date,'now',()=>now);
+ try{
+  assert.ok(store.acquireLease('writer',30_000,now));
+  const guard=()=>{if(!store.renewLease('writer',30_000,now))throw new Error('writer expired')};
+  if(mode==='incremental')store.migrateLaneCheckpoint('{"version":1}',[],[],{},guard);
+  function* rows(){for(let i=0;i<12;i++){now+=20_000;yield{id:'row-'+i,data:JSON.stringify({id:'row-'+i})}}}
+  if(mode==='migrate')store.migrateLaneCheckpoint('{"version":1}',rows(),[],{},guard);
+  else store.saveLaneCheckpoint('{"version":1}',rows(),[],{},guard);
+  assert.equal(store.ownsLease('writer',now),true);
+  assert.equal(Object.keys(store.loadEngineState()!.lanes).length,12);
+ }finally{store.close()}
+});
+
+test('a single checkpoint step beyond the actual lease deadline cannot resurrect its old writer',t=>{
+ const store=new StateStore(':memory:');let now=10_000;t.mock.method(Date,'now',()=>now);
+ try{
+  store.acquireLease('writer',30_000,now);
+  const guard=()=>{if(!store.renewLease('writer',30_000,now))throw new Error('writer expired')};
+  store.migrateLaneCheckpoint('{"version":1}',[{id:'original',data:'{"id":"original"}'}],[],{},guard);
+  function* stalled(){now+=31_000;yield{id:'unowned',data:'{"id":"unowned"}'}}
+  assert.throws(()=>store.saveLaneCheckpoint('{"version":1}',stalled(),[],{},guard),/writer expired/);
+  assert.deepEqual(Object.keys(store.loadEngineState()!.lanes),['original']);
+  assert.ok(store.acquireLease('replacement',30_000,now));
+  assert.equal(store.renewLease('writer',30_000,now),false);
+ }finally{store.close()}
+});

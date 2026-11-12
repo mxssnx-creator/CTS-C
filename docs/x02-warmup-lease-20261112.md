@@ -1,0 +1,7 @@
+# Observed warmup ownership and explicit study universe
+
+A large real-candle warmup could spend the entire writer lease serializing or inserting fewer than 500 large checkpoint rows. Renew the still-valid owner at elapsed 500 ms boundaries as well as the existing row-count boundaries. A genuinely expired or replaced owner still fails; its transaction rolls back and it cannot renew after expiry. Candle preparation yields between individual observed bars.
+
+`TerminalRuntime.start({symbols})` validates an explicit unique venue universe and retains it through initialization. Missing contracts or quotes fail rather than silently substituting the default majors. Ordinary application startup without this option retains automatic selection. The bounded x02 runner accepts `--symbols-file` and independent `--normal on|off` / `--trailing on|off` settings, so additional-family tests can run with Ordinary disabled on exactly the recorded cohort.
+
+Validation includes elapsed-time renewal below the 500-row boundary, migration and incremental checkpoint paths, rollback after a single overlong operation, replacement-owner acquisition, and exact startup-symbol retention / invalid-universe rejection. These offline checks establish lifecycle behaviour, not live profitability. The original aborted twelve-symbol report remains a failed run with no owned lots; a resumed test must retain separate observations and an actual cleanup result.

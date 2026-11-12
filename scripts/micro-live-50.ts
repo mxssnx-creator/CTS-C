@@ -8,6 +8,7 @@ import {DemoExecutor} from '../core/executor'
 import type {ExecutionIntent} from '../core/types'
 
 const arg=(name:string,fallback:string)=>{const i=process.argv.indexOf(name);return i<0?fallback:process.argv[i+1]}
+const enabled=(name:string)=>{const value=arg(name,'on');if(value!=='on'&&value!=='off')throw Error(`${name} must be on or off`);return value==='on'}
 async function main(){
  if(!process.argv.includes('--execute'))throw Error('Pass --execute for the authorized VST run')
  const directory=resolve(arg('--output','.data/micro-live-50')),duration=Number(arg('--seconds','600')),symbolCount=Number(arg('--symbols','50'))
@@ -15,7 +16,10 @@ async function main(){
  await mkdir(directory,{recursive:true,mode:0o700})
  const store=new StateStore(join(directory,'runtime.sqlite')),venue=new BingxVstClient(),runtime=new TerminalRuntime('bingx-x02',store)
  const initial={positions:await venue.positions(),orders:await venue.openOrders()}
- runtime.saveFlatSettings({symbolCount,historyCandles:1440,baseNotional:Number(arg('--base-notional','100')),volumeFactor:Number(arg('--volume-factor','.01')),maxOrderNotional:Number(arg('--max-order-notional','10')),stageGateMode:'processed-sets',microMinSlDistancePct:Number(arg('--micro-min-sl-pct','.1')),microMinTrailDistancePct:Number(arg('--micro-min-trail-pct','.05')),strategyEnabledRanges:arg('--ranges','Micro,Low-Range').split(','),strategyTpSteps:[2,3,4,5,6,8,9,12],strategySlRatios:Array.from({length:15},(_,i)=>(i+2)/10),strategyExitModes:['fixed','trailing','trailing-only'],strategyIndicationTypes:arg('--indications','Trend').split(','),strategySignalTimeframes:[1/6,1],autoPfEnabled:true,autoPfRatio:.2,autoPfMax:2,microTradeStream:true,microTrailRatio:.5,axisPrevious:5,axisLast:2,axisOutcome:'positive',axisReferenceStage:'base',blockBehavior:'rounds',blockSize:3,blockSteps:3,blockVolumeRatio:.2,blockPauseRounds:1,blockMaxMultiplier:1.6,dcaDistancePct:Number(arg('--dca-distance-pct','.2')),dcaMultiplier:Number(arg('--dca-multiplier','.2'))})
+ runtime.saveFlatSettings({symbolCount,historyCandles:1440,baseNotional:Number(arg('--base-notional','100')),volumeFactor:Number(arg('--volume-factor','.01')),maxOrderNotional:Number(arg('--max-order-notional','10')),stageGateMode:'processed-sets',microMinSlDistancePct:Number(arg('--micro-min-sl-pct','.1')),microMinTrailDistancePct:Number(arg('--micro-min-trail-pct','.05')),strategyNormalEnabled:enabled('--normal'),strategyTrailingEnabled:enabled('--trailing'),strategyEnabledRanges:arg('--ranges','Micro,Low-Range').split(','),strategyTpSteps:[2,3,4,5,6,8,9,12],strategySlRatios:Array.from({length:15},(_,i)=>(i+2)/10),strategyExitModes:['fixed','trailing','trailing-only'],strategyIndicationTypes:arg('--indications','Trend').split(','),strategySignalTimeframes:[1/6,1],autoPfEnabled:true,autoPfRatio:.2,autoPfMax:2,microTradeStream:true,microTrailRatio:.5,axisPrevious:5,axisLast:2,axisOutcome:'positive',axisReferenceStage:'base',blockBehavior:'rounds',blockSize:3,blockSteps:3,blockVolumeRatio:.2,blockPauseRounds:1,blockMaxMultiplier:1.6,dcaDistancePct:Number(arg('--dca-distance-pct','.2')),dcaMultiplier:Number(arg('--dca-multiplier','.2'))})
+ let studySymbols:string[]|undefined
+ const symbolsFile=arg('--symbols-file','')
+ if(symbolsFile)studySymbols=JSON.parse(await readFile(symbolsFile,'utf8'))
  let runError:string|null=null,warmedAt:number|undefined,observationCompleted=false,stopRequested=false,observedSeconds=0
  try{
   const historyDirectory=arg('--history-directory','')
@@ -23,6 +27,7 @@ async function main(){
    if(runtime.engine.managedSymbols().some(symbol=>runtime.engine.lastProcessedAt(symbol)!==null))throw Error('Offline profile preparation requires a fresh directory; resume the saved runtime without --history-directory')
    const manifest=JSON.parse(await readFile(join(historyDirectory,'manifest.json'),'utf8'))
    if(manifest.symbols.length!==symbolCount||manifest.barSeconds!==60)throw Error('The exact requested observed one-minute study is required')
+   studySymbols=manifest.symbols
    runtime.engine.updateSettings({symbols:manifest.symbols,symbolFees:Object.fromEntries(manifest.symbols.map((symbol:string)=>[symbol,{makerFeePct:manifest.fee.maker*100,takerFeePct:manifest.fee.taker*100}]))})
    for(const [index,symbol] of manifest.symbols.entries()){
     const raw=JSON.parse(await readFile(join(historyDirectory,`${symbol}.json`),'utf8')).slice(-1440)
@@ -33,7 +38,7 @@ async function main(){
    // Each symbol is durably checkpointed. Startup still recovers every missing
    // native minute; cached observations never manufacture runtime freshness.
   }
-  await runtime.start()
+  await runtime.start({symbols:studySymbols})
   const began=Date.now()
   // Warmup and requested observation have separate deadlines. A full 30-minute observation
   // remains possible after native history collection; no short run is reported as complete.

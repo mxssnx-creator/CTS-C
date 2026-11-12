@@ -1,6 +1,6 @@
 import {BingxTradeStream,TradeBarBuilder} from './trade-stream'
 import { randomUUID } from 'node:crypto'
-import { TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings,validateObservedCandles } from './engine'
+import { normalizeSymbol, TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings,validateObservedCandles } from './engine'
 import { connectionClient, connectionCredentials, stableClientOrderId,type BingxClient } from './bingx'
 import {CONNECTIONS,connectionInfo,type ConnectionId} from './connections'
 import { planExecutionIntents } from './runtime-policy'
@@ -110,9 +110,9 @@ export class TerminalRuntime {
     validateObservedCandles(candles)
     const latest=Math.floor(Date.now()/60000)*60000
     if(candles.some((bar,i)=>bar.timestamp>latest||bar.timestamp%60000!==0||(i>0&&bar.timestamp-candles[i-1].timestamp!==60000)))throw new Error('Warmup requires complete contiguous one-minute observations')
-    for(let offset=0;offset<candles.length;offset+=8){
+    for(let offset=0;offset<candles.length;offset++){
       this.ensureLease()
-      this.engine.processCandles(symbol,candles.slice(offset,offset+8),{allowExecution:false,eventLimit:0})
+      this.engine.processCandles(symbol,candles.slice(offset,offset+1),{allowExecution:false,eventLimit:0})
       await new Promise<void>(resolve=>setImmediate(resolve))
     }
     this.persist()
@@ -131,18 +131,23 @@ export class TerminalRuntime {
     this.engine.checkpointSaved();this.store.set('control',this.control)
     this.bufferedEvents=[];this.checkpointAt=Date.now()
   }
-  async start() {
+  async start(options:{symbols?:string[]}={}) {
     this.ensureLease()
+    const requested=options.symbols?.map(normalizeSymbol)
+    if(requested&&(requested.length!==this.control.symbolCount||new Set(requested).size!==requested.length||requested.some(symbol=>!/^[A-Z0-9]{1,30}-USDT$/.test(symbol))))throw new Error('Explicit symbols must match the configured count and supported universe')
     if(!connectionCredentials(this.connectionId))throw new Error(`Dedicated ${connectionInfo(this.connectionId).name} credentials are unavailable on the server.`)
     this.quoteGeneration++;this.quoteResult=undefined;this.quoteError=null
     this.accountGeneration++;this.accountError=null;this.accountRetryAt=0
     this.client = this.createClient(this.connectionId)
     this.executor = new DemoExecutor(this.store,this.client,{connectionId:this.connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
     const [balance,contracts,quotes] = await Promise.all([this.client.balance(),this.client.contracts(),this.client.quotes()])
+    this.ensureLease()
     this.store.set('account',{...balance,updatedAt:Date.now(),source:connectionInfo(this.connectionId).environment})
     const available=new Set(quotes.filter(q=>q.price>0).map(q=>q.symbol))
     const priority=['BTC-USDT','ETH-USDT','SOL-USDT','XRP-USDT','BCH-USDT','DOGE-USDT']
-    const symbols=[...priority,...contracts.map(c=>c.symbol)].filter((s,i,a)=>a.indexOf(s)===i&&available.has(s)).slice(0,this.control.symbolCount)
+    const supported=new Set(contracts.map(c=>c.symbol))
+    if(requested?.some(symbol=>!supported.has(symbol)||!available.has(symbol)))throw new Error('Explicit symbols require current contract metadata and quotes for every symbol')
+    const symbols=requested??[...priority,...contracts.map(c=>c.symbol)].filter((s,i,a)=>a.indexOf(s)===i&&available.has(s)).slice(0,this.control.symbolCount)
     if(!symbols.length)throw new Error('No tradable contracts returned for this connection')
     this.ensureLease()
     const settings=this.engine.settings
