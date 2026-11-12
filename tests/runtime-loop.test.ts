@@ -380,3 +380,32 @@ test("stream execution dispatches a close before the next main tick and coalesce
     assert.equal(runtime.engine.pendingIntents().length,0)
   })
 })
+
+
+test('explicit observed-study symbols survive native startup and invalid scopes cannot select replacement symbols',async()=>{
+ await isolated(async runtime=>{
+  const priorKey=process.env.BINGX_X02_KEY,priorSecret=process.env.BINGX_X02_SECRET;
+  process.env.BINGX_X02_KEY='offline-fixture';process.env.BINGX_X02_SECRET='offline-fixture';
+  try {
+   const internal=runtime as any,chosen=['ZZZ-USDT','ALT-USDT'];let reads=0;
+   const symbols=['BTC-USDT','ETH-USDT',...chosen];
+   const client={balance:async()=>{reads++;return{equity:1000,available:1000}},contracts:async()=>symbols.map(symbol=>({symbol})),quotes:async()=>symbols.map(symbol=>({symbol,price:100,timestamp:Date.now()})),commission:async()=>({maker:.0002,taker:.0005})};
+   internal.createClient=()=>client;internal.client=client;
+   runtime.control.running=false;runtime.control.exchangeExecution=false;runtime.control.symbolCount=2;
+   runtime.engine.updateSettings({symbols:chosen,catalog:{...runtime.engine.settings.catalog,microTradeStream:false}});
+   const end=Math.floor(Date.now()/60000)*60000-60000;
+   await runtime.warmObservedHistory(chosen[0],[{timestamp:end,open:100,high:100,low:100,close:100,volume:1}]);
+   await runtime.start({symbols:chosen});
+   assert.deepEqual(runtime.engine.settings.symbols,chosen);
+   assert.equal(runtime.engine.lastProcessedAt(chosen[0]),end,'startup preserves the exact observed-history generation');
+   runtime.stop();reads=0;
+   await assert.rejects(runtime.start({symbols:[chosen[0],chosen[0]]}),/Explicit symbols/);
+   assert.equal(reads,0,'duplicate scopes fail before account or market reads');
+   await assert.rejects(runtime.start({symbols:['MISSING-USDT',chosen[0]]}),/metadata and quotes/);
+   assert.deepEqual(runtime.engine.settings.symbols,chosen);
+  }finally{
+   if(priorKey===undefined)delete process.env.BINGX_X02_KEY;else process.env.BINGX_X02_KEY=priorKey;
+   if(priorSecret===undefined)delete process.env.BINGX_X02_SECRET;else process.env.BINGX_X02_SECRET=priorSecret;
+  }
+ })
+})
