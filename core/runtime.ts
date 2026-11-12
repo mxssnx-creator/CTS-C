@@ -1,7 +1,7 @@
 import {BingxTradeStream,TradeBarBuilder} from './trade-stream'
 import { randomUUID } from 'node:crypto'
 import { normalizeSymbol, TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings,validateObservedCandles } from './engine'
-import { connectionClient, connectionCredentials, stableClientOrderId,type BingxClient } from './bingx'
+import { connectionClient, connectionCredentials,type BingxClient } from './bingx'
 import {CONNECTIONS,connectionInfo,type ConnectionId} from './connections'
 import { planExecutionIntents } from './runtime-policy'
 import { closedHistory, planHistory, validateHistory, type HistoryPlan } from './history'
@@ -61,6 +61,7 @@ export class TerminalRuntime {
     const restored = this.store.loadEngineState()
     this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
     this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId})
+    this.engine.observeLiveCloses(trade=>this.executor.recordSimulatedClose(this.connectionId,trade))
     if(this.engine.settings.connectionId!==connectionId)throw new Error('Engine checkpoint belongs to another connection')
     this.control = { ...DEFAULT_CONTROL, ...this.store.get<Control>('control'), warmed: [] }
   }
@@ -85,7 +86,7 @@ export class TerminalRuntime {
       // Hydration can take longer than a lease on a large journal. Do it unowned, then
       // verify the exact checkpoint generation after reacquiring before any mutation.
       const restored=this.store.loadEngineState()
-      if(restored){if(restored.settings.connectionId!==this.connectionId)throw new Error('Engine checkpoint belongs to another connection');this.engine=TradingEngine.fromOwnedCheckpoint(restored)}
+      if(restored){if(restored.settings.connectionId!==this.connectionId)throw new Error('Engine checkpoint belongs to another connection');this.engine=TradingEngine.fromOwnedCheckpoint(restored);this.engine.observeLiveCloses(trade=>this.executor.recordSimulatedClose(this.connectionId,trade))}
       this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
     }
     if(!acquired)throw new Error('Checkpoint changed repeatedly before execution ownership')
@@ -217,7 +218,7 @@ export class TerminalRuntime {
         const events:EngineEvent[]=[]
         const pending=this.engine.pendingIntents().filter(i=>this.control.exchangeExecution||i.kind==='close')
         if(!reconcile&&!pending.length)return
-        const submittedIntentIds=new Set(pending.filter(i=>this.store.intent(stableClientOrderId(i.connectionId,i.id))).map(i=>i.id))
+        const submittedIntentIds=new Set(pending.filter(i=>this.store.hasExecutionIntent(i.connectionId,i.id)).map(i=>i.id))
         const plan=planExecutionIntents(pending,{activePositionIds:this.engine.activePositionIds(),submittedIntentIds,now:Date.now(),limit:1})
         for(const rejection of plan.rejected){this.engine.markExecution(rejection.id,{status:'rejected',error:rejection.error});const intent=pending.find(i=>i.id===rejection.id)!;events.push({type:'execution',laneId:intent.laneId,stage:'live',timestamp:Date.now(),status:'rejected',reason:rejection.error})}
         if(plan.rejected.length)this.persist(events.splice(0))
@@ -351,7 +352,7 @@ export class TerminalRuntime {
     input=validateConfiguration(input,{partial:true})
     validateConfiguration({...flatEngineSettings(this.engine.settings,this.control),...input})
     const current=this.engine.settings, next=structuredClone(current)
-    const catalogKeys=['microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
+    const catalogKeys=['strategySignalsSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
     for(const [key,value] of Object.entries(input)) {
       if(key==='stageBlocks'){next.stageBlocks=structuredClone(value) as EngineSettings['stageBlocks'];continue}
@@ -396,7 +397,7 @@ export class TerminalRuntime {
     const stages=Object.fromEntries(s.stages.map(stage=>[stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:stage.currentEnoughSamples,samplesPercent:stage.currentLanes?100*stage.currentEnoughSamples/stage.currentLanes:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:stage.currentProfitFactor,windowPfState:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,validatedWindow:stage.validatedWindow,admittedForward:stage.admittedForward,required:s.settings.stageLastN[stage.stage==='live'?'real':stage.stage]}]))
     const settings=Object.fromEntries(Object.entries(flatEngineSettings(s.settings,this.control)).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)]))
     const positions=s.positions.filter(p=>p.stage==='live')
-    const trades=s.liveTrades, live=s.stages.find(stage=>stage.stage==='live')!
+    const trades=s.liveTrades, live=s.stages.find(stage=>stage.stage==='live')!,ownedLots=this.executor.lots()
     const warmedCount=this.control.warmed.filter(symbol=>s.settings.symbols.includes(symbol)).length
     const unrealized=(p:typeof positions[number])=>{const mark=this.marks.get(p.symbol);return mark&&Date.now()-mark.timestamp<=15_000?(mark.price-p.entryPrice)*p.quantity*(p.direction==='long'?1:-1):null}
     return {updatedAt:Date.now(),equity:account&&Date.now()-account.updatedAt<60_000?account.equity:null,paperEquity:s.equity,
@@ -409,7 +410,7 @@ export class TerminalRuntime {
       positionCount:live.open,positionDisplayLimit:1000,microMarketData:{...this.tradeStream?.status,barsRecorded:this.tradeBarsRecorded,duplicates:this.tradeBars.duplicates,lateTrades:this.tradeBars.late,gaps:this.tradeBars.gaps,barSeconds:10},metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
       coordinationStats:this.engine.coordinationStats(),
       engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory,symbolFees:s.settings.symbolFees??{},feeReadFailures:this.control.feeReadFailures,feeCheckedAt:this.control.feeCheckedAt,feeFallbackSymbols:s.settings.symbols.filter(symbol=>!s.settings.symbolFees?.[symbol])},
-      execution:{lots:this.executor.lots(),intents:this.store.intents(100),summary:this.executor.summary()},lastReplay:this.store.get('lastReplay')}
+      execution:{lots:ownedLots,intents:this.store.intents(100),summary:this.executor.summary(ownedLots),comparison:this.executor.comparison(ownedLots)},lastReplay:this.store.get('lastReplay')}
   }
 }
 const shared=globalThis as typeof globalThis&{__ctscRuntimes?:Map<ConnectionId,TerminalRuntime>}

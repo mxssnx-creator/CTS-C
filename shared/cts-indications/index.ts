@@ -4,6 +4,7 @@ import {INDICATIONS,indicationState} from "./origin/indications/registry.ts";
 import {SeriesCache} from "./origin/indications/cache.ts";
 import {MarketSource} from "./origin/indications/market.ts";
 import type {Bars} from "./origin/domain/types.ts";
+import {SIGNALS_BY_ID} from './signals-catalog.ts';
 
 export type PortedBar={timestamp:number;open:number;high:number;low:number;close:number;volume:number};
 export const PORTED_INDICATIONS=INDICATIONS.filter(s=>s.kind==="inverse"||s.kind==="tactic");
@@ -26,7 +27,7 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
  k.setMarket(new MarketSource(marketBars));
  const states:Record<string,Int8Array>={},available:Record<string,boolean>={};
  for(const id of new Set(ids)){
-   if(!PORTED_BY_ID.has(id))throw new Error(`Unknown Tactic/Inverse source ${id}`);
+   if(!PORTED_BY_ID.has(id)&&!SIGNALS_BY_ID.has(id))throw new Error(`Unknown indication source ${id}`);
    const pair=/^inverse-pair-(btc|eth)-/.exec(id);
    available[id]=![1,5,15].includes(tfMin)&&id.startsWith("inverse-")?false:pair?symbol!==pair[1].toUpperCase()+"-USDT"&&unique.has(pair[1].toUpperCase()+"-USDT")
      :id.includes("market-")?marketBars.length>1:true;

@@ -45,7 +45,7 @@ def audit(root):
                     close(gross-t['cost'],t['netPnl'],'net');close(100*t['netPnl']/t['notional'],t['netReturnPct'],'net-return')
                     if t['stage']!='base':
                         proofs=t.get('admission',[])
-                        if len(proofs)!=STAGES.index(t['stage']) or any(not p['qualified'] or p['count']!=p['required'] or p['profitFactor']<p['minPF'] for p in proofs):raise ValueError('Unqualified stage admission')
+                        if len(proofs)!=STAGES.index(t['stage']) or any(not p['qualified'] or p['count']!=p['required'] or p['profitFactor']<p['minPF'] or (p.get('maxDrawdownPct') is not None and (not isinstance(p.get('drawdownPct'),(int,float)) or not math.isfinite(p['drawdownPct']) or not 0<=p['drawdownPct']<=p['maxDrawdownPct'])) for p in proofs):raise ValueError('Unqualified stage admission')
                     # Events are ordered by bar then stage: retain only this close timestamp's Real parents.
                     if last_at!=t['closedAt']:parents={};last_at=t['closedAt']
                     if t['stage']=='real':parents[t['id']]=t

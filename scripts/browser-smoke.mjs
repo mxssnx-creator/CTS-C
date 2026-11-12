@@ -58,6 +58,8 @@ try{
  await page.getByText('Training / holdout',{exact:true}).waitFor({timeout:30000})
  assert.match(await page.getByRole('table').last().innerText(),/Training/)
  await page.getByRole('button',{name:'Positions',exact:true}).click();await page.getByRole('heading',{name:'Position ledger'}).waitFor()
+ await page.getByRole('heading',{name:'Simulation versus exchange',exact:true}).waitFor()
+ assert.ok(await page.getByText('New entries require verified maximum leverage',{exact:true}).isVisible())
  await page.getByRole('button',{name:'Activity',exact:true}).click();await page.getByRole('heading',{name:'Event stream'}).waitFor()
  await page.getByRole('button',{name:'Connections',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Verify & start x02'}).isEnabled(),false)
  await page.getByLabel('Trading connection',{exact:true}).selectOption('bingx-x01');await page.getByRole('heading',{name:'X01 execution control',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Verify & start x01 mainnet'}).isEnabled(),false)
@@ -80,8 +82,21 @@ try{
  assert.deepEqual(JSON.parse(micro.strategySignalTimeframes),[1/6,1])
  assert.equal(micro.blockBehavior,'rounds');assert.equal(micro.blockSize,'4');assert.equal(micro.autoPfEnabled,'true')
 
+ await page.getByRole('button',{name:'Prepare Signals preset',exact:true}).click()
+ await page.getByLabel('Signals source configurations',{exact:true}).selectOption(['sig-ema-cross-s','sig-coord-v2-r80-n3-i3-bzikk5k'])
+ await page.getByLabel('Signals gate return drawdown limit (pp; 0 = disabled)',{exact:true}).fill('2.5')
+ await page.getByRole('button',{name:'Save configuration',exact:true}).click()
+ await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
+ const signals=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
+ assert.deepEqual(JSON.parse(signals.strategyIndicationTypes),['Signals'])
+ assert.deepEqual(JSON.parse(signals.strategySignalsSources),['sig-ema-cross-s','sig-coord-v2-r80-n3-i3-bzikk5k'])
+ assert.equal(signals.signalsMaxWindowDrawdownPct,'2.5');assert.equal(signals.stageGateMode,'processed-sets');assert.equal(signals.liveEntryMode,'real-mirror')
+ await page.getByLabel('Filter Signals sources',{exact:true}).fill('unmatched-no-source')
+ assert.equal(await page.getByLabel('Signals source configurations',{exact:true}).locator('option').count(),2)
+
  await page.getByRole('button',{name:'Integrations',exact:true}).click();await page.getByLabel('Search integrations').fill('unmatched');await page.getByText('No integration matches this search.').waitFor()
  await page.getByRole('button',{name:'Command center',exact:true}).click()
+ await page.getByRole('heading',{name:'Execution comparison',exact:true}).waitFor()
  if(process.env.CTS_UI_OUTPUT){await mkdir(process.env.CTS_UI_OUTPUT,{recursive:true});await page.screenshot({path:join(process.env.CTS_UI_OUTPUT,'desktop.png'),fullPage:true})}
  await page.setViewportSize({width:390,height:844})
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'mobile page must not overflow horizontally')
@@ -89,7 +104,7 @@ try{
  await page.reload();await page.getByRole('heading',{name:'Stage diagnostics'}).waitFor()
  await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByLabel('Workspace password').waitFor()
  assert.deepEqual(errors,[])
- console.log(JSON.stringify({browserPassed:true,views:6,settingsSave:true,connectionIsolation:true,factorsRoundTrip:true,relationalVolumeSliders:true,microPresetRoundTrip:true,unsavedDraft:true,importExport:true,replayUiApiData:true,mobileWidth:390,errors,syntheticFixture:true,exchangeWrites:0}))
+ console.log(JSON.stringify({browserPassed:true,views:6,settingsSave:true,connectionIsolation:true,factorsRoundTrip:true,relationalVolumeSliders:true,microPresetRoundTrip:true,signalsPresetRoundTrip:true,matchedComparisonUi:true,maximumLeveragePolicyUi:true,unsavedDraft:true,importExport:true,replayUiApiData:true,mobileWidth:390,errors,syntheticFixture:true,exchangeWrites:0}))
 }finally{
  await browser?.close()
  if(child&&child.exitCode===null){const exit=once(child,'exit');child.kill('SIGTERM');await exit}

@@ -362,6 +362,25 @@ test('a stale or pre-close quote cannot authorize a fresh executable history bar
 })
 
 
+test("submitted instance-scoped entries retain reconciliation priority after the paper position closes",async()=>{
+  await isolated(async runtime=>{
+    const internal=runtime as any,entry={...intent('entry'),timestamp:Date.now()-60000},close=intent('close')
+    const wireId=internal.executor.clientOrderId(entry.connectionId,entry.id)
+    runtime.store.claimIntent(wireId,{intent:entry,order:{clientOrderId:wireId}})
+    assert.equal(runtime.store.hasExecutionIntent(entry.connectionId,entry.id),true)
+    assert.equal(runtime.store.hasExecutionIntent('bingx-x01',entry.id),false)
+    const state=runtime.engine.exportState();state.intents=[entry,close]
+    runtime.engine=new TradingEngine(state.settings,state)
+    assert.equal(runtime.engine.activePositionIds().has(entry.positionId),false)
+    let submitted:ExecutionIntent[]=[]
+    internal.executor={process:async(ready:ExecutionIntent[])=>{submitted=ready;return []}}
+    internal.pumpExecution()
+    await internal.executionTask
+    assert.deepEqual(submitted.map(i=>i.id),[entry.id],"unknown venue entry must reconcile before its own close")
+    assert.equal(runtime.engine.pendingIntents().find(i=>i.id===entry.id)?.status,'pending')
+  })
+})
+
 test("stream execution dispatches a close before the next main tick and coalesces in-flight work",async()=>{
   await isolated(async runtime=>{
     const internal=runtime as any, blocked=deferred<any[]>()

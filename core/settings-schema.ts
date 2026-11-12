@@ -1,6 +1,7 @@
 import {checkBlockPolicy,type BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 import {relationalVolumeSettings,DEFAULT_RELATIONAL_VOLUME} from "../shared/cts-volume/ratios.ts";
 import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from "../shared/cts-indications/catalog.ts"
+import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES} from '../shared/cts-indications/signals-catalog'
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
 import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import type { EngineSettings } from "./types"
@@ -33,6 +34,7 @@ export const DEFAULTS: Record<string, unknown> = {
   strategyExitModes: MODES, strategyIndicationTypes: [...CORE_INDICATIONS],
   strategyIndicationSources:[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES],
   strategySignalPeriods:[20],strategySignalTimeframes:[1],
+  strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],signalsMaxWindowDrawdownPct:3,
 }
 export const NUMERIC_FIELDS = [
   { key: "baseProfitFactor", label: "Base → Main minimum PF", min: 0, max: 999, step: 0.01 },
@@ -75,9 +77,11 @@ const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
   strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
   strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),
+  strategySignalsSources:SIGNALS_CATALOG.map(s=>s.id),
   strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1/6,1,5,15,30],
 }
 export const FACTOR_FIELDS = [
+  { key:"signalsMaxWindowDrawdownPct",label:"Signals gate return drawdown limit (pp; 0 = disabled)",min:0,max:50,step:.1 },
   { key:"microMinSlDistancePct", label:"Micro / Low-Range minimum SL (% of entry)",min:0,max:10,step:.01 },
   { key:"microMinTrailDistancePct", label:"Micro / Low-Range minimum trailing gap (% of entry)",min:0,max:10,step:.01 },
   { key:"microTrailRatio", label:"Micro / Low-Range trail width factor",min:.05,max:10,step:.05 },
@@ -106,7 +110,8 @@ export function configurationCount(values: Record<string, unknown>) {
   const portedTypes=types.filter(t=>t==='Tactic'||t==='Inverse')
   const sourceIds=values.strategyIndicationSources as string[]
   const extra=portedTypes.reduce((n,t)=>n+sourceIds.filter(id=>sourceKinds.get(id)===t.toLowerCase()).length*(values.strategySignalTimeframes as number[]).filter(tf=>t!=='Inverse'||[1,5,15].includes(tf)).length,0)
-  return cells * ((types.length-technical-portedTypes.length)*(values.strategySignalTimeframes as number[]).length+extra+technical*(values.strategySignalPeriods as number[]).length*(values.strategySignalTimeframes as number[]).length)
+  const signals=types.includes('Signals')?1:0,signalSources=(values.strategySignalsSources??DEFAULT_SIGNALS_SOURCES) as string[]
+  return cells * ((types.length-technical-portedTypes.length-signals+signals*signalSources.length)*(values.strategySignalTimeframes as number[]).length+extra+technical*(values.strategySignalPeriods as number[]).length*(values.strategySignalTimeframes as number[]).length)
 }
 
 export function validateConfiguration(input: unknown, { partial = false, formNumbers = false } = {}): Record<string, unknown> {

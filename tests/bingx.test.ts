@@ -35,6 +35,23 @@ test("malformed exchange inventories are not treated as empty", async () => {
   await assert.rejects(()=>badQuantity.positions(),/quantity was invalid/)
 })
 
+test('maximum leverage uses authenticated side limits, writes side not positionSide, and verifies a lost reply',async()=>{
+ let current=5,posts=0
+ const {client}=fixture((url,method)=>{
+  assert.equal(url.pathname,'/openApi/swap/v2/trade/leverage')
+  if(method==='POST'){posts++;assert.equal(url.searchParams.get('side'),'LONG');assert.equal(url.searchParams.has('positionSide'),false);assert.equal(url.searchParams.get('leverage'),'75');current=75;throw Error('lost leverage reply')}
+  return json({longLeverage:current,shortLeverage:7,maxLongLeverage:75,maxShortLeverage:50})
+ })
+ assert.equal(await client.ensureMaximumLeverage('BTC-USDT','long'),75);assert.equal(posts,1)
+ assert.equal(await client.ensureMaximumLeverage('BTC-USDT','long'),75);assert.equal(posts,1,'already maximum needs no POST')
+})
+test('leverage guard refusal sends zero writes and never turns into a successful confirmation',async()=>{
+ let writes=0;const {client}=fixture((_url,method)=>{if(method==='POST')writes++;return json({longLeverage:5,shortLeverage:5,maxLongLeverage:75,maxShortLeverage:75})})
+ await assert.rejects(()=>client.ensureMaximumLeverage('BTC-USDT','long',()=>{throw Error('ownership expired')}),/ownership expired/);assert.equal(writes,0)
+ const invalid=fixture(()=>json({longLeverage:5,maxLongLeverage:0})).client
+ await assert.rejects(()=>invalid.ensureMaximumLeverage('BTC-USDT','long'),/could not be verified/)
+})
+
 test("x02 aliases never import mainnet credentials", () => {
   assert.equal(demoCredentials({ BINGX_API_KEY: "mainnet", BINGX_API_SECRET: "mainnet" }), null)
   assert.deepEqual(demoCredentials({ BINGX_X02_KEY: " demo ", BINGX_X02_SECRET: "secret" }), { apiKey: "demo", apiSecret: "secret" })

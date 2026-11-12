@@ -82,31 +82,39 @@ function laneKey(connectionId: string, symbol: string, config: StrategyConfig, d
   // JSON identities cannot collide when a user changes delimiters in a label.
   return JSON.stringify([connectionId, symbol, config.id, direction, coordination, stage, identity])
 }
-type WindowResult={pfSampleCount?:number;blockPolicyKey?:string;count:number;required:number;minPF:number;profit:number;loss:number;enoughSamples:boolean;profitFactor:number;pfState:import('./types').ProfitFactorState;qualified:boolean}
+type WindowResult={pfSampleCount?:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number;count:number;required:number;minPF:number;profit:number;loss:number;enoughSamples:boolean;profitFactor:number;pfState:import('./types').ProfitFactorState;qualified:boolean}
 const windowCache=new WeakMap<LaneState,{closed:number;samples:number[];length:number;head:number|undefined;value:WindowResult}>()
 const blockWindowCache=new WeakMap<LaneState,{closed:number;samples:number[];head:number|undefined;length:number;key:string;value:WindowResult}>()
 const axisCache=new WeakMap<LaneState,{closed:number;samples:number[];length:number;head:number|undefined;previous:number;last:number;outcome:string;threshold:number;allowed:boolean}>()
 export function windowMetrics(lane: LaneState | undefined, required: number, minPF: number, blocks?:BlockPolicy):WindowResult {
+  const cap=lane?.config.maxWindowDrawdownPct
   if(blocks){
     minPF=Math.max(minPF,lane?.config.autoPfFloor??0);
     const samples=lane?.samples??[],key=blockPolicyKey(blocks),cached=lane?blockWindowCache.get(lane):undefined;
-    if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.key===key&&cached.value.minPF===minPF)return cached.value;
+    if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.key===key&&cached.value.minPF===minPF&&cached.value.maxDrawdownPct===cap)return cached.value;
     const result=evaluateBlocks(blockPrefix(samples,blockRequired(blocks)),blocks,minPF);
     const pf=describeProfitFactor(result.long.gp,result.long.gl,result.long.count);
-    const value={profit:result.long.gp,loss:result.long.gl,pfSampleCount:result.long.count,count:result.count,required:result.required,minPF,enoughSamples:result.count===result.required,...pf,qualified:result.state==="qualified",blockPolicyKey:result.key};
+    const drawdown=cap===undefined?undefined:windowRisk(samples,result.required,cap)
+    const value={profit:result.long.gp,loss:result.long.gl,pfSampleCount:result.long.count,count:result.count,required:result.required,minPF,enoughSamples:result.count===result.required,...pf,...drawdown,qualified:result.state==="qualified"&&(cap===undefined||drawdown!.drawdownPct<=cap),blockPolicyKey:result.key};
     if(lane)blockWindowCache.set(lane,{closed:lane.closedCount,samples,head:samples[0],length:samples.length,key,value});
     return value;
   }
   minPF = Math.max(minPF,lane?.config.autoPfFloor??0)
   const samples = lane?.samples ?? [], count = Math.min(samples.length, required)
   const cached=lane?windowCache.get(lane):undefined
-  if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.value.required===required&&cached.value.minPF===minPF)return cached.value
+  if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.value.required===required&&cached.value.minPF===minPF&&cached.value.maxDrawdownPct===cap)return cached.value
   let profit = 0, loss = 0
   for (let i = 0; i < count; i++) { profit += Math.max(0, samples[i]); loss += Math.max(0, -samples[i]) }
   const pf = describeProfitFactor(profit, loss, count)
-  const value={count,required,minPF,profit,loss,enoughSamples:count>=required,...pf,qualified:count>=required&&pf.profitFactor>=minPF}
+  const drawdown=cap===undefined?undefined:windowRisk(samples,count,cap)
+  const value={count,required,minPF,profit,loss,enoughSamples:count>=required,...pf,...drawdown,qualified:count>=required&&pf.profitFactor>=minPF&&(cap===undefined||drawdown!.drawdownPct<=cap)}
   if(lane)windowCache.set(lane,{closed:lane.closedCount,samples,length:samples.length,head:samples[0],value})
   return value
+}
+function windowRisk(samples:readonly number[],count:number,cap:number){
+ let sum=0,peak=0,drawdownPct=0
+ for(let i=Math.min(count,samples.length)-1;i>=0;i--){sum+=samples[i];peak=Math.max(peak,sum);drawdownPct=Math.max(drawdownPct,peak-sum)}
+ return {drawdownPct,maxDrawdownPct:cap}
 }
 export function validateObservedCandles(candles:readonly Candle[]):void{
   let previous=-Infinity
@@ -118,6 +126,8 @@ export function validateObservedCandles(candles:readonly Candle[]):void{
   }
 }
 export class TradingEngine {
+  private liveCloseObserver?:(trade:ClosedTrade)=>void
+  observeLiveCloses(observer:(trade:ClosedTrade)=>void){this.liveCloseObserver=observer}
   private state: EngineState
   private configs: StrategyConfig[]
   private symbolConfigs=new Map<string,StrategyConfig[]>()
@@ -304,7 +314,7 @@ export class TradingEngine {
     if(!lane)return false
     if(this.validLineages.has(lane.id))return true
     const index=STAGES.indexOf(lane.stage),s=this.state.settings
-    const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>proof.stage===STAGES[i]&&proof.qualified&&Number.isFinite(proof.checkedAt)&&proof.checkedAt>0&&Number.isFinite(proof.profitFactor)&&proof.count===proof.required&&proof.profitFactor>=proof.minPF&&proof.required===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockRequired(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):s.stageLastN[proof.stage as 'base'|'main'|'real'])&&(proof.blockPolicyKey??null)===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockPolicyKey(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):null)&&proof.minPF===Math.max(s.stageMinPF[proof.stage as 'base'|'main'|'real'],lane.config.autoPfFloor??0)&&proof.laneId===this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,proof.stage)?.id))
+    const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>proof.stage===STAGES[i]&&proof.qualified&&Number.isFinite(proof.checkedAt)&&proof.checkedAt>0&&Number.isFinite(proof.profitFactor)&&proof.count===proof.required&&proof.profitFactor>=proof.minPF&&(proof.maxDrawdownPct??0)===(lane.config.maxWindowDrawdownPct??0)&&(proof.maxDrawdownPct===undefined||(Number.isFinite(proof.drawdownPct)&&proof.drawdownPct!>=0&&proof.drawdownPct!<=proof.maxDrawdownPct))&&proof.required===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockRequired(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):s.stageLastN[proof.stage as 'base'|'main'|'real'])&&(proof.blockPolicyKey??null)===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockPolicyKey(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):null)&&proof.minPF===Math.max(s.stageMinPF[proof.stage as 'base'|'main'|'real'],lane.config.autoPfFloor??0)&&proof.laneId===this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,proof.stage)?.id))
     if(valid)this.validLineages.add(lane.id)
     return valid
   }
@@ -349,7 +359,7 @@ export class TradingEngine {
     const proof=(stage:Stage):GateProof=>{
       const source=stage as 'base'|'main'|'real',parent=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,stage),id=parent?.id??''
       const proof=windowMetrics(parent,s.stageLastN[source],s.stageMinPF[source],s.stageBlocks?.[source])
-      return {stage,laneId:id,count:proof.count,required:proof.required,minPF:proof.minPF,profitFactor:proof.profitFactor,pfState:proof.pfState,qualified:proof.qualified,checkedAt:candle.timestamp,...("blockPolicyKey" in proof?{blockPolicyKey:proof.blockPolicyKey as string}:{})}
+      return {stage,laneId:id,count:proof.count,required:proof.required,minPF:proof.minPF,profitFactor:proof.profitFactor,pfState:proof.pfState,qualified:proof.qualified,checkedAt:candle.timestamp,...(proof.maxDrawdownPct!==undefined?{drawdownPct:proof.drawdownPct,maxDrawdownPct:proof.maxDrawdownPct}:{}),...("blockPolicyKey" in proof?{blockPolicyKey:proof.blockPolicyKey as string}:{})}
     }
     let admission:GateProof[]|undefined
     if(lane.stage!=='base'){
@@ -418,6 +428,7 @@ export class TradingEngine {
       this.state.equityHistory.push({ timestamp: candle.timestamp, equity: this.state.equity, drawdownPct: dd })
       if (this.state.equityHistory.length > 1000) this.state.equityHistory.shift()
     }
+    if(lane.stage==='live')this.liveCloseObserver?.(trade)
     return trade
   }
   private mark(lane: LaneState, candle: Candle, ordered=false): EngineEvent | undefined {

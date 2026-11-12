@@ -375,6 +375,25 @@ export class BingxClient {
     return { maker, taker, source: "exchange" }
   }
 
+  /** Direction-specific maximum from the authenticated account/tier, verified after any write. */
+  async ensureMaximumLeverage(symbol:string,direction:'long'|'short',beforeWrite?:()=>void):Promise<number>{
+    symbol=normalizeSymbol(symbol)
+    const read=async()=>{
+      const d=object(await this.read('/openApi/swap/v2/trade/leverage',{symbol},true))
+      const current=Number(d[direction==='long'?'longLeverage':'shortLeverage']),maximum=Number(d[direction==='long'?'maxLongLeverage':'maxShortLeverage'])
+      if(!Number.isInteger(current)||current<1||!Number.isInteger(maximum)||maximum<1||maximum>1000)throw Error('Exchange leverage limits could not be verified')
+      return {current,maximum}
+    }
+    const previous=await read()
+    if(previous.current===previous.maximum)return previous.current
+    await this.ensureClock()
+    let error:unknown
+    try{await this.request('/openApi/swap/v2/trade/leverage',{symbol,side:direction.toUpperCase(),leverage:previous.maximum},'POST',true,undefined,beforeWrite)}catch(e){if(e instanceof WriteGuardError)throw e.original;error=e}
+    const confirmed=await read()
+    if(confirmed.current!==confirmed.maximum||confirmed.current!==previous.maximum)throw error??Error('Maximum leverage update was not confirmed')
+    return confirmed.current
+  }
+
   /** Exact order attribution only; callers deduplicate persisted trade IDs. */
   async fills(orderId: string, startTs: number, endTs: number): Promise<VenueFill[]> {
     if (!/^\d+$/.test(orderId)) throw new Error("A venue order ID is required for fill reconciliation")

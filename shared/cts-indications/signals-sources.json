@@ -1,0 +1,620 @@
+[
+  {
+    "name": "r-apz-reclaim",
+    "label": "apz-reclaim (research)",
+    "short": "sig-r-apz-reclaim-s",
+    "medium": "sig-r-apz-reclaim-m"
+  },
+  {
+    "name": "r-frama-pullback",
+    "label": "frama-pullback (research)",
+    "short": "sig-r-frama-pullback-s",
+    "medium": "sig-r-frama-pullback-m"
+  },
+  {
+    "name": "r-st-pullback",
+    "label": "st-pullback (research)",
+    "short": "sig-r-st-pullback-s",
+    "medium": "sig-r-st-pullback-m"
+  },
+  {
+    "name": "ema-cross",
+    "label": "EMA cross",
+    "short": "sig-ema-cross-s",
+    "medium": "sig-ema-cross-m"
+  },
+  {
+    "name": "macd-cross",
+    "label": "MACD signal cross",
+    "short": "sig-macd-cross-s",
+    "medium": "sig-macd-cross-m"
+  },
+  {
+    "name": "rsi-reversal",
+    "label": "RSI reversal",
+    "short": "sig-rsi-reversal-s",
+    "medium": "sig-rsi-reversal-m"
+  },
+  {
+    "name": "bollinger",
+    "label": "Bollinger bounce",
+    "short": "sig-bollinger-s",
+    "medium": "sig-bollinger-m"
+  },
+  {
+    "name": "supertrend",
+    "label": "Supertrend flip",
+    "short": "sig-supertrend-s",
+    "medium": "sig-supertrend-m"
+  },
+  {
+    "name": "donchian",
+    "label": "Donchian breakout",
+    "short": "sig-donchian-s",
+    "medium": "sig-donchian-m"
+  },
+  {
+    "name": "sar",
+    "label": "Parabolic SAR flip",
+    "short": "sig-sar-s",
+    "medium": "sig-sar-m"
+  },
+  {
+    "name": "ichimoku",
+    "label": "Ichimoku TK cross",
+    "short": "sig-ichimoku-s",
+    "medium": "sig-ichimoku-m"
+  },
+  {
+    "name": "stoch-rsi",
+    "label": "Stoch RSI",
+    "short": "sig-stoch-rsi-s",
+    "medium": "sig-stoch-rsi-m"
+  },
+  {
+    "name": "keltner",
+    "label": "Keltner breakout",
+    "short": "sig-keltner-s",
+    "medium": "sig-keltner-m"
+  },
+  {
+    "name": "adx",
+    "label": "ADX / DMI",
+    "short": "sig-adx-s",
+    "medium": "sig-adx-m"
+  },
+  {
+    "name": "vwap",
+    "label": "VWAP reclaim",
+    "short": "sig-vwap-s",
+    "medium": "sig-vwap-m"
+  },
+  {
+    "name": "hma",
+    "label": "Hull MA",
+    "short": "sig-hma-s",
+    "medium": "sig-hma-m"
+  },
+  {
+    "name": "cci",
+    "label": "CCI",
+    "short": "sig-cci-s",
+    "medium": "sig-cci-m"
+  },
+  {
+    "name": "squeeze",
+    "label": "TTM squeeze",
+    "short": "sig-squeeze-s",
+    "medium": "sig-squeeze-m"
+  },
+  {
+    "name": "aroon",
+    "label": "Aroon",
+    "short": "sig-aroon-s",
+    "medium": "sig-aroon-m"
+  },
+  {
+    "name": "williams-r",
+    "label": "Williams %R",
+    "short": "sig-williams-r-s",
+    "medium": "sig-williams-r-m"
+  },
+  {
+    "name": "mfi",
+    "label": "Money Flow Index",
+    "short": "sig-mfi-s",
+    "medium": "sig-mfi-m"
+  },
+  {
+    "name": "obv",
+    "label": "On-Balance Volume",
+    "short": "sig-obv-s",
+    "medium": "sig-obv-m"
+  },
+  {
+    "name": "cmf",
+    "label": "Chaikin Money Flow",
+    "short": "sig-cmf-s",
+    "medium": "sig-cmf-m"
+  },
+  {
+    "name": "trix",
+    "label": "TRIX",
+    "short": "sig-trix-s",
+    "medium": "sig-trix-m"
+  },
+  {
+    "name": "kama",
+    "label": "Kaufman adaptive MA",
+    "short": "sig-kama-s",
+    "medium": "sig-kama-m"
+  },
+  {
+    "name": "heikin-ashi",
+    "label": "Heikin-Ashi",
+    "short": "sig-heikin-ashi-s",
+    "medium": "sig-heikin-ashi-m"
+  },
+  {
+    "name": "zscore",
+    "label": "Z-score reversion",
+    "short": "sig-zscore-s",
+    "medium": "sig-zscore-m"
+  },
+  {
+    "name": "ema-slope",
+    "label": "EMA slope",
+    "short": "sig-ema-slope-s",
+    "medium": "sig-ema-slope-m"
+  },
+  {
+    "name": "macd-hist",
+    "label": "MACD histogram",
+    "short": "sig-macd-hist-s",
+    "medium": "sig-macd-hist-m"
+  },
+  {
+    "name": "volume-break",
+    "label": "Volume breakout",
+    "short": "sig-volume-break-s",
+    "medium": "sig-volume-break-m"
+  },
+  {
+    "name": "ichi-cloud",
+    "label": "Ichimoku cloud",
+    "short": "sig-ichi-cloud-s",
+    "medium": "sig-ichi-cloud-m"
+  },
+  {
+    "name": "rsi-momentum",
+    "label": "RSI momentum",
+    "short": "sig-rsi-momentum-s",
+    "medium": "sig-rsi-momentum-m"
+  },
+  {
+    "name": "ema-trend",
+    "label": "EMA trend",
+    "short": "sig-ema-trend-s",
+    "medium": "sig-ema-trend-m"
+  },
+  {
+    "name": "atr-break",
+    "label": "ATR breakout",
+    "short": "sig-atr-break-s",
+    "medium": "sig-atr-break-m"
+  },
+  {
+    "name": "act-burst",
+    "label": "Activity burst",
+    "short": "sig-act-burst-s",
+    "medium": "sig-act-burst-m"
+  },
+  {
+    "name": "thrust",
+    "label": "Directional thrust",
+    "short": "sig-thrust-s",
+    "medium": "sig-thrust-m"
+  },
+  {
+    "name": "impulse",
+    "label": "Impulse move",
+    "short": "sig-impulse-s",
+    "medium": "sig-impulse-m"
+  },
+  {
+    "name": "swing",
+    "label": "Swing move",
+    "short": "sig-swing-s",
+    "medium": "sig-swing-m"
+  },
+  {
+    "name": "rsi-mid",
+    "label": "RSI mid cross",
+    "short": "sig-rsi-mid-s",
+    "medium": "sig-rsi-mid-m"
+  },
+  {
+    "name": "bb-walk",
+    "label": "Bollinger walk",
+    "short": "sig-bb-walk-s",
+    "medium": "sig-bb-walk-m"
+  },
+  {
+    "name": "ema-pullback",
+    "label": "EMA pullback",
+    "short": "sig-ema-pullback-s",
+    "medium": "sig-ema-pullback-m"
+  },
+  {
+    "name": "ema-cross-fast",
+    "label": "EMA cross fast",
+    "short": "sig-ema-cross-fast-s",
+    "medium": "sig-ema-cross-fast-m"
+  },
+  {
+    "name": "reclaim",
+    "label": "Level reclaim",
+    "short": "sig-reclaim-s",
+    "medium": "sig-reclaim-m"
+  },
+  {
+    "name": "act-hf",
+    "label": "High-frequency activity",
+    "short": "sig-act-hf-s",
+    "medium": "sig-act-hf-m"
+  },
+  {
+    "name": "macd-slow",
+    "label": "MACD cross slow",
+    "short": "sig-macd-slow-s",
+    "medium": "sig-macd-slow-m"
+  },
+  {
+    "name": "st-slow",
+    "label": "Supertrend slow",
+    "short": "sig-st-slow-s",
+    "medium": "sig-st-slow-m"
+  },
+  {
+    "name": "s2-ema-cross",
+    "label": "S2 EMA cross pulse",
+    "short": "sig-s2-ema-cross-s",
+    "medium": "sig-s2-ema-cross-m"
+  },
+  {
+    "name": "s2-rsi-revert",
+    "label": "S2 RSI mean revert",
+    "short": "sig-s2-rsi-revert-s",
+    "medium": "sig-s2-rsi-revert-m"
+  },
+  {
+    "name": "s2-st-trail",
+    "label": "S2 Supertrend trail",
+    "short": "sig-s2-st-trail-s",
+    "medium": "sig-s2-st-trail-m"
+  },
+  {
+    "name": "s2-bb-bounce",
+    "label": "S2 Bollinger bounce",
+    "short": "sig-s2-bb-bounce-s",
+    "medium": "sig-s2-bb-bounce-m"
+  },
+  {
+    "name": "s2-vwap-axis",
+    "label": "S2 VWAP axis",
+    "short": "sig-s2-vwap-axis-s",
+    "medium": "sig-s2-vwap-axis-m"
+  },
+  {
+    "name": "s2-vol-break",
+    "label": "S2 Volume breakout",
+    "short": "sig-s2-vol-break-s",
+    "medium": "sig-s2-vol-break-m"
+  },
+  {
+    "name": "s2-adx-gate",
+    "label": "S2 ADX trend gate",
+    "short": "sig-s2-adx-gate-s",
+    "medium": "sig-s2-adx-gate-m"
+  },
+  {
+    "name": "s2-stoch-swing",
+    "label": "S2 Stoch swing",
+    "short": "sig-s2-stoch-swing-s",
+    "medium": "sig-s2-stoch-swing-m"
+  },
+  {
+    "name": "s2-confluence",
+    "label": "S2 Confluence 3 of 5",
+    "short": "sig-s2-confluence-s",
+    "medium": "sig-s2-confluence-m"
+  },
+  {
+    "name": "s2-range-break",
+    "label": "S2 Range break",
+    "short": "sig-s2-range-break-s",
+    "medium": "sig-s2-range-break-m"
+  },
+  {
+    "name": "s2-atr-break",
+    "label": "S2 ATR break",
+    "short": "sig-s2-atr-break-s",
+    "medium": "sig-s2-atr-break-m"
+  },
+  {
+    "name": "s2-active-hf",
+    "label": "S2 Active high-freq",
+    "short": "sig-s2-active-hf-s",
+    "medium": "sig-s2-active-hf-m"
+  },
+  {
+    "name": "s2-range-shift",
+    "label": "S2 Range shift",
+    "short": "sig-s2-range-shift-s",
+    "medium": "sig-s2-range-shift-m"
+  },
+  {
+    "name": "s2-block-stack",
+    "label": "S2 Block stack",
+    "short": "sig-s2-block-stack-s",
+    "medium": "sig-s2-block-stack-m"
+  },
+  {
+    "name": "s2-block-scale",
+    "label": "S2 Block scale",
+    "short": "sig-s2-block-scale-s",
+    "medium": "sig-s2-block-scale-m"
+  },
+  {
+    "name": "r-squeeze",
+    "label": "R Squeeze release",
+    "short": "sig-r-squeeze-s",
+    "medium": "sig-r-squeeze-m"
+  },
+  {
+    "name": "r-donch-vol",
+    "label": "R Donchian + volume + CLV",
+    "short": "sig-r-donch-vol-s",
+    "medium": "sig-r-donch-vol-m"
+  },
+  {
+    "name": "r-sweep",
+    "label": "R Stop-run reversal",
+    "short": "sig-r-sweep-s",
+    "medium": "sig-r-sweep-m"
+  },
+  {
+    "name": "r-capit",
+    "label": "R Forced-flow fade",
+    "short": "sig-r-capit-s",
+    "medium": "sig-r-capit-m"
+  },
+  {
+    "name": "r-vwap-reclaim",
+    "label": "R VWAP reclaim",
+    "short": "sig-r-vwap-reclaim-s",
+    "medium": "sig-r-vwap-reclaim-m"
+  },
+  {
+    "name": "r-cvd-div",
+    "label": "R Volume-delta divergence",
+    "short": "sig-r-cvd-div-s",
+    "medium": "sig-r-cvd-div-m"
+  },
+  {
+    "name": "r-rsi2",
+    "label": "R RSI(2) reversion + trend",
+    "short": "sig-r-rsi2-s",
+    "medium": "sig-r-rsi2-m"
+  },
+  {
+    "name": "r-bb-adx",
+    "label": "R Bollinger extreme, ADX low",
+    "short": "sig-r-bb-adx-s",
+    "medium": "sig-r-bb-adx-m"
+  },
+  {
+    "name": "r-bbw-expand",
+    "label": "R Bandwidth expansion",
+    "short": "sig-r-bbw-expand-s",
+    "medium": "sig-r-bbw-expand-m"
+  },
+  {
+    "name": "r-session-trend",
+    "label": "R Session trend",
+    "short": "sig-r-session-trend-s",
+    "medium": "sig-r-session-trend-m"
+  },
+  {
+    "name": "r-zdist",
+    "label": "R Distance z-score fade",
+    "short": "sig-r-zdist-s",
+    "medium": "sig-r-zdist-m"
+  },
+  {
+    "name": "r-vol-regime",
+    "label": "R Regime breakout",
+    "short": "sig-r-vol-regime-s",
+    "medium": "sig-r-vol-regime-m"
+  },
+  {
+    "name": "r-clv-thrust",
+    "label": "R CLV thrust",
+    "short": "sig-r-clv-thrust-s",
+    "medium": "sig-r-clv-thrust-m"
+  },
+  {
+    "name": "r-nr-break",
+    "label": "R NR7 breakout",
+    "short": "sig-r-nr-break-s",
+    "medium": "sig-r-nr-break-m"
+  },
+  {
+    "name": "r-roofing",
+    "label": "R Roofing filter cross",
+    "short": "sig-r-roofing-s",
+    "medium": "sig-r-roofing-m"
+  },
+  {
+    "name": "r-fisher",
+    "label": "R Fisher turn",
+    "short": "sig-r-fisher-s",
+    "medium": "sig-r-fisher-m"
+  },
+  {
+    "name": "r-connors",
+    "label": "R Connors RSI fade",
+    "short": "sig-r-connors-s",
+    "medium": "sig-r-connors-m"
+  },
+  {
+    "name": "r-stc",
+    "label": "R Schaff trend cycle",
+    "short": "sig-r-stc-s",
+    "medium": "sig-r-stc-m"
+  },
+  {
+    "name": "r-vortex",
+    "label": "R Vortex cross",
+    "short": "sig-r-vortex-s",
+    "medium": "sig-r-vortex-m"
+  },
+  {
+    "name": "r-tsi",
+    "label": "R TSI cross",
+    "short": "sig-r-tsi-s",
+    "medium": "sig-r-tsi-m"
+  },
+  {
+    "name": "r-elder",
+    "label": "R Elder ray pullback",
+    "short": "sig-r-elder-s",
+    "medium": "sig-r-elder-m"
+  },
+  {
+    "name": "r-awesome",
+    "label": "R AO saucer",
+    "short": "sig-r-awesome-s",
+    "medium": "sig-r-awesome-m"
+  },
+  {
+    "name": "r-linreg",
+    "label": "R Regression channel",
+    "short": "sig-r-linreg-s",
+    "medium": "sig-r-linreg-m"
+  },
+  {
+    "name": "r-fractal",
+    "label": "R Fractal breakout",
+    "short": "sig-r-fractal-s",
+    "medium": "sig-r-fractal-m"
+  },
+  {
+    "name": "r-camarilla",
+    "label": "R Camarilla pivots",
+    "short": "sig-r-camarilla-s",
+    "medium": "sig-r-camarilla-m"
+  },
+  {
+    "name": "r-fakeout",
+    "label": "R Failed breakout",
+    "short": "sig-r-fakeout-s",
+    "medium": "sig-r-fakeout-m"
+  },
+  {
+    "name": "r-spring",
+    "label": "R Wyckoff spring",
+    "short": "sig-r-spring-s",
+    "medium": "sig-r-spring-m"
+  },
+  {
+    "name": "r-valuearea",
+    "label": "R Value-area re-entry",
+    "short": "sig-r-valuearea-s",
+    "medium": "sig-r-valuearea-m"
+  },
+  {
+    "name": "r-orb",
+    "label": "R Opening-range breakout",
+    "short": "sig-r-orb-s",
+    "medium": "sig-r-orb-m"
+  },
+  {
+    "name": "r-pdhl",
+    "label": "R Prev-day break and retest",
+    "short": "sig-r-pdhl-s",
+    "medium": "sig-r-pdhl-m"
+  },
+  {
+    "name": "r-bos",
+    "label": "R Break of structure",
+    "short": "sig-r-bos-s",
+    "medium": "sig-r-bos-m"
+  },
+  {
+    "name": "r-choch",
+    "label": "R Change of character",
+    "short": "sig-r-choch-s",
+    "medium": "sig-r-choch-m"
+  },
+  {
+    "name": "r-fvg",
+    "label": "R Fair value gap retest",
+    "short": "sig-r-fvg-s",
+    "medium": "sig-r-fvg-m"
+  },
+  {
+    "name": "r-inside",
+    "label": "R Inside-bar breakout",
+    "short": "sig-r-inside-s",
+    "medium": "sig-r-inside-m"
+  },
+  {
+    "name": "r-engulf",
+    "label": "R Engulfing at extreme",
+    "short": "sig-r-engulf-s",
+    "medium": "sig-r-engulf-m"
+  },
+  {
+    "name": "r-pin",
+    "label": "R Pin bar at extreme",
+    "short": "sig-r-pin-s",
+    "medium": "sig-r-pin-m"
+  },
+  {
+    "name": "r-star",
+    "label": "R Morning / evening star",
+    "short": "sig-r-star-s",
+    "medium": "sig-r-star-m"
+  },
+  {
+    "name": "r-streak",
+    "label": "R Exhaustion streak",
+    "short": "sig-r-streak-s",
+    "medium": "sig-r-streak-m"
+  },
+  {
+    "name": "r-laguerre",
+    "label": "R Laguerre RSI turn",
+    "short": "sig-r-laguerre-s",
+    "medium": "sig-r-laguerre-m"
+  },
+  {
+    "name": "r-chand",
+    "label": "R ATR Chandelier channel flip",
+    "short": "sig-r-chand-s",
+    "medium": "sig-r-chand-m"
+  },
+  {
+    "name": "r-klinger",
+    "label": "R Klinger volume-force cross",
+    "short": "sig-r-klinger-s",
+    "medium": "sig-r-klinger-m"
+  },
+  {
+    "name": "r-rvi",
+    "label": "R Relative Vigor Index cross",
+    "short": "sig-r-rvi-s",
+    "medium": "sig-r-rvi-m"
+  }
+]

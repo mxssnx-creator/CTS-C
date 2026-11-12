@@ -125,6 +125,9 @@ export class StateStore {
     const row = this.database.prepare("SELECT * FROM intents WHERE id=?").get(id) as Record<string, any> | undefined
     return row ? { id: row.id, status: row.status, payload: JSON.parse(row.payload), result: row.result ? JSON.parse(row.result) : null, createdAt: row.created, updatedAt: row.updated } : undefined
   }
+  hasExecutionIntent(connectionId: string, intentId: string): boolean {
+    return Boolean(this.database.prepare("SELECT id FROM intents WHERE json_extract(payload,'$.intent.connectionId')=? AND json_extract(payload,'$.intent.id')=? AND json_extract(payload,'$.role') IS NULL LIMIT 1").get(connectionId, intentId))
+  }
   openExecutionIntents(): Intent[] {
     return (this.database.prepare("SELECT * FROM intents WHERE status IN ('reserved','unknown','accepted') ORDER BY created,id").all() as Record<string, any>[]).map(row => ({ id: row.id, status: row.status, payload: JSON.parse(row.payload), result: row.result ? JSON.parse(row.result) : null, createdAt: row.created, updatedAt: row.updated }))
   }
