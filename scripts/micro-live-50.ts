@@ -15,7 +15,7 @@ async function main(){
  await mkdir(directory,{recursive:true,mode:0o700})
  const store=new StateStore(join(directory,'runtime.sqlite')),venue=new BingxVstClient(),runtime=new TerminalRuntime('bingx-x02',store)
  const initial={positions:await venue.positions(),orders:await venue.openOrders()}
- runtime.saveFlatSettings({symbolCount,historyCandles:1440,baseNotional:100,volumeFactor:.01,maxOrderNotional:Number(arg('--max-order-notional','10')),stageGateMode:'processed-sets',microMinSlDistancePct:.1,microMinTrailDistancePct:.05,strategyEnabledRanges:arg('--ranges','Micro,Low-Range').split(','),strategyTpSteps:[2,3,4,5,6,8,9,12],strategySlRatios:Array.from({length:15},(_,i)=>(i+2)/10),strategyExitModes:['fixed','trailing','trailing-only'],strategyIndicationTypes:arg('--indications','Trend').split(','),strategySignalTimeframes:[1/6,1],autoPfEnabled:true,autoPfRatio:.2,autoPfMax:2,microTradeStream:true,microTrailRatio:.5,axisPrevious:5,axisLast:2,axisOutcome:'positive',axisReferenceStage:'base',blockBehavior:'rounds',blockSize:3,blockSteps:3,blockVolumeRatio:.2,blockPauseRounds:1,blockMaxMultiplier:1.6,dcaDistancePct:.2,dcaMultiplier:.2})
+ runtime.saveFlatSettings({symbolCount,historyCandles:1440,baseNotional:Number(arg('--base-notional','100')),volumeFactor:Number(arg('--volume-factor','.01')),maxOrderNotional:Number(arg('--max-order-notional','10')),stageGateMode:'processed-sets',microMinSlDistancePct:Number(arg('--micro-min-sl-pct','.1')),microMinTrailDistancePct:Number(arg('--micro-min-trail-pct','.05')),strategyEnabledRanges:arg('--ranges','Micro,Low-Range').split(','),strategyTpSteps:[2,3,4,5,6,8,9,12],strategySlRatios:Array.from({length:15},(_,i)=>(i+2)/10),strategyExitModes:['fixed','trailing','trailing-only'],strategyIndicationTypes:arg('--indications','Trend').split(','),strategySignalTimeframes:[1/6,1],autoPfEnabled:true,autoPfRatio:.2,autoPfMax:2,microTradeStream:true,microTrailRatio:.5,axisPrevious:5,axisLast:2,axisOutcome:'positive',axisReferenceStage:'base',blockBehavior:'rounds',blockSize:3,blockSteps:3,blockVolumeRatio:.2,blockPauseRounds:1,blockMaxMultiplier:1.6,dcaDistancePct:Number(arg('--dca-distance-pct','.2')),dcaMultiplier:Number(arg('--dca-multiplier','.2'))})
  let runError:string|null=null,warmedAt:number|undefined,observationCompleted=false,stopRequested=false,observedSeconds=0
  try{
   const historyDirectory=arg('--history-directory','')
@@ -35,7 +35,10 @@ async function main(){
   }
   await runtime.start()
   const began=Date.now()
-  while(Date.now()-began<1_800_000){
+  // Warmup and requested observation have separate deadlines. A full 30-minute observation
+  // remains possible after native history collection; no short run is reported as complete.
+  while(!warmedAt || Date.now()-warmedAt<duration*1000+5000){
+   if(!warmedAt&&Date.now()-began>=1_800_000)break
    await new Promise(r=>setTimeout(r,5000))
    const snapshot=await runtime.serial(async()=>runtime.snapshot())
    const coverage=runtime.control.warmed.length
@@ -48,7 +51,7 @@ async function main(){
    if(warmedAt&&observedSeconds>=duration){observationCompleted=true;break}
    try{await access(join(directory,'stop'));stopRequested=true;break}catch{}
   }
-  if(!observationCompleted&&!stopRequested)runError='Automatic observation reached its 30-minute cap before completing the full warmup and requested observation'
+  if(!observationCompleted&&!stopRequested)runError='Native history warmup reached its 30-minute deadline before the requested observation could start'
  }catch(e){runError=e instanceof Error?e.message:'Live observation failed'}
  finally{
   try{await runtime.quiesce()}catch(e){runError??=e instanceof Error?e.message:'Runtime stop could not be confirmed'}
