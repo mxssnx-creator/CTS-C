@@ -13,6 +13,8 @@ export interface StrategyConfig {
   roundTripCostPct?: number; maxHoldMinutes?: number; trailDistancePct?:number
   indicationSourceId?:string
   autoPfFloor?:number
+  /** Maximum peak-to-trough sum of net-return percentage points in this lane's gate window. Not account drawdown. */
+  maxWindowDrawdownPct?:number
   signalTimeframeMinutes?:number
 }
 export interface PseudoPosition {
@@ -40,7 +42,7 @@ export interface EngineSettings {
   maxSamples: number
 }
 export interface EntryFill { price: number; quantity: number; timestamp: number; kind: "entry" | "block" | "dca" }
-export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string}
+export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number}
 export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   activationOrder?:number
@@ -97,6 +99,7 @@ export interface ExecutionIntent {
   minimumAddRatio?:number
   entryAllocationRatio?:number
   realPositionId?:string
+  leverage?:number
 }
 export interface EngineEvent { type: "opened" | "added" | "closed" | "qualified" | "execution"; status?:string; reason?:string; laneId: string; timestamp: number; stage: Stage; trade?: ClosedTrade }
 export interface EngineState {

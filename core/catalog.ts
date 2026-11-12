@@ -1,4 +1,5 @@
 import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from "../shared/cts-indications/catalog.ts"
+import {checkedSignalsSources} from '../shared/cts-indications/signals-catalog'
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
 import { relationalVolumeSettings } from "../shared/cts-volume/ratios"
 import type { StrategyConfig } from "./types"
@@ -55,7 +56,10 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   const selectedSources=values(settings,'strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES]).map(String)
   const sourceKinds=new Map<string,string>(PORTED_CATALOG.map(s=>[s.id,s.kind]))
   if(selectedSources.some(id=>!sourceKinds.has(id)))throw new Error('Unknown Tactic / Inverse source')
-  const sourceList=(type:string)=>(type==='Tactic'||type==='Inverse')?selectedSources.filter(id=>sourceKinds.get(id)===type.toLowerCase()):[undefined]
+  const signalsSources=checkedSignalsSources(settings.strategySignalsSources)
+  const maxWindowDrawdownPct=Number(settings.signalsMaxWindowDrawdownPct??3)
+  if(!Number.isFinite(maxWindowDrawdownPct)||maxWindowDrawdownPct<0||maxWindowDrawdownPct>50)throw Error('Invalid Signals return drawdown limit')
+  const sourceList=(type:string)=>type==='Signals'?signalsSources:(type==='Tactic'||type==='Inverse')?selectedSources.filter(id=>sourceKinds.get(id)===type.toLowerCase()):[undefined]
   for(const type of types)if(!sourceList(type).length)throw new Error(`Choose at least one ${type} source`)
   const autoPfEnabled=settings.autoPfEnabled===true
   if(settings.autoPfEnabled!==undefined&&typeof settings.autoPfEnabled!=="boolean")throw new Error('Invalid auto PF enabled')
@@ -78,10 +82,10 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
       const lookback = period
       const maxHoldMinutes = (range==="Low-Range"?15:holdMinutes[STRATEGY_RANGES.indexOf(range)])*holdFactor
       const autoPfFloor=autoPfEnabled?Math.max(1.01,Math.min(autoPfMax,1+Math.floor(takeprofit*1000+1e-9)/10*autoPfRatio)):undefined
-      const economics = createHash("sha256").update(JSON.stringify([type, takeprofit, stoploss, cost, maxHoldMinutes, lookback, exitMode,trailDistancePct, "ratcheted-trailing-v2",...(indicationSourceId?[indicationSourceId]:[]),...(timeframe!==1||technical||ported?[timeframe,'closed-ohlcv-v1']:[]),autoPfFloor])).digest("hex").slice(0, 20)
+      const economics = createHash("sha256").update(JSON.stringify([type, takeprofit, stoploss, cost, maxHoldMinutes, lookback, exitMode,trailDistancePct, "ratcheted-trailing-v2",...(indicationSourceId?[indicationSourceId]:[]),...(timeframe!==1||technical||ported?[timeframe,'closed-ohlcv-v1']:[]),autoPfFloor,...(type==='Signals'?['signals-risk-v1',maxWindowDrawdownPct]:[])])).digest("hex").slice(0, 20)
       const id = `v4_${type}_${range}_tp${step}_sl${Math.round(ratio * 10)}_${exitMode}_${economics}`
       configs.push({ id, connectionId, createdAt: now, enabled: true, catalogVersion: 4,
-        type, ...(autoPfFloor!==undefined?{autoPfFloor}:{}), ...(indicationSourceId?{indicationSourceId}:{}), range, tpStep: step, slRatio: ratio, exitMode,
+        type, ...(autoPfFloor!==undefined?{autoPfFloor}:{}), ...(type==='Signals'&&maxWindowDrawdownPct>0?{maxWindowDrawdownPct}:{}), ...(indicationSourceId?{indicationSourceId}:{}), range, tpStep: step, slRatio: ratio, exitMode,
         // Indicator lookback is separate from the cost-distance step.
         position_cost_step: lookback,
         takeprofit, stoploss, trailing: exitMode !== "fixed", roundTripCostPct: cost,

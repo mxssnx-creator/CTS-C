@@ -1,0 +1,14 @@
+{
+  "request": "Signals and processed-stage 50-symbol validation",
+  "date": "2026-11-12",
+  "dataSHA256": "4c7379c88881acdcbaa8c0f36d9bdda024f2b961de28035e12e5e48606b4577d",
+  "symbols": 50,
+  "families": 20,
+  "warmupCandles": 4320,
+  "heldOutHours": 24,
+  "gates": [
+    20,
+    8,
+    8
+  ]
+}

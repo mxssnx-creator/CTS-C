@@ -2,6 +2,7 @@
 import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
+import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES,SIGNAL_SOURCES} from '@/shared/cts-indications/signals-catalog'
 import {VolumeRatioSliders} from "../../shared/cts-volume/sliders.tsx";
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -54,6 +55,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sourceFilter,setSourceFilter]=useState('')
+  const [signalsFilter,setSignalsFilter]=useState('')
   const dirtyRef = useRef(false)
   const importInput = useRef<HTMLInputElement>(null)
   const serverFingerprint = JSON.stringify(settings)
@@ -136,11 +138,20 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
         <button type="button" className="terminal-button" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic','Inverse'])]);change('strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES])}}>Prepare Tactic + Inverse</button>
         <label className="block text-xs">Search source configurations<input className="terminal-input mt-2 w-full" value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} placeholder="Decline, recovery, trend, pair…" /></label>
         <label className="block text-xs">Independent source configurations<select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Tactic and Inverse source configurations" value={draft.strategyIndicationSources as string[]} onChange={e=>change('strategyIndicationSources',Array.from(e.target.selectedOptions,o=>o.value))}>{sourceChoices.map(s=><option key={s.id} value={s.id}>{s.label} · {s.id}</option>)}</select></label>
-        <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {PORTED_CATALOG.length} available. Tactic supports 1/5/15/30m; Inverse supports 1/5/15m. Shared history retains up to 4,320 completed source candles per symbol and timeframe and periodically rebases its calculations.</p>
+        <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {PORTED_CATALOG.length} available. Tactic supports recorded 10s and 1/5/15/30m; Inverse supports 1/5/15m. Shared history retains up to 4,320 completed source candles per symbol and timeframe and periodically rebases its calculations.</p>
       </section>
       <section className="terminal-panel space-y-4 p-5" aria-label="Relational volume"><h3 className="text-sm font-semibold">Relational volume · Indications</h3><VolumeRatioSliders overall value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{indicationTypes:INDICATIONS,indications:draft.strategyIndicationSources as string[]}}/></section>
       <section className="terminal-panel space-y-4 p-5"><h3 className="text-sm font-semibold">Relational volume · Strategies & Ranges</h3><VolumeRatioSliders value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{strategies:['normal','axis','block','dca'],ranges:RANGES}}/></section>
       {Object.keys(symbolFees).length>0&&<section className="terminal-panel space-y-4 p-5"><h3 className="text-sm font-semibold">Relational volume · Symbols</h3><VolumeRatioSliders value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{symbols:Object.keys(symbolFees)}}/></section>}
+      <section className="terminal-panel space-y-4 p-5" aria-label="Signals settings">
+        <h3 className="text-sm font-semibold">Signals · sources &amp; independent voting bands</h3>
+        <p className="terminal-muted text-xs">{SIGNAL_SOURCES.length} computed source families, short/medium variants and independent category coordinators. Each source votes once; conflicting variants abstain. These use observed exchange candles, not third-party trade recommendations.</p>
+        <button type="button" className="terminal-button" onClick={()=>{dirtyRef.current=true;setDirty(true);setDraft(current=>({...current,strategyIndicationTypes:['Signals'],strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],strategyEnabledRanges:['Micro','Low-Range','Minimal','Short'],strategyTpSteps:[2,3,5,8,12],strategySlRatios:[.6,1],strategyExitModes:[...MODES],strategySignalTimeframes:[1],stageGateMode:'processed-sets',liveEntryMode:'real-mirror',signalsMaxWindowDrawdownPct:3}));setMessage('Signals draft prepared. Save to apply it. Research results do not guarantee profitable execution.')}}>Prepare Signals preset</button>
+        <label className="block text-xs">Filter Signals sources<input className="terminal-input mt-2 w-full" aria-label="Filter Signals sources" value={signalsFilter} onChange={e=>setSignalsFilter(e.target.value)} placeholder="Trend, breakout, volume, research, minimum 3..."/></label>
+        <label className="block text-xs">Signals source configurations<select multiple size={8} className="terminal-input mt-2 w-full" aria-label="Signals source configurations" value={draft.strategySignalsSources as string[]} onChange={e=>change('strategySignalsSources',Array.from(e.target.selectedOptions,o=>o.value))}>{SIGNALS_CATALOG.filter(s=>(draft.strategySignalsSources as string[]).includes(s.id)||`${s.category} ${s.label}`.toLowerCase().includes(signalsFilter.toLowerCase())).map(s=><option key={s.id} value={s.id}>{s.category} · {s.label}</option>)}</select></label>
+        <p className="terminal-muted text-xs">{(draft.strategySignalsSources as string[]).length} selected / {SIGNALS_CATALOG.length} available. Gate return-drawdown limit below uses cumulative net-return percentage points in each own Last-N window. It is a qualification filter, not a future account-drawdown guarantee.</p>
+        <VolumeRatioSliders value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{indications:draft.strategySignalsSources as string[]}}/>
+      </section>
       <section className="terminal-panel space-y-4 p-5" aria-label="Strategy processing">
         <h3 className="text-sm font-semibold">Strategy processing · Normal & Trailing</h3>
         <p className="terminal-muted text-xs">Normal off keeps calculation and Axis/Block/DCA progression, including their fixed exits. Plain Normal and plain Trailing lanes cannot enter Live. Trailing off excludes every new trailing configuration. Both the overall and range switch must be on.</p>

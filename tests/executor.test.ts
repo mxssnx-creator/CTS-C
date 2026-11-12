@@ -30,6 +30,7 @@ class Venue implements ExecutorVenue {
   markets() { return this.submitted.filter((row) => row.type === "MARKET") }
   conditionals() { return this.submitted.filter((row) => row.type === "STOP_MARKET" || row.type === "TAKE_PROFIT_MARKET") }
   async positionMode() { return "hedge" as const }
+  async ensureMaximumLeverage(_symbol:string,_direction:"long"|"short",beforeWrite?:()=>void){beforeWrite?.();return 100}
   async contracts() { return [{ symbol: "BTC-USDT", quantityPrecision: 3, pricePrecision: 2, minQuantity: 0.001, minNotional: 1, maxLongLeverage: 100, maxShortLeverage: 100, status: "1" }] }
   async positions() {
     const quantities = new Map<string,number>()
@@ -92,6 +93,45 @@ class Venue implements ExecutorVenue {
     return structuredClone(existing)
   }
 }
+
+test('external full closes require two observations, tombstone only owned lots and permit later fresh positions',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close());const venue=new Venue();let now=Date.now();const executor=new DemoExecutor(store,venue,{now:()=>now})
+ const first=intent({timestamp:now,qualificationId:'proof'});await executor.process([first]);assert.equal(executor.lots()[0].leverage,100)
+ const native=[...venue.orders.values()].find(o=>o.type==='MARKET')!
+ venue.orders.set('external-manual',{...native,orderId:'99001',clientOrderId:'external-manual',side:'SELL',quantity:2,filledQuantity:2,averagePrice:101})
+ now+=20000;await executor.process([]);assert.equal(executor.lots()[0].quantity,2,'a single flat observation cannot settle a lot')
+ now+=1001;await executor.process([]);const lot=executor.lots()[0];assert.equal(lot.quantity,0);assert.ok(lot.externalClosure?.confirmedAt);assert.equal(lot.realizedNetPnl,null);assert.equal(lot.protection,'closed');assert.equal(executor.summary().validatedExecutionPF.incomplete,1)
+ const before=venue.markets().length;await executor.process([first]);await executor.process([intent({id:'different-id-same-position',timestamp:now})]);assert.equal(venue.markets().length,before)
+ assert.equal(status(await executor.process([intent({id:'upcoming',positionId:'position-2',timestamp:now})]),'upcoming'),'acknowledged');assert.equal(venue.markets().length,before+1)
+ assert.ok(!venue.canceled.includes('99001'))
+})
+
+test('execution namespaces isolate identical signals in separate journals and remain stable across restart',t=>{
+ const a=new StateStore(':memory:'),b=new StateStore(':memory:');t.after(()=>{a.close();b.close()});const venue=new Venue()
+ const first=new DemoExecutor(a,venue),other=new DemoExecutor(b,venue)
+ assert.notEqual(first.clientOrderId('x02','same-signal'),other.clientOrderId('x02','same-signal'))
+ assert.equal(first.clientOrderId('x02','same-signal'),new DemoExecutor(a,venue).clientOrderId('x02','same-signal'))
+})
+test('legacy reserved order identities are resumed exactly and cannot be replaced by a new namespace',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close());const venue=new Venue(),entry=intent(),legacy=stableClientOrderId('x02',entry.id)
+ store.claimIntent(legacy,{intent:entry,order:{clientOrderId:legacy,symbol:'BTC-USDT',side:'BUY',positionSide:'LONG',type:'MARKET',quantity:'2'}})
+ const executor=new DemoExecutor(store,venue);assert.equal(executor.clientOrderId('x02',entry.id),legacy)
+ await executor.process([entry]);assert.equal(venue.markets().length,0);assert.equal(store.intents().length,1)
+})
+test('unavailable or partial external inventory cannot fabricate a settled lot or its PnL',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close());const venue=new Venue();let now=Date.now();const executor=new DemoExecutor(store,venue,{now:()=>now})
+ await executor.process([intent({timestamp:now})]);const native=[...venue.orders.values()].find(o=>o.type==='MARKET')!
+ venue.orders.set('partial-manual',{...native,orderId:'99002',clientOrderId:'partial-manual',side:'SELL',quantity:1,filledQuantity:1});now+=20000;await executor.process([]);assert.equal(executor.lots()[0].quantity,2)
+ venue.positions=async()=>{throw Error('inventory unavailable')};now+=2000;await executor.process([]);assert.equal(executor.lots()[0].quantity,2);assert.equal(executor.summary().executionPF.closed,0)
+})
+test('paper/exchange comparisons persist exact position pairs across restart and keep losing executions',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close());const venue=new Venue(),executor=new DemoExecutor(store,venue)
+ const first=intent({qualificationId:'proof'});await executor.process([first]);await executor.process([intent({id:'close-for-comparison',kind:'close',qualificationId:'proof'})])
+ const simulated:any={id:first.positionId,laneId:first.laneId,configId:first.configId,symbol:first.symbol,direction:'long',stage:'live',coordination:'normal',openedAt:first.timestamp,closedAt:first.timestamp+60000,entryPrice:100,exitPrice:100,quantity:2,notional:200,grossPnl:0,cost:.22,netPnl:-.22,netReturnPct:-.11,source:'paper',fills:[]}
+ executor.recordSimulatedClose('x02',simulated);executor.recordSimulatedClose('x02',simulated)
+ const comparison=new DemoExecutor(store,venue).comparison();assert.equal(comparison.matched,1);assert.equal(comparison.coveragePct,100);assert.equal(comparison.exchangePF.profitFactor,0);assert.equal(comparison.simulatedPF.profitFactor,0);assert.ok(Math.abs(comparison.meanDeltaPp!+.09)<1e-10)
+ assert.throws(()=>executor.recordSimulatedClose('x02',{...simulated,netReturnPct:5}),/changed/)
+})
 
 test('notional cap includes exchange minimums and rejects additions before canceling protection',async t=>{
  const store=new StateStore(':memory:');t.after(()=>store.close())
@@ -174,6 +214,22 @@ test('a final partial entry uses its actual scale and refuses an impossible smal
  assert.equal(status(await executor.process([add]),add.id),'rejected');assert.equal(venue.canceled.length,0);assert.equal(executor.lots()[0].protection,'active')
 })
 
+test('relative sizing stays exact when the exchange minimum falls between lot steps',async t=>{
+ const store=new StateStore(':memory:');t.after(()=>store.close())
+ const venue=new Venue(),executor=new DemoExecutor(store,venue)
+ const entry=intent({price:103,requestedQuantity:.001,minimumAddRatio:.2,maxOrderNotional:10})
+ assert.equal(status(await executor.process([entry]),entry.id),'acknowledged')
+ assert.equal(Number(venue.markets()[0].quantity),.05)
+ const add={...entry,id:'fractional-step-add',kind:'add' as const,requestedQuantity:.0002}
+ assert.equal(status(await executor.process([add]),add.id),'acknowledged')
+ assert.equal(Number(venue.markets()[1].quantity),.01)
+ assert.ok(Math.abs(Number(venue.markets()[1].quantity)/Number(venue.markets()[0].quantity)-.2)<1e-12)
+ const impossible={...entry,id:'fractional-impossible',kind:'add' as const,requestedQuantity:.00021}
+ const canceled=venue.canceled.length
+ assert.equal(status(await executor.process([impossible]),impossible.id),'rejected')
+ assert.equal(venue.canceled.length,canceled);assert.equal(executor.lots()[0].protection,'active')
+})
+
 test("actual fills create owned lots and native brackets exactly once", async (t) => {
   const store = new StateStore(":memory:"); t.after(() => store.close())
   const venue = new Venue(), executor = new DemoExecutor(store, venue)
@@ -196,7 +252,7 @@ test("partial fills use cumulative actual size and reconcile fees without duplic
   assert.equal(status(await executor.process([intent()]), "entry-1"), "unknown")
   assert.equal(executor.lots()[0].quantity, 0.5)
   assert.equal(executor.summary().fees, 0.05)
-  const existing = venue.orders.get(stableClientOrderId("x02", "entry-1"))!
+  const existing = venue.orders.get(executor.clientOrderId("x02", "entry-1"))!
   existing.status = "FILLED"; existing.filledQuantity = 2; existing.averagePrice = 101
   await executor.process([])
   assert.equal(executor.lots()[0].quantity, 2)
@@ -219,7 +275,7 @@ test("unknown outcomes survive restart and are queried without another market PO
   const executor = new DemoExecutor(restored, venue)
   await executor.process([intent()])
   assert.equal(venue.markets().length, 1)
-  const id = stableClientOrderId("x02", "entry-1")
+  const id = executor.clientOrderId("x02", "entry-1")
   venue.orders.set(id, makeOrder(venue.markets()[0]))
   await executor.process([intent()])
   assert.equal(venue.markets().length, 1)
@@ -393,7 +449,7 @@ test("lost writer lease blocks POST and discards late receipts until the next ow
   await assert.rejects(executor.process([intent()]), /writer lease lost/)
   assert.equal(venue.markets().length, 1)
   assert.equal(executor.lots().length, 0)
-  assert.equal(store.intent(stableClientOrderId("x02", "entry-1"))!.status, "reserved")
+  assert.equal(store.intent(executor.clientOrderId("x02", "entry-1"))!.status, "reserved")
   owns = true
   const freshOwner = new DemoExecutor(store, venue, { beforeSubmit: () => { if (!owns) throw new Error("writer lease lost") } })
   await freshOwner.process([intent()])
@@ -422,7 +478,7 @@ test("native cumulative order fee snapshots replace partial totals without inven
     price: order.averagePrice, quantity: order.filledQuantity, fee: -order.filledQuantity * order.averagePrice * 0.0006, realizedPnl: null, timestamp: Date.now() }]
   await executor.process([intent()])
   assert.equal(executor.summary().fees, 0.03)
-  const entry = venue.orders.get(stableClientOrderId("x02", "entry-1"))!
+  const entry = venue.orders.get(executor.clientOrderId("x02", "entry-1"))!
   entry.status = "FILLED"; entry.filledQuantity = 2
   await executor.process([]); await executor.process([])
   assert.equal(executor.summary().fees, 0.12)
@@ -444,7 +500,7 @@ test("regressing or over-covered native fee snapshots cannot complete accounting
   venue.fillOverride = (order) => [{ tradeId: null, granularity: "order", orderId: order.orderId, symbol: order.symbol, side: order.side,
     price: order.averagePrice, quantity, fee: -quantity * 0.06, realizedPnl: null, timestamp: Date.now() }]
   await executor.process([intent()])
-  const entry = venue.orders.get(stableClientOrderId("x02", "entry-1"))!
+  const entry = venue.orders.get(executor.clientOrderId("x02", "entry-1"))!
   entry.status = "FILLED"; entry.filledQuantity = 2
   quantity = 0.25
   await executor.process([])
@@ -508,7 +564,7 @@ test("unavailable position reads defer an unsubmitted add instead of rejecting i
   assert.equal(result.find(row=>row.id===add.id)?.status,"unknown")
   assert.match(result.find(row=>row.id===add.id)?.error??"",/Position mode read unavailable/)
   assert.equal(venue.submitted.length,before)
-  assert.equal(store.intent(stableClientOrderId("x02",add.id)),undefined)
+  assert.equal(store.intent(executor.clientOrderId("x02",add.id)),undefined)
   venue.positionMode = original
   assert.equal((await executor.process([add])).find(row=>row.id===add.id)?.status,"acknowledged")
   assert.equal(executor.lots()[0].quantity,4)
@@ -525,7 +581,7 @@ test("paper closure during async preflight rejects the durable intent before POS
   assert.equal(result.find(row=>row.id==='entry-1')?.status,'rejected')
   assert.match(result.find(row=>row.id==='entry-1')?.error??'',/Canceled before exchange write: Paper position already closed/)
   assert.equal(venue.submitted.length,0)
-  assert.equal(store.intent(stableClientOrderId('x02','entry-1'))?.status,'rejected')
+  assert.equal(store.intent(executor.clientOrderId('x02','entry-1'))?.status,'rejected')
   await executor.process([intent()])
   assert.equal(venue.submitted.length,0)
 })
@@ -563,5 +619,5 @@ test("mismatched native fill side cannot be assigned to an owned intent", async 
   const result=await executor.process([intent()])
   assert.equal(result.find(row=>row.id==='entry-1')?.status,'unknown')
   assert.equal(executor.lots().length,0)
-  assert.equal(store.intent(stableClientOrderId('x02','entry-1'))?.status,'reserved')
+  assert.equal(store.intent(executor.clientOrderId('x02','entry-1'))?.status,'reserved')
 })
