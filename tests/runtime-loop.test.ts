@@ -22,6 +22,31 @@ function intent(kind: ExecutionIntent["kind"]): ExecutionIntent {
   return { id: `intent-${kind}`, connectionId: "bingx-x02", laneId: "lane-a", configId: "config-a", symbol: "BTC-USDT", direction: "long", kind,
     positionId: "position-a", requestedQuantity: 1, timestamp: Date.now(), price: 100, notional: 100, takeProfitPct: 2, stopLossPct: 1, exitMode: "fixed", source: "real-qualified", status: "pending" }
 }
+
+test("one slow observed candle yields before a second history candle can exceed the work budget", async () => {
+  await isolated(async runtime => {
+    const internal=runtime as any,symbol=runtime.engine.managedSymbols()[0]
+    const end=Math.floor(Date.now()/60000)*60000
+    const candles=Array.from({length:16},(_,i)=>({timestamp:end-(16-i)*60000,open:100,high:101,low:99,close:100,volume:1}))
+    let elapsed=0,cursor:number|null=null
+    const lengths:number[]=[],clock=Object.getOwnPropertyDescriptor(performance,'now')
+    const processCandles=runtime.engine.processCandles,lastProcessedAt=runtime.engine.lastProcessedAt,persist=internal.persist
+    try{
+      Object.defineProperty(performance,'now',{configurable:true,value:()=>elapsed})
+      runtime.engine.lastProcessedAt=()=>cursor
+      runtime.engine.processCandles=(_symbol,chunk)=>{lengths.push(chunk.length);cursor=chunk.at(-1)!.timestamp;elapsed+=120;return[]}
+      internal.persist=()=>{}
+      const job={data:candles};internal.warmJobs.set(symbol,job)
+      internal.consumeHistory([])
+      assert.deepEqual(lengths,[1],"a costly candle must not hide another seven inside one work slice")
+      assert.equal(internal.warmJobs.get(symbol).offset,1)
+      assert.equal(runtime.control.warmed.includes(symbol),true,"existing readiness is not manufactured or retired by partial recovery")
+    }finally{
+      if(clock)Object.defineProperty(performance,'now',clock);else delete (performance as any).now
+      runtime.engine.processCandles=processCandles;runtime.engine.lastProcessedAt=lastProcessedAt;internal.persist=persist
+    }
+  })
+})
 async function isolated(work: (runtime: TerminalRuntime) => Promise<void>) {
   const directory = mkdtempSync(join(tmpdir(), "ctsc-runtime-loop-"))
   const priorDirectory = process.env.CTS_DATA_DIR

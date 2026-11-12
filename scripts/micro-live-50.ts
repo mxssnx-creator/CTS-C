@@ -20,7 +20,7 @@ async function main(){
  let studySymbols:string[]|undefined
  const symbolsFile=arg('--symbols-file','')
  if(symbolsFile)studySymbols=JSON.parse(await readFile(symbolsFile,'utf8'))
- let runError:string|null=null,warmedAt:number|undefined,observationCompleted=false,stopRequested=false,observedSeconds=0
+ let runError:string|null=null,warmedAt:number|undefined,observationCompleted=false,stopRequested=false,observedSeconds=0,lastStatsAt=0,lastStages:unknown=null
  try{
   const historyDirectory=arg('--history-directory','')
   if(historyDirectory){
@@ -45,10 +45,10 @@ async function main(){
   while(!warmedAt || Date.now()-warmedAt<duration*1000+5000){
    if(!warmedAt&&Date.now()-began>=1_800_000)break
    await new Promise(r=>setTimeout(r,5000))
-   const snapshot=await runtime.serial(async()=>runtime.snapshot())
+   const stages=await runtime.serial(async()=>{if(Date.now()-lastStatsAt>=60000){lastStages=runtime.engine.snapshot({laneLimit:0,positionLimit:0}).stages;lastStatsAt=Date.now()}return lastStages})
    const coverage=runtime.control.warmed.length
    if(coverage===symbolCount)warmedAt??=Date.now()
-   const observation={checkedAt:new Date().toISOString(),elapsedSeconds:(Date.now()-began)/1000,warmed:coverage,control:runtime.control,stages:runtime.engine.snapshot({laneLimit:0,positionLimit:0}).stages,stream:(snapshot as any).microMarketData,execution:new DemoExecutor(store,venue).summary(),performance:{heapBytes:process.memoryUsage().heapUsed,maxRssKiB:process.resourceUsage().maxRSS}}
+   const observation={checkedAt:new Date().toISOString(),elapsedSeconds:(Date.now()-began)/1000,warmed:coverage,control:runtime.control,stages,stageStatsAt:lastStatsAt,stream:runtime.marketDataStatus(),execution:new DemoExecutor(store,venue).summary(),performance:{heapBytes:process.memoryUsage().heapUsed,maxRssKiB:process.resourceUsage().maxRSS}}
    await appendFile(join(directory,'observations.ndjson'),JSON.stringify(observation)+'\n')
    await writeFile(join(directory,'latest.json'),JSON.stringify(observation))
    console.log(JSON.stringify({elapsed:observation.elapsedSeconds,warmed:coverage,stream:observation.stream,execution:observation.execution}))
