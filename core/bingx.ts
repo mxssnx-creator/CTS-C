@@ -303,8 +303,8 @@ export class BingxClient {
   async quotes(): Promise<Quote[]> {
     return rows(await this.read("/openApi/swap/v1/ticker/price")).map((raw) => {
       const value = object(raw)
-      return { symbol: text(value.symbol), price: number(value.price), timestamp: number(value.time ?? value.timestamp) || this.now() }
-    }).filter((quote) => quote.price > 0)
+      return { symbol: text(value.symbol), price: number(value.price), timestamp: number(value.time ?? value.timestamp) }
+    }).filter((quote) => quote.price > 0 && Number.isSafeInteger(quote.timestamp) && quote.timestamp > 0)
   }
 
   async candles(symbol: string, interval = "1m", limit = 500, endTime?: number): Promise<Candle[]> {

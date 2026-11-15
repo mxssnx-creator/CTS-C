@@ -328,7 +328,7 @@ export class TerminalRuntime {
       this.ensureLease()
       for(const quote of quotes) {
         if(!this.control.warmed.includes(quote.symbol)||!managed.has(quote.symbol))continue
-        if(!Number.isFinite(quote.price)||quote.price<=0||Date.now()-quote.timestamp>15_000||quote.timestamp>Date.now()+5000)continue
+        if(!Number.isFinite(quote.price)||quote.price<=0||!Number.isSafeInteger(quote.timestamp)||quote.timestamp<=0||Date.now()-quote.timestamp>15_000||quote.timestamp>Date.now()+5000)continue
         if((this.marks.get(quote.symbol)?.timestamp??0)<=quote.timestamp)this.marks.set(quote.symbol,{price:quote.price,timestamp:quote.timestamp})
         const bucket=Math.floor(quote.timestamp/60_000)*60_000
         const previous=this.bars.get(quote.symbol)
