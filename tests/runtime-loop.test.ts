@@ -13,6 +13,19 @@ function deferred<T>() {
   const promise = new Promise<T>((done) => { resolve = done })
   return { promise, resolve }
 }
+
+test('invalid quote times cannot poison readiness or replace a valid observed minute',async()=>{
+ await isolated(async runtime=>{
+  const internal=runtime as any,symbol=runtime.engine.settings.symbols[0],now=Date.now()
+  internal.prefetchHistory=()=>{};internal.executor={process:async()=>[]}
+  const seen:number[]=[];runtime.engine.processTick=(_s,_p,t)=>{seen.push(t);return[]}
+  internal.client.quotes=async()=>[{symbol,price:100,timestamp:now},{symbol,price:999,timestamp:NaN},{symbol,price:999,timestamp:undefined},{symbol,price:999,timestamp:now-20000},{symbol,price:999,timestamp:now+60000}]
+  await internal.tick();if(internal.executionTask)await internal.executionTask
+  assert.deepEqual(seen,[now]);assert.equal(internal.bars.get(symbol).lastObservation,now)
+  assert.ok(runtime.control.warmed.includes(symbol),'unknown quote age must not poison a valid minute with NaN')
+  assert.equal(internal.marks.get(symbol).timestamp,now)
+ })
+})
 async function within<T>(promise: Promise<T>, milliseconds = 1000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Quote tick waited for the background executor")), milliseconds) })]) }
