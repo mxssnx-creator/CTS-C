@@ -211,6 +211,8 @@ export class TradingEngine {
     for (const lane of Object.values(this.state.lanes)){const retained=this.sampleRetention(lane);if(lane.samples.length>retained){lane.samples.length=retained;this.dirtyLaneIds.add(lane.id)}}
   }
   exportState(): EngineState { return structuredClone(this.state) }
+  /** Existing retained model outcomes only; never reconstruct an absent exit. */
+  retainedLiveCloses():ClosedTrade[]{return structuredClone(this.state.recentLiveTrades??[])}
   private refreshSymbolCatalogs(){
     this.symbolConfigs.clear();this.symbolConfigIds.clear();this.configIds.clear();this.streams.clear();this.signalStreams.clear();this.portedStreams.clear();this.microStreams.clear();this.minuteStreams.clear()
     const cache=new Map<string,{configs:StrategyConfig[];ids:Set<string>}>()
