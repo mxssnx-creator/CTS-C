@@ -44,3 +44,19 @@ readiness, incomplete Active coverage, full twelve-symbol warmup/load assessment
 and sufficient separate forward samples remain open. No current financed run,
 positive execution PF, native fee calibration, or fresh venue clearance is
 established by these offline tests.
+
+## Concurrent hydration follow-up
+
+The engine can be hydrated without a lease while another writer advances its
+checkpoint. Ownership verification already reloads that engine generation, but
+the executor's constructor-time position index could remain stale. Comparison
+repair now refreshes the own-lot and pending-intent index from the same current
+journal after acquisition, using the same connection checks as construction.
+Validation completes before replacing the in-memory index; no journal is
+rewritten by the refresh.
+
+The final six-case fixture fails its two added cases against merged PR #26:
+a newly recorded own episode stays unpaired, and a newly mixed-connection journal
+is not rejected. Both pass with the refreshed journal index; the original four
+restart/identity/immutability cases remain passing. This is offline concurrency
+coverage, not an additional financial observation or a change in retention.
