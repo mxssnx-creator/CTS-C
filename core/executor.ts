@@ -95,8 +95,21 @@ export class DemoExecutor {
   }
   recordSimulatedClose(connectionId:string,trade:ClosedTrade){
     const key=JSON.stringify([connectionId,trade.id]);if(trade.stage!=='live'||!this.trackedPositions.has(key))return
+    this.persistSimulatedClose(connectionId,trade,this.allLots()[key])
+  }
+  /** Repair only missing comparison rows from retained own model evidence.
+   * A previously journaled outcome is authoritative and never replaced. */
+  recoverRetainedSimulatedCloses(connectionId:string,trades:readonly ClosedTrade[]){
+    const lots=this.allLots(),prior=this.store.database.prepare('SELECT 1 FROM execution_simulation WHERE position_id=?')
+    for(const trade of trades){
+      const key=JSON.stringify([connectionId,trade.id])
+      if(trade.stage!=='live'||!this.trackedPositions.has(key)||prior.get(key))continue
+      this.persistSimulatedClose(connectionId,trade,lots[key])
+    }
+  }
+  private persistSimulatedClose(connectionId:string,trade:ClosedTrade,lot:OwnedLot|undefined){
+    const key=JSON.stringify([connectionId,trade.id])
     if(this.options.connectionId&&connectionId!==this.options.connectionId)throw Error('Cross-connection simulation comparison')
-    const lot=this.allLots()[key]
     if(lot&&(lot.laneId!==trade.laneId||lot.symbol!==trade.symbol||lot.direction!==trade.direction||lot.executionIntent.configId!==trade.configId))throw Error('Simulation comparison escaped its exact owned lane')
     this.guard();const data=JSON.stringify(trade),prior=this.store.database.prepare('SELECT data FROM execution_simulation WHERE position_id=?').get(key) as {data:string}|undefined
     if(prior&&prior.data!==data)throw Error('A settled simulation comparison changed')

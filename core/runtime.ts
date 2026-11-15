@@ -92,6 +92,14 @@ export class TerminalRuntime {
     if(!acquired)throw new Error('Checkpoint changed repeatedly before execution ownership')
     this.leased=true
     this.leaseRenewedAt=Date.now()
+    try{
+      this.executor.recoverRetainedSimulatedCloses(this.connectionId,this.engine.retainedLiveCloses())
+    }catch(error){
+      // A failed repair must not make a second call bypass initial verification.
+      this.leaseLost=true;this.leased=false;this.control.running=false
+      this.store.releaseLease(this.owner)
+      throw error
+    }
     this.heartbeat=setInterval(()=>{try{this.ensureLease()}catch(error){this.control.lastError=error instanceof Error?error.message:'Ownership lost';clearInterval(this.heartbeat)}},5000)
     this.heartbeat.unref?.()
     this.control={...this.control,...this.store.get<Control>('control'),warmed:[]}
