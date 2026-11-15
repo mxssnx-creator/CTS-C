@@ -85,8 +85,13 @@ export class DemoExecutor {
     store.database.prepare('INSERT OR IGNORE INTO records VALUES(?,?,?)').run('executor:namespace',JSON.stringify(randomUUID()),Date.now())
     this.namespace=store.get<string>('executor:namespace')!
     if(typeof this.namespace!=='string'||!/^[a-f0-9-]{36}$/.test(this.namespace))throw Error('Durable execution namespace is invalid')
-    for(const lot of this.lots()){if(options.connectionId&&lot.connectionId!==options.connectionId)throw Error('Execution journal contains another connection');this.trackedPositions.add(lot.id)}
-    for(const r of store.openExecutionIntents())if(r.payload.intent){if(options.connectionId&&payload(r).intent.connectionId!==options.connectionId)throw Error('Execution journal contains another connection');this.trackedPositions.add(lotId(payload(r).intent))}
+    this.refreshTrackedPositions(this.allLots())
+  }
+  private refreshTrackedPositions(lots:Record<string,OwnedLot>){
+    const positions=new Set<string>()
+    for(const lot of Object.values(lots)){if(this.options.connectionId&&lot.connectionId!==this.options.connectionId)throw Error('Execution journal contains another connection');positions.add(lot.id)}
+    for(const r of this.store.openExecutionIntents())if(r.payload.intent){if(this.options.connectionId&&payload(r).intent.connectionId!==this.options.connectionId)throw Error('Execution journal contains another connection');positions.add(lotId(payload(r).intent))}
+    this.trackedPositions=positions
   }
   clientOrderId(connectionId:string,id:string){
     const old=this.store.database.prepare("SELECT id FROM intents WHERE json_extract(payload,'$.intent.connectionId')=? AND json_extract(payload,'$.intent.id')=? AND json_extract(payload,'$.role') IS NULL LIMIT 2").all(connectionId,id) as {id:string}[]
@@ -101,6 +106,8 @@ export class DemoExecutor {
    * A previously journaled outcome is authoritative and never replaced. */
   recoverRetainedSimulatedCloses(connectionId:string,trades:readonly ClosedTrade[]){
     const lots=this.allLots(),prior=this.store.database.prepare('SELECT 1 FROM execution_simulation WHERE position_id=?')
+    // Another writer may have advanced the journal during unowned hydration.
+    this.refreshTrackedPositions(lots)
     for(const trade of trades){
       const key=JSON.stringify([connectionId,trade.id])
       if(trade.stage!=='live'||!this.trackedPositions.has(key)||prior.get(key))continue

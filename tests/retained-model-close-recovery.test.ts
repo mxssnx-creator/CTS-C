@@ -78,3 +78,29 @@ test('a retained close from another lane fails recovery before funding and canno
   assert.equal(store.intents().length,0)
  }finally{runtime?.shutdown();store.close()}
 })
+
+test('ownership revalidation repairs a newly journaled own episode alongside the refreshed engine checkpoint',()=>{
+ const store=new StateStore(':memory:');let runtime:TerminalRuntime|undefined
+ try{
+  runtime=new TerminalRuntime(connection,store,noVenue)
+  store.acquireLease('other-owner')
+  seed(store,[trade])
+  store.releaseLease('other-owner')
+  runtime.pause()
+  assert.equal(executor(store).comparison().matched,1,'fresh model and fresh owned journal must be matched together')
+  assert.equal(store.intents().length,0)
+ }finally{runtime?.shutdown();store.close()}
+})
+
+test('ownership revalidation rejects a newly mixed-connection owned journal before comparison repair',()=>{
+ const store=new StateStore(':memory:');let runtime:TerminalRuntime|undefined
+ try{
+  runtime=new TerminalRuntime(connection,store,noVenue)
+  seed(store,[trade])
+  store.set('executor:owned-lots',{[JSON.stringify(['another-connection',position])]:{...lot,id:JSON.stringify(['another-connection',position]),connectionId:'another-connection'}})
+  assert.throws(()=>runtime!.pause(),/Execution journal contains another connection/)
+  assert.throws(()=>runtime!.pause(),/ownership was lost/)
+  assert.equal(store.database.prepare('SELECT COUNT(*) AS n FROM execution_simulation').get()!.n,0)
+  assert.equal(store.intents().length,0)
+ }finally{runtime?.shutdown();store.close()}
+})
