@@ -186,7 +186,18 @@ test('execution PF uses actual net returns of closed lots and keeps losing quali
  const s=executor.summary()
  assert.equal(s.validatedExecutionPF.closed,2);assert.equal(s.executionPF.closed,2);assert.equal(s.executionPF.incomplete,0)
  assert.ok(Math.abs(s.validatedExecutionPF.profitFactor-2.797/3.203)<1e-9,'return PF must not be distorted by the losing lot having 10 times the notional')
+ assert.ok(Math.abs(s.validatedExecutionPF.monetaryProfitFactor-2.797/32.03)<1e-9,'monetary PF must reflect the actual unequal position sizes')
  const lots=executor.lots();assert.ok(lots.some(l=>l.realizedNetPnl!<0));assert.deepEqual(s.validatedExecutionPF,s.executionPF)
+ const missing={...lots[0],id:'incomplete',realizedNetPnl:null}
+ const partial=executor.summary([...lots,missing]).validatedExecutionPF
+ assert.equal(partial.incomplete,1);assert.equal(partial.closed,2)
+ assert.ok(Math.abs(partial.monetaryProfitFactor-2.797/32.03)<1e-9,'incomplete results must not be fabricated as zero')
+ const malformed={...lots[0],id:'malformed',openedNotional:-1}
+ assert.equal(executor.summary([...lots,malformed]).validatedExecutionPF.incomplete,1)
+ const unqualified={...lots[1],id:'unqualified',executionIntent:{...lots[1].executionIntent,qualificationId:undefined}}
+ const filtered=executor.summary([lots[0],unqualified])
+ assert.equal(filtered.validatedExecutionPF.closed,1);assert.equal(filtered.executionPF.closed,2)
+ assert.equal(filtered.validatedExecutionPF.monetaryPfState,'no-losses')
 })
 
 test('exchange minimum normalization preserves Block entry/add proportions using one captured scale',async t=>{

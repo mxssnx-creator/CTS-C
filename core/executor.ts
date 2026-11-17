@@ -171,7 +171,7 @@ export class DemoExecutor {
     const counts = this.store.database.prepare("SELECT status,COUNT(*) AS count FROM intents GROUP BY status").all() as { status: string; count: number }[]
     const complete = lots.every((lot) => lot.fees !== null), exchangeComplete = lots.every((lot) => lot.exchangeRealizedPnl !== null)
     const resultPF=(qualifiedOnly:boolean)=>{
-      let profit=0,loss=0,closed=0,incomplete=0
+      let profit=0,loss=0,monetaryProfit=0,monetaryLoss=0,closed=0,incomplete=0
       for(const lot of lots){
         if(lot.quantity>EPSILON||lot.openedQuantity<=0||(qualifiedOnly&&!lot.executionIntent.qualificationId))continue
         let notional=lot.openedNotional
@@ -179,10 +179,14 @@ export class DemoExecutor {
           const row=this.store.database.prepare("SELECT SUM(quantity) AS quantity,SUM(quantity*json_extract(data,'$.price')) AS notional FROM execution_fill_ledger WHERE lot_id=? AND upper(json_extract(data,'$.side'))=?").get(lot.id,lot.direction==='long'?'BUY':'SELL') as {quantity:number|null;notional:number|null}
           if(row.quantity!==null&&Math.abs(row.quantity-lot.openedQuantity)<EPSILON)notional=row.notional??undefined
         }
-        if(lot.realizedNetPnl===null||lot.fees===null||!notional||!Number.isFinite(notional)){incomplete++;continue}
-        const value=100*lot.realizedNetPnl/notional;profit+=Math.max(0,value);loss+=Math.max(0,-value);closed++
+        if(typeof lot.realizedNetPnl!=='number'||!Number.isFinite(lot.realizedNetPnl)||typeof lot.fees!=='number'||!Number.isFinite(lot.fees)||typeof notional!=='number'||!Number.isFinite(notional)||notional<=0){incomplete++;continue}
+        const value=100*lot.realizedNetPnl/notional
+        if(!Number.isFinite(value)){incomplete++;continue}
+        profit+=Math.max(0,value);loss+=Math.max(0,-value);closed++
+        monetaryProfit+=Math.max(0,lot.realizedNetPnl);monetaryLoss+=Math.max(0,-lot.realizedNetPnl)
       }
-      return {closed,incomplete,...describeProfitFactor(profit,loss,closed)}
+      const monetary=describeProfitFactor(monetaryProfit,monetaryLoss,closed)
+      return {closed,incomplete,...describeProfitFactor(profit,loss,closed),monetaryProfitFactor:monetary.profitFactor,monetaryPfState:monetary.pfState}
     }
     return { configured: this.venue.configured, environment: this.venue.environment??'BingX VST', intents: Object.fromEntries(counts.map((row) => [row.status, Number(row.count)])),
       executionPF:resultPF(false),validatedExecutionPF:resultPF(true),leveragePolicy:'maximum-verified-per-direction',externalCloses:lots.filter(l=>l.externalClosure?.confirmedAt).length,
