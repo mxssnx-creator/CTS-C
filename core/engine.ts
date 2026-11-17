@@ -82,10 +82,14 @@ function laneKey(connectionId: string, symbol: string, config: StrategyConfig, d
   // JSON identities cannot collide when a user changes delimiters in a label.
   return JSON.stringify([connectionId, symbol, config.id, direction, coordination, stage, identity])
 }
-type WindowResult={pfSampleCount?:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number;count:number;required:number;minPF:number;profit:number;loss:number;enoughSamples:boolean;profitFactor:number;pfState:import('./types').ProfitFactorState;qualified:boolean}
+type WindowResult={pfSampleCount?:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number;count:number;required:number;minPF:number;profit:number|null;loss:number|null;enoughSamples:boolean;profitFactor:number|null;pfState:import('./types').ProfitFactorState;qualified:boolean}
 const windowCache=new WeakMap<LaneState,{closed:number;samples:number[];length:number;head:number|undefined;value:WindowResult}>()
 const blockWindowCache=new WeakMap<LaneState,{closed:number;samples:number[];head:number|undefined;length:number;key:string;value:WindowResult}>()
 const axisCache=new WeakMap<LaneState,{closed:number;samples:number[];length:number;head:number|undefined;previous:number;last:number;outcome:string;threshold:number;allowed:boolean}>()
+function knownWindow(samples:readonly unknown[],count:number):boolean {
+  for(let i=0;i<count;i++)if(typeof samples[i]!=='number'||!Number.isFinite(samples[i]))return false
+  return true
+}
 export function windowMetrics(lane: LaneState | undefined, required: number, minPF: number, blocks?:BlockPolicy):WindowResult {
   const cap=lane?.config.maxWindowDrawdownPct
   if(blocks){
@@ -93,9 +97,10 @@ export function windowMetrics(lane: LaneState | undefined, required: number, min
     const samples=lane?.samples??[],key=blockPolicyKey(blocks),cached=lane?blockWindowCache.get(lane):undefined;
     if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.key===key&&cached.value.minPF===minPF&&cached.value.maxDrawdownPct===cap)return cached.value;
     const result=evaluateBlocks(blockPrefix(samples,blockRequired(blocks)),blocks,minPF);
-    const pf=describeProfitFactor(result.long.gp,result.long.gl,result.long.count);
-    const drawdown=cap===undefined?undefined:windowRisk(samples,result.required,cap)
-    const value={profit:result.long.gp,loss:result.long.gl,pfSampleCount:result.long.count,count:result.count,required:result.required,minPF,enoughSamples:result.count===result.required,...pf,...drawdown,qualified:result.state==="qualified"&&(cap===undefined||drawdown!.drawdownPct<=cap),blockPolicyKey:result.key};
+    const unknown=result.state==='unknown';
+    const pf=unknown?{profitFactor:null,pfState:'unknown' as const}:describeProfitFactor(result.long.gp,result.long.gl,result.long.count);
+    const drawdown:{drawdownPct?:number;maxDrawdownPct:number}|undefined=cap===undefined?undefined:unknown?{maxDrawdownPct:cap}:windowRisk(samples,result.required,cap)
+    const value={profit:unknown?null:result.long.gp,loss:unknown?null:result.long.gl,pfSampleCount:result.long.count,count:result.count,required:result.required,minPF,enoughSamples:!unknown&&result.count===result.required,...pf,...drawdown,qualified:result.state==="qualified"&&(cap===undefined||drawdown?.drawdownPct!==undefined&&drawdown.drawdownPct<=cap),blockPolicyKey:result.key};
     if(lane)blockWindowCache.set(lane,{closed:lane.closedCount,samples,head:samples[0],length:samples.length,key,value});
     return value;
   }
@@ -103,8 +108,15 @@ export function windowMetrics(lane: LaneState | undefined, required: number, min
   const samples = lane?.samples ?? [], count = Math.min(samples.length, required)
   const cached=lane?windowCache.get(lane):undefined
   if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.value.required===required&&cached.value.minPF===minPF&&cached.value.maxDrawdownPct===cap)return cached.value
+  const unknown=()=>{
+    const value:WindowResult={count,required,minPF,profit:null,loss:null,enoughSamples:false,profitFactor:null,pfState:'unknown',qualified:false,...(cap===undefined?{}:{maxDrawdownPct:cap})}
+    if(lane)windowCache.set(lane,{closed:lane.closedCount,samples,length:samples.length,head:samples[0],value})
+    return value
+  }
+  if(!knownWindow(samples,count))return unknown()
   let profit = 0, loss = 0
   for (let i = 0; i < count; i++) { profit += Math.max(0, samples[i]); loss += Math.max(0, -samples[i]) }
+  if(!Number.isFinite(profit)||!Number.isFinite(loss))return unknown()
   const pf = describeProfitFactor(profit, loss, count)
   const drawdown=cap===undefined?undefined:windowRisk(samples,count,cap)
   const value={count,required,minPF,profit,loss,enoughSamples:count>=required,...pf,...drawdown,qualified:count>=required&&pf.profitFactor>=minPF&&(cap===undefined||drawdown!.drawdownPct<=cap)}
@@ -316,7 +328,7 @@ export class TradingEngine {
     if(!lane)return false
     if(this.validLineages.has(lane.id))return true
     const index=STAGES.indexOf(lane.stage),s=this.state.settings
-    const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>proof.stage===STAGES[i]&&proof.qualified&&Number.isFinite(proof.checkedAt)&&proof.checkedAt>0&&Number.isFinite(proof.profitFactor)&&proof.count===proof.required&&proof.profitFactor>=proof.minPF&&(proof.maxDrawdownPct??0)===(lane.config.maxWindowDrawdownPct??0)&&(proof.maxDrawdownPct===undefined||(Number.isFinite(proof.drawdownPct)&&proof.drawdownPct!>=0&&proof.drawdownPct!<=proof.maxDrawdownPct))&&proof.required===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockRequired(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):s.stageLastN[proof.stage as 'base'|'main'|'real'])&&(proof.blockPolicyKey??null)===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockPolicyKey(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):null)&&proof.minPF===Math.max(s.stageMinPF[proof.stage as 'base'|'main'|'real'],lane.config.autoPfFloor??0)&&proof.laneId===this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,proof.stage)?.id))
+    const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>proof.stage===STAGES[i]&&proof.qualified&&Number.isFinite(proof.checkedAt)&&proof.checkedAt>0&&typeof proof.profitFactor==='number'&&Number.isFinite(proof.profitFactor)&&proof.count===proof.required&&proof.profitFactor>=proof.minPF&&(proof.maxDrawdownPct??0)===(lane.config.maxWindowDrawdownPct??0)&&(proof.maxDrawdownPct===undefined||(Number.isFinite(proof.drawdownPct)&&proof.drawdownPct!>=0&&proof.drawdownPct!<=proof.maxDrawdownPct))&&proof.required===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockRequired(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):s.stageLastN[proof.stage as 'base'|'main'|'real'])&&(proof.blockPolicyKey??null)===(s.stageBlocks?.[proof.stage as 'base'|'main'|'real']?blockPolicyKey(s.stageBlocks[proof.stage as 'base'|'main'|'real']!):null)&&proof.minPF===Math.max(s.stageMinPF[proof.stage as 'base'|'main'|'real'],lane.config.autoPfFloor??0)&&proof.laneId===this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,proof.stage)?.id))
     if(valid)this.validLineages.add(lane.id)
     return valid
   }
@@ -348,10 +360,13 @@ export class TradingEngine {
     const threshold = Math.max(referenceStage === "live" ? s.stageMinPF.real : s.stageMinPF[referenceStage],config.autoPfFloor??0)
     const cached=axisCache.get(source),samples=source.samples
     if(cached&&cached.closed===source.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.previous===axis.previous&&cached.last===axis.last&&cached.outcome===axis.outcome&&cached.threshold===threshold)return cached.allowed
+    if(!knownWindow(samples,axis.last+axis.previous)){
+      axisCache.set(source,{closed:source.closedCount,samples,length:samples.length,head:samples[0],previous:axis.previous,last:axis.last,outcome:axis.outcome,threshold,allowed:false});return false
+    }
     let profit=0,loss=0,lastNet=0
     for(let i=0;i<axis.last;i++)lastNet+=samples[i]
     for(let i=axis.last;i<axis.last+axis.previous;i++){profit+=Math.max(0,samples[i]);loss+=Math.max(0,-samples[i])}
-    const allowed=describeProfitFactor(profit,loss,axis.previous).profitFactor>=threshold&&(axis.outcome==='any'||(axis.outcome==='positive'?lastNet>0:lastNet<0))
+    const allowed=[profit,loss,lastNet].every(Number.isFinite)&&describeProfitFactor(profit,loss,axis.previous).profitFactor>=threshold&&(axis.outcome==='any'||(axis.outcome==='positive'?lastNet>0:lastNet<0))
     axisCache.set(source,{closed:source.closedCount,samples,length:samples.length,head:samples[0],previous:axis.previous,last:axis.last,outcome:axis.outcome,threshold,allowed})
     return allowed
   }
@@ -630,7 +645,7 @@ export class TradingEngine {
     for (const limit of [laneLimit, positionLimit]) if (limit !== Infinity && (!Number.isInteger(limit) || limit < 0)) throw new Error("Invalid snapshot limit")
     const s = this.state.settings
     const lanes: EngineSnapshot["lanes"] = [], positions: EngineSnapshot["positions"] = []
-    const stageStats = Object.fromEntries(STAGES.map(stage => [stage, { stage, lanes: 0, open: 0, closed: 0, enoughSamples: 0, enoughSamplesPct: 0, qualified: 0, profitFactor: 1, netPnl: 0, profit: 0, loss: 0,wins:0,fees:0 as number|null,longOpen:0,shortOpen:0,currentLanes:0,currentEnoughSamples:0,currentQualified:0,admissionReady:0,blockedByParent:0,currentProfit:0,currentLoss:0,currentCount:0,validatedProfit:0,validatedLoss:0,validatedCount:0,admittedCount:0,admittedProfit:0,admittedLoss:0,admittedNet:0 }])) as Record<Stage,StageMetricsAccumulator>
+    const stageStats = Object.fromEntries(STAGES.map(stage => [stage, { stage, lanes: 0, open: 0, closed: 0, enoughSamples: 0, enoughSamplesPct: 0, qualified: 0, profitFactor: 1, netPnl: 0, profit: 0, loss: 0,wins:0,fees:0 as number|null,longOpen:0,shortOpen:0,currentLanes:0,currentEnoughSamples:0,currentQualified:0,admissionReady:0,blockedByParent:0,currentProfit:0,currentLoss:0,currentCount:0,currentUnknown:0,validatedProfit:0,validatedLoss:0,validatedCount:0,admittedCount:0,admittedProfit:0,admittedLoss:0,admittedNet:0 }])) as Record<Stage,StageMetricsAccumulator>
     for (const lane of Object.values(this.state.lanes)) {
       if (lane.calculationOnly) continue
       const source = lane.stage === "live" ? "real" : lane.stage
@@ -652,16 +667,17 @@ export class TradingEngine {
         stats.admissionReady+=Number(parentReady&&axisReady)
         stats.blockedByParent+=Number(!parentReady)
         stats.currentQualified+=Number(validated)
-        if(validated){stats.validatedProfit+=metrics.profit;stats.validatedLoss+=metrics.loss;stats.validatedCount+=metrics.pfSampleCount??metrics.count}
-        stats.currentProfit+=metrics.profit;stats.currentLoss+=metrics.loss;stats.currentCount+=metrics.pfSampleCount??metrics.count
+        if(validated){stats.validatedProfit+=metrics.profit??0;stats.validatedLoss+=metrics.loss??0;stats.validatedCount+=metrics.pfSampleCount??metrics.count}
+        if(metrics.pfState==='unknown')stats.currentUnknown++
+        else {stats.currentProfit+=metrics.profit??0;stats.currentLoss+=metrics.loss??0;stats.currentCount+=metrics.pfSampleCount??metrics.count}
       }
       if (lanes.length < laneLimit) lanes.push({ id: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, direction: lane.direction, coordination: lane.coordination, ...metrics, current,admissionReady:parentReady&&axisReady,validated,isOpen:Boolean(lane.open),netPnl: lane.netPnl })
       if (lane.open && (!options.positionStage || options.positionStage === lane.stage) && positions.length < positionLimit) positions.push({ ...lane.open, laneId: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, coordination: lane.coordination })
     }
     const stages = STAGES.map(stage => {
-      const { profit, loss,currentProfit,currentLoss,currentCount,validatedProfit,validatedLoss,validatedCount,admittedCount,admittedProfit,admittedLoss,admittedNet, ...stats } = stageStats[stage]
+      const { profit, loss,currentProfit,currentLoss,currentCount,currentUnknown,validatedProfit,validatedLoss,validatedCount,admittedCount,admittedProfit,admittedLoss,admittedNet, ...stats } = stageStats[stage]
       stats.enoughSamplesPct = stats.lanes ? 100 * stats.enoughSamples / stats.lanes : 0
-      const current=describeProfitFactor(currentProfit,currentLoss,currentCount)
+      const current=currentUnknown?{profitFactor:null,pfState:'unknown' as const}:describeProfitFactor(currentProfit,currentLoss,currentCount)
       return { ...stats, ...describeProfitFactor(profit, loss, stats.closed),currentProfitFactor:current.profitFactor,currentPfState:current.pfState,validatedWindow:{samples:validatedCount,sets:stats.currentQualified,profit:validatedProfit,loss:validatedLoss,...describeProfitFactor(validatedProfit,validatedLoss,validatedCount)},admittedForward:{closes:admittedCount,...describeProfitFactor(admittedProfit,admittedLoss,admittedCount),netPnl:admittedNet,unprovenCloses:stats.closed-admittedCount} }
     })
     return structuredClone({ settings: s, catalogCount: this.configs.length, symbolCount: s.symbols.length, processedCandles: this.state.processedCandles, updatedAt: this.state.updatedAt,
@@ -671,4 +687,4 @@ export class TradingEngine {
 }
 // Deterministic client IDs survive restart and retries; credentials are never inputs.
 function hashId(text: string): string { return createHash("sha256").update(text).digest("hex").slice(0, 32) }
-type StageMetricsAccumulator = Omit<import("./types").StageMetrics,"pfState"|"currentProfitFactor"|"currentPfState"> & {profit:number;loss:number;currentProfit:number;currentLoss:number;currentCount:number;validatedProfit:number;validatedLoss:number;validatedCount:number;admittedCount:number;admittedProfit:number;admittedLoss:number;admittedNet:number}
+type StageMetricsAccumulator = Omit<import("./types").StageMetrics,"pfState"|"currentProfitFactor"|"currentPfState"> & {profit:number;loss:number;currentProfit:number;currentLoss:number;currentCount:number;currentUnknown:number;validatedProfit:number;validatedLoss:number;validatedCount:number;admittedCount:number;admittedProfit:number;admittedLoss:number;admittedNet:number}
