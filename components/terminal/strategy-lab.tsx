@@ -130,6 +130,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
   const enumField = (key: string, label: string, options: { value: string; label: string }[]) => (
     <label className="space-y-2 text-xs"><span className="block terminal-muted">{label}</span><select aria-label={label} className="terminal-input w-full" value={String(draft[key])} onChange={event => change(key, event.target.value)}>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>{settings[key] === undefined && <span className="block text-[10px] terminal-muted">Default · {String(DEFAULTS[key])}</span>}</label>
   )
+  const windowOptions = [
+    { value: "context", label: "Exact symbol and side" },
+    { value: "config", label: "Same configuration across symbols and sides" },
+    { value: "both", label: "Require both windows" },
+  ]
   return (
     <>
     <form onSubmit={save} className="space-y-5">
@@ -190,6 +195,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <div className="mb-5 flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-[var(--terminal-accent)]" /><h3 className="text-sm font-semibold">Stage gates & completed evidence</h3></div>
             <p className="terminal-muted mb-5 text-xs">PF 1.0 is neutral. Each stage uses its own most recent completed samples. The Real gate controls progression into Live; exchange execution also requires a verified connection.</p>
             <div className="mb-5">{enumField("stageGateMode", "Stage progression", [{ value: "processed-sets", label: "Independent processed sets" }, { value: "continuous-ancestors", label: "Recheck all ancestor windows" }])}</div>
+            <div className="mb-3 grid gap-5 sm:grid-cols-2">
+              {enumField("stageWindowScope", "Stage evidence scope", windowOptions)}
+              {enumField("microStageWindowScope", "Micro and Low-Range evidence scope", [{ value: "inherit", label: "Use stage evidence scope" }, ...windowOptions])}
+            </div>
+            <p className="terminal-muted mb-5 text-xs">Pooled windows use completed samples from the same configuration, strategy coordination and stage. Exchange entries still require the exact symbol and side to pass.</p>
             <div className="mb-5">{enumField("liveEntryMode", "Live entries", [{ value: "independent", label: "Independent signal entries · legacy baseline" }, { value: "real-mirror", label: "Mirror fresh qualified Real entries" }])}</div>
             <p className="terminal-muted mb-5 text-xs">Real remains the final current PF gate. Mirroring links each new Live position to its fresh Real entry and uses Real evidence for Axis, without another Live evidence gate. Independent processed sets always mirror Real. Mode changes preserve prior outcomes.</p>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{NUMERIC_FIELDS.map(numberField)}</div>

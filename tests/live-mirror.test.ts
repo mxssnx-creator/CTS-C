@@ -35,6 +35,30 @@ test('a pending mirrored entry fails when current Real evidence, its exact paren
  }
 })
 
+for(const coordination of ['block','dca'] as const)test(`a mirrored ${coordination} reserves an add only from the exact Real parent`,()=>{
+ const engine=new TradingEngine(settings)
+ let state:EngineState|undefined,liveId=''
+ for(const bar of bars){
+  engine.processCandles('BTC-USDT',[bar],{allowExecution:true})
+  const p=engine.snapshot().positions.find(p=>p.stage==='live'&&p.coordination===coordination&&p.exitMode==='fixed')
+  if(p){state=engine.exportState();liveId=p.id;break}
+ }
+ assert.ok(state)
+ const live=Object.values(state.lanes).find(lane=>lane.open?.id===liveId)!
+ const real=Object.values(state.lanes).find(lane=>lane.open?.id===live.open!.parentPositionId)!
+ const p=live.open!,sign=p.direction==='long'?1:-1
+ const move=coordination==='block'?p.takeProfitPct*.6:-.15
+ const price=p.entryPrice*(1+sign*move/100),time=state.updatedAt+1
+ const healthy=new TradingEngine(settings,state)
+ assert.ok(healthy.processTick('BTC-USDT',price,time).some(e=>e.laneId===live.id&&e.type==='added'))
+ real.open!.id+='-unrelated-order'
+ const changed=new TradingEngine(settings,state)
+ const events=changed.processTick('BTC-USDT',price,time)
+ assert.ok(events.some(e=>e.laneId===real.id&&e.type==='added'))
+ assert.ok(!events.some(e=>e.laneId===live.id&&e.type==='added'))
+ assert.ok(!changed.pendingIntents().some(intent=>intent.positionId===liveId&&intent.kind==='add'))
+})
+
 test('mirroring restarts exactly and switching its mode preserves Base/Main/Real identities and losses',()=>{
  const e=new TradingEngine(settings);e.processCandles('BTC-USDT',bars.slice(0,317),{allowExecution:true})
  const restored=TradingEngine.fromSerialized(e.serializeState());e.processCandles('BTC-USDT',bars.slice(317),{allowExecution:true});restored.processCandles('BTC-USDT',bars.slice(317),{allowExecution:true});assert.deepEqual(normalized(restored.exportState()),normalized(e.exportState()))

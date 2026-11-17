@@ -1,0 +1,73 @@
+/** Compare Settings evidence scopes against the same closed market bars. */
+import { createHash } from 'node:crypto'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { TradingEngine } from '../core/engine.ts'
+import { describeProfitFactor } from '../core/metrics.ts'
+import type { Candle, ClosedTrade, EngineSettings } from '../core/types.ts'
+const symbols=['BTC-USDT','ETH-USDT','SOL-USDT','BCH-USDT','ADA-USDT','AVAX-USDT','BNB-USDT','LINK-USDT']
+const [feedPath, outputPath, ...dates] = process.argv.slice(2)
+if (!feedPath || !outputPath) throw new Error('Usage: replay-config-stage-windows.ts FEED_JSON OUTPUT_JSON [UTC decisions]')
+const bytes = readFileSync(feedPath), feed = JSON.parse(bytes.toString()).candles
+const fixtureSha256 = createHash('sha256').update(bytes).digest('hex')
+const hourly=3_600_000
+const scenarios = {
+  context: {stageWindowScope:'context'},
+  config: {stageWindowScope:'config'},
+  mixed: {stageWindowScope:'config',microStageWindowScope:'both'},
+} as const satisfies Record<string,Partial<EngineSettings>>
+function stats(rows:ClosedTrade[]) {
+  let gp=0, gl=0, cashGain=0, cashLoss=0, pnl=0, peak=0, drawdown=0
+  const clock=new Map<number,number>()
+  for(const row of rows){
+    gp+=Math.max(0,row.netReturnPct);gl+=Math.max(0,-row.netReturnPct)
+    cashGain+=Math.max(0,row.netPnl);cashLoss+=Math.max(0,-row.netPnl)
+    clock.set(row.closedAt,(clock.get(row.closedAt)??0)+row.netPnl)
+  }
+  for(const value of clock.values()){pnl+=value;peak=Math.max(peak,pnl);drawdown=Math.max(drawdown,peak-pnl)}
+  const pf=describeProfitFactor(gp,gl,rows.length), cash=describeProfitFactor(cashGain,cashLoss,rows.length)
+  return {closed:rows.length,pf:pf.pfState==='finite'?pf.profitFactor:null,pfState:pf.pfState,
+    cashPf:cash.pfState==='finite'?cash.profitFactor:null,cashPfState:cash.pfState,net:pnl,settledDrawdown:drawdown,
+    added:rows.reduce((sum,row)=>sum+row.fills.length-1,0)}
+}
+const results=[]
+for(const date of (dates.length?dates:['2026-10-09','2026-10-13','2026-10-17T09:00'])) {
+  const start=Date.parse(date.includes('T')?date+'Z':date+'T00:00Z')
+  function range(lo:number,hi:number):Record<string,Candle[]> {
+    return Object.fromEntries(symbols.map(symbol=>{
+      const bars=feed[symbol+'|1'].filter((row:{t:number})=>row.t>=lo&&row.t<hi)
+      if(bars.length!==720||bars.some((row:{t:number},i:number)=>row.t!==lo+i*60_000))throw Error(`Noncontiguous data ${date} ${symbol}`)
+      return [symbol,bars.map((r:{t:number;o:number;h:number;l:number;c:number;v:number})=>({timestamp:r.t,open:r.o,high:r.h,low:r.l,close:r.c,volume:r.v}))]
+    }))
+  }
+  const pre=range(start-12*hourly,start), forward=range(start,start+12*hourly)
+  for(const [scenario, scope] of Object.entries(scenarios)) {
+    const engine=new TradingEngine({symbols,stageGateMode:'processed-sets', ...scope,
+      stageLastN:{base:20,main:8,real:8},stageMinPF:{base:1.1,main:1.1,real:1.1},
+      catalog:{strategyIndicationTypes:['Trend','Break','Signals','Tactic','Inverse'],strategyEnabledRanges:['Micro','Low-Range','Minimal','Short','Normal','Long'],
+        strategyTpSteps:[2,3,5,8,12,18],strategySlRatios:[.6,1],strategyExitModes:['fixed','trailing'],strategySignalTimeframes:[1],strategySignalPeriods:[20],
+        strategySignalsSources:['sig-ema-cross-s'],strategyIndicationSources:['tactic-dca-bounce-8-percent-0.5-1-0.25','inverse-known-ema-9-21'],
+        autoPfEnabled:true,autoPfRatio:.2,autoPfMax:2,makerFeePct:.02,takerFeePct:.05,slippagePctOfFees:10}})
+    const began=performance.now()
+    engine.processMarketCandles(pre)
+    const before=engine.snapshot({laneLimit:0,positionLimit:0}), beforeState=engine.exportState()
+    const trades:ClosedTrade[]=[]
+    engine.observeLiveCloses(trade=>{if(trade.openedAt>=start)trades.push(trade)})
+    engine.processMarketCandles(forward)
+    const after=engine.snapshot({laneLimit:0,positionLimit:0}), afterState=engine.exportState()
+    if(engine.pendingIntents().length)throw Error('Offline replay created venue intents')
+    const lanes=Object.values(afterState.lanes), live=lanes.filter(l=>l.stage==='live'&&!l.calculationOnly)
+    const grouped=Object.fromEntries(['normal','axis','block','dca'].map(coord=>{
+      const own=live.filter(l=>l.coordination===coord)
+      return [coord,{opened:own.reduce((n,l)=>n+l.admissionCount-(beforeState.lanes[l.id]?.admissionCount??0),0),
+        held:own.filter(l=>l.open&&l.open.openedAt>=start).length,...stats(trades.filter(t=>t.coordination===coord))}]
+    }))
+    const entry= {date,scenario,symbols,elapsedMs:Math.round(performance.now()-began),settings:engine.settings,
+      before:before.stages, after:after.stages,live:stats(trades),grouped,
+      byRange:Object.fromEntries([...new Set(live.map(l=>l.config.range))].map(range=>[range,stats(trades.filter(t=>afterState.lanes[t.laneId].config.range===range))])),
+      byIndication:Object.fromEntries([...new Set(live.map(l=>l.config.type))].map(type=>[type,stats(trades.filter(t=>afterState.lanes[t.laneId].config.type===type))]))}
+    results.push(entry)
+    console.log(JSON.stringify({date,scenario,elapsedMs:entry.elapsedMs,configs:after.catalogCount,
+      base:[before.stages[0].currentQualified,before.stages[0].currentLanes,before.stages[0].validatedWindow],live:entry.live,grouped}))
+    writeFileSync(outputPath, JSON.stringify({fixtureSha256, preHours:12, tradeHours:12, results}, null, 2) + '\n')
+  }
+}

@@ -22,10 +22,13 @@ export interface PseudoPosition {
   status: "open" | "closed"; result?: number; exit_time?: string; exit_price?: number
   direction?: Direction; indication_type?: string
 }
+export type StageWindowScope = "context" | "config" | "both"
 export interface EngineSettings {
   stageBlocks?: Partial<Record<"base"|"main"|"real",BlockPolicy>>;
   liveEntryMode?:'independent'|'real-mirror'
   stageGateMode?:'continuous-ancestors'|'processed-sets'
+  stageWindowScope?: StageWindowScope
+  microStageWindowScope?: StageWindowScope | "inherit"
   connectionId: string; symbols: string[]; initialEquity: number; baseNotional: number; volumeFactor: number
   volumeRatios?:Record<Coordination,number>
   maxOrderNotional?:number
@@ -46,7 +49,7 @@ export interface DcaStepVerdict {
   step: number; samples: number; required: number; profitFactor: number | null; state: "warming" | "unknown" | "held" | "qualified"
 }
 export interface EntryFill { price: number; quantity: number; timestamp: number; kind: "entry" | "block" | "dca" }
-export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number|null;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number}
+export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number|null;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number;windowScope?:StageWindowScope;configWindow?:{count:number;profitFactor:number|null;qualified:boolean}}
 export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   activationOrder?:number
@@ -77,6 +80,8 @@ export interface LaneState {
   dcaStepReturns?: Array<Array<number | null>>
   id: string; symbol: string; configId: string; direction: Direction; stage: Stage; coordination: Coordination
   config: StrategyConfig; samples: number[]; closedCount: number; wins: number; netPnl: number; grossProfit: number; grossLoss: number
+  /** Timestamped prefix of samples. Older checkpoints may have exact-lane returns only. */
+  sampleTimes?: number[]
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
   costTotal?: number
   admittedClosed?:number;admittedProfit?:number;admittedLoss?:number;admittedNetPnl?:number
@@ -129,5 +134,5 @@ export interface EngineSnapshot {
   positions: (PaperPosition & { laneId: string; symbol: string; configId: string; stage: Stage; coordination: Coordination })[]
   trades: ClosedTrade[]; intents: ExecutionIntent[]; equityHistory: EngineState["equityHistory"]
   liveTrades: ClosedTrade[]
-  lanes: { id: string; symbol: string; configId: string; stage: Stage; direction: Direction; coordination: Coordination; count: number; required: number; enoughSamples: boolean; profitFactor: number|null; pfState: ProfitFactorState; qualified: boolean; netPnl: number;profit?:number|null;loss?:number|null;current?:boolean;admissionReady?:boolean;validated?:boolean;isOpen?:boolean }[]
+  lanes: ({ id: string; symbol: string; configId: string; stage: Stage; direction: Direction; coordination: Coordination; count: number; required: number; enoughSamples: boolean; profitFactor: number|null; pfState: ProfitFactorState; qualified: boolean; netPnl: number;profit?:number|null;loss?:number|null;current?:boolean;admissionReady?:boolean;validated?:boolean;isOpen?:boolean } & Pick<GateProof,"windowScope"|"configWindow">)[]
 }
