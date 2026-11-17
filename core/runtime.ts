@@ -367,6 +367,8 @@ export class TerminalRuntime {
     for(const [key,value] of Object.entries(input)) {
       if(key==='stageBlocks'){next.stageBlocks=structuredClone(value) as EngineSettings['stageBlocks'];continue}
       if(key==='stageGateMode'){next.stageGateMode=value as EngineSettings['stageGateMode'];continue}
+      if(key==='stageWindowScope'){next.stageWindowScope=value as EngineSettings['stageWindowScope'];continue}
+      if(key==='microStageWindowScope'){next.microStageWindowScope=value as EngineSettings['microStageWindowScope'];continue}
       if(key==='liveEntryMode'){next.liveEntryMode=value as EngineSettings['liveEntryMode'];continue}
       if(catalogKeys.includes(key)){next.catalog[key]=value;continue}
       if(gateMap[key]){const[group,stage]=gateMap[key];next[group][stage]=Number(value);continue}

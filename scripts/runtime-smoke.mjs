@@ -25,8 +25,9 @@ try{
  const cookie=await login()
  const snapshot=await fetch(origin+'/api/terminal',{headers:{Cookie:cookie}});assert.equal(snapshot.status,200)
  const state=await snapshot.json();assert.equal(state.readiness.x02Configured,false);assert.equal(state.equity,null);assert.equal(state.openPositions.length,0);assert.equal(state.engine.catalogCount,252)
- assert.equal((await action(cookie,{action:'save-settings',settings:{mainEvalPosCount:7,volumeFactor:.01,symbolCount:100}})).status,200)
+ assert.equal((await action(cookie,{action:'save-settings',settings:{mainEvalPosCount:7,volumeFactor:.01,symbolCount:100,stageWindowScope:'config',microStageWindowScope:'both'}})).status,200)
  assert.equal((await action(cookie,{action:'save-settings',settings:{mainEvalPosCount:0}})).status,400)
+ assert.equal((await action(cookie,{action:'save-settings',settings:{stageWindowScope:'mixed'}})).status,400)
  assert.equal((await action(cookie,{action:'start-x02'})).status,400)
  assert.equal((await action(cookie,{action:'pause-x02'},{Origin:'https://attacker.invalid','Sec-Fetch-Site':'cross-site'})).status,403)
  const csv=await fetch(origin+'/api/terminal/export',{headers:{Cookie:cookie}});assert.equal(csv.status,200);assert.match(await csv.text(),/^timestamp,equity,drawdownPct,source/)
@@ -38,7 +39,9 @@ try{
   console.log(JSON.stringify({marketApiPassed:true,source:bars.source,actualCandles:bars.data.length,replayConfigurations:study.configurations,ordersSubmitted:0}))
  }
  await stop();await start()
- const restored=await fetch(origin+'/api/terminal',{headers:{Cookie:cookie}});assert.equal(restored.status,200);assert.equal((await restored.json()).settings.mainEvalPosCount,'7')
+ const restored=await fetch(origin+'/api/terminal',{headers:{Cookie:cookie}});assert.equal(restored.status,200)
+ const saved=(await restored.json()).settings
+ assert.equal(saved.mainEvalPosCount,'7');assert.equal(saved.stageWindowScope,'config');assert.equal(saved.microStageWindowScope,'both')
  assert.equal((await fetch(origin+'/api/auth/logout',{method:'POST',headers:{Cookie:cookie,Origin:origin}})).status,200)
  await stop();await start()
  assert.equal((await fetch(origin+'/api/terminal',{headers:{Cookie:cookie}})).status,401)

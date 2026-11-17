@@ -24,17 +24,32 @@ executing while the busiest (weaker) configurations filled their windows and too
 better per symbol, so CTS-A-O judges Micro on both views. Real-money promotion stays per symbol × side.
 Full record: CTS-A-O `docs/config-wide-windows.md`.
 
-## Where CTS-C stands (main b25f3b2, checked in the code)
+## CTS-C Settings and evidence
 
-- Every lane is keyed by **symbol × config × direction × coordination × stage** (`core/engine.ts`, `cachedLane`), and the
-  stage windows (`stageLastN` base 20 / main 8 / real 8, `windowMetrics`, `qualifies`) read that lane's own samples.
-- So a configuration is judged **per symbol × side** — the setting that starved long-hold configurations in CTS-A-O.
+- **Exact symbol and side** is the default. **Same configuration across symbols and sides** pools only settled returns of the same config, strategy coordination, stage, fee and sizing policy. **Require both windows** applies the complete own test and the complete pooled test. Micro and Low-Range can inherit or set their own preference.
+- The timestamp-capped pooled window reads closes strictly before a decision. Each Main, Real and Live Set keeps its own parent on the same symbol, side and coordination. Every new exchange entry still requires the local Real window and, in mirror mode, the corresponding fresh Real position. Block and DCA add events mirror only that position's observed fills.
+- Existing checkpoints without pooled timestamps retain their exact-lane samples. A pooled window collects newly timestamped evidence after it is enabled. Enabling another scope starts a separate derived cohort. Current qualifying lane counts track instantiated symbol-side Sets. Validated PF aggregates each pooled window once, even when it supports several Sets.
 
-## For next work
+## Recorded market replay
 
-1. **Measure a config-wide window** on one recorded window (same data, one setting changed): the stage windows read the
-   configuration's own samples across symbols and directions (lineage and proofs unchanged), against today's per-lane
-   windows. Report executed PF and orders per range / coordination next to each other; change the default only if it beats it.
-2. If very short-target ranges do better per symbol, keep per-lane windows for them only (CTS-A-O: Micro judged on both).
-3. Keep real-money promotion on the exact symbol × side lane.
-4. Config-wide means the configuration's **own** closes — never another configuration's, range's or coordination's.
+Eight BingX symbols, 12 hours of prehistory and 12 hours of measured minute candles per decision. The same 200 configurations, Auto PF, 20/8/8 stage windows, independent processed Sets, four coordinations and 0.11% modeled round-trip cost were used in every arm. Mixed applies both windows to Micro and Low-Range and config-wide windows elsewhere. Forward settles count only positions opened in the measured window, with all gains and losses retained. Recorded `feed.json` SHA-256 `02ad14fd7d7ba3e89dee99026962a2ec66d8145d6beb36b17ab42a89a7d2004e`.
+
+| Decision (UTC) | Scope | Base passing / instantiated | Passing Base PF | Modeled settles | Settled return PF | Settled cash PF | Realized drawdown (units) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2026-10-09 00:00 | Exact | 285 / 10,398 | 1.467 | 218 | 0.043 | 0.047 | 0.604 |
+| 2026-10-09 00:00 | Config | 3,305 / 10,398 | 1.969 | 9,802 | 0.267 | 0.284 | 15.340 |
+| 2026-10-09 00:00 | Mixed | 863 / 10,398 | 1.568 | 2,326 | 0.491 | 0.504 | 3.570 |
+| 2026-10-13 00:00 | Exact | 234 / 9,864 | 1.387 | 2,543 | 0.579 | 0.594 | 2.849 |
+| 2026-10-13 00:00 | Config | 3,380 / 9,864 | 2.907 | 27,144 | 0.695 | 0.722 | 16.035 |
+| 2026-10-13 00:00 | Mixed | 1,191 / 9,864 | 2.005 | 5,789 | 1.030 | 1.001 | 4.394 |
+| 2026-10-17 09:00 | Exact | 0 / 8,432 | — | 0 | — | — | — |
+| 2026-10-17 09:00 | Config | 0 / 8,432 | — | 2,844 | 0.392 | 0.422 | 2.563 |
+| 2026-10-17 09:00 | Mixed | 0 / 8,432 | — | 856 | 0.772 | 0.814 | 0.372 |
+
+All nine comparisons emitted zero order intents. Mixed produced one positive realized window. Axis and Block had no profitable measured window under this mixed profile. DCA had return PF 1.280 and cash PF 1.022 on the October 13 window and lost in the other two. Exact symbol-and-side scope remains the default. These repeated historical windows and closed-bar fills provide model comparisons. Cash drawdown is the peak-to-trough sum of settled modeled P&L, without open exposure or exchange margin.
+
+```sh
+node --import tsx scripts/replay-config-stage-windows.ts /path/to/feed.json /path/to/results.json
+```
+
+The replay follows a rolling decision clock and only uses completed evidence. Parameter selection over previously examined history can overstate future performance. [Probability of Backtest Overfitting](https://escholarship.org/uc/item/4w1110bb) · [Time-series cross-validation](https://otext.robjhyndman.com/hyndsight/tscvexample/)
