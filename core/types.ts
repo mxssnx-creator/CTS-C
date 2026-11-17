@@ -4,7 +4,7 @@ export type Stage = "base" | "main" | "real" | "live"
 export type Coordination = "normal" | "axis" | "block" | "dca"
 export type StrategyRange = "Micro" | "Minimal" | "Short" | "Normal" | "Long" | "Wide" | "Low-Range"
 export type ExitMode = "fixed" | "trailing" | "trailing-only"
-export type ProfitFactorState = "empty" | "flat" | "no-losses" | "finite"
+export type ProfitFactorState = "empty" | "flat" | "no-losses" | "finite" | "unknown"
 export interface Candle { timestamp: number; open: number; high: number; low: number; close: number; volume: number }
 export interface StrategyConfig {
   id: string; connectionId: string; createdAt: string; enabled: boolean; catalogVersion?: number
@@ -42,7 +42,7 @@ export interface EngineSettings {
   maxSamples: number
 }
 export interface EntryFill { price: number; quantity: number; timestamp: number; kind: "entry" | "block" | "dca" }
-export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number}
+export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number|null;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number}
 export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   activationOrder?:number
@@ -111,7 +111,7 @@ export interface EngineState {
   processedCandles: number; startedAt: number; updatedAt: number; equity: number; peakEquity: number; maxDrawdownPct: number
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]
 }
-export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; pfState: ProfitFactorState; netPnl: number; wins:number; fees:number|null; longOpen:number; shortOpen:number; currentLanes:number; currentEnoughSamples:number; currentQualified:number; admissionReady:number; blockedByParent:number; currentProfitFactor:number; currentPfState:ProfitFactorState
+export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; pfState: ProfitFactorState; netPnl: number; wins:number; fees:number|null; longOpen:number; shortOpen:number; currentLanes:number; currentEnoughSamples:number; currentQualified:number; admissionReady:number; blockedByParent:number; currentProfitFactor:number|null; currentPfState:ProfitFactorState
   validatedWindow?:{samples:number;sets:number;profitFactor:number;pfState:ProfitFactorState;profit?:number;loss?:number}
   admittedForward?:{closes:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;unprovenCloses:number}
 }
@@ -121,5 +121,5 @@ export interface EngineSnapshot {
   positions: (PaperPosition & { laneId: string; symbol: string; configId: string; stage: Stage; coordination: Coordination })[]
   trades: ClosedTrade[]; intents: ExecutionIntent[]; equityHistory: EngineState["equityHistory"]
   liveTrades: ClosedTrade[]
-  lanes: { id: string; symbol: string; configId: string; stage: Stage; direction: Direction; coordination: Coordination; count: number; required: number; enoughSamples: boolean; profitFactor: number; pfState: ProfitFactorState; qualified: boolean; netPnl: number;profit?:number;loss?:number;current?:boolean;admissionReady?:boolean;validated?:boolean;isOpen?:boolean }[]
+  lanes: { id: string; symbol: string; configId: string; stage: Stage; direction: Direction; coordination: Coordination; count: number; required: number; enoughSamples: boolean; profitFactor: number|null; pfState: ProfitFactorState; qualified: boolean; netPnl: number;profit?:number|null;loss?:number|null;current?:boolean;admissionReady?:boolean;validated?:boolean;isOpen?:boolean }[]
 }
