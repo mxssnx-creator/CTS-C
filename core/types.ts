@@ -36,10 +36,14 @@ export interface EngineSettings {
   coordinations: {
     axis: { enabled: boolean; previous: number; last: number; outcome: "positive" | "negative" | "any";reference?:'base'|'same-stage' }
     block: { enabled: boolean; steps: number; ratio: number; mode: "shared" | "additive"; behavior?: "pyramid" | "rounds"; size?:number; pauseRounds?:number; maxMultiplier?:number }
-    dca: { enabled: boolean; steps: number; distancePct: number; multiplier: number }
+    dca: { enabled: boolean; steps: number; distancePct: number; multiplier: number; auto?: DcaAutoPolicy }
   }
   /** Retention ceiling; each lane keeps only the samples its stage/Axis windows need. Lifetime metrics are retained separately. */
   maxSamples: number
+}
+export interface DcaAutoPolicy { enabled: boolean; lastN: number; minSamples: number; minPF: number }
+export interface DcaStepVerdict {
+  step: number; samples: number; required: number; profitFactor: number | null; state: "warming" | "unknown" | "held" | "qualified"
 }
 export interface EntryFill { price: number; quantity: number; timestamp: number; kind: "entry" | "block" | "dca" }
 export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number|null;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number}
@@ -50,6 +54,8 @@ export interface PaperPosition {
   parentPositionId?:string
   admission?:GateProof[]
   sizing?: { baseBudget: number; block: EngineSettings["coordinations"]["block"]; dca: EngineSettings["coordinations"]["dca"] }
+  /** Prices at the successive causal shadow triggers, indexed by step. */
+  dcaProbePrices?: number[]
   peak: number; lastAddPrice: number; addedSteps: number; costPct: number; takeProfitPct: number; stopLossPct: number
   exitMode: ExitMode; maxHoldMinutes: number; notional: number
   trailingBasis?: "peak" | "entry"
@@ -67,6 +73,8 @@ export interface LaneState {
   /** Internal Normal reference, never funded or counted as active Live execution. */
   calculationOnly?: boolean;
   blockRound?: { closed:number; sum:number; net:number; level:number; pauseRemaining:number; rounds:number };
+  /** Recent returns on each add probe at the modeled parent's exit, newest first. */
+  dcaStepReturns?: Array<Array<number | null>>
   id: string; symbol: string; configId: string; direction: Direction; stage: Stage; coordination: Coordination
   config: StrategyConfig; samples: number[]; closedCount: number; wins: number; netPnl: number; grossProfit: number; grossLoss: number
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
