@@ -5,6 +5,7 @@ import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES} from '../shared/cts-indications
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
 import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import type { EngineSettings } from "./types"
+import { DEFAULT_DCA_AUTO } from "./dca-auto"
 
 export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"]
 export const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
@@ -26,6 +27,8 @@ export const DEFAULTS: Record<string, unknown> = {
   blockBehavior: "pyramid", blockSize: 3, blockPauseRounds: 1, blockMaxMultiplier: 3,
   autoPfEnabled: false, autoPfRatio: .2, autoPfMax: 2, microTradeStream: false,
   blockSteps: 3, blockMode: "shared", dcaSteps: 2, dcaDistancePct: 1, dcaMultiplier: 2,
+  dcaAutoEnabled: DEFAULT_DCA_AUTO.enabled, dcaAutoLastN: DEFAULT_DCA_AUTO.lastN,
+  dcaAutoMinSamples: DEFAULT_DCA_AUTO.minSamples, dcaAutoMinPF: DEFAULT_DCA_AUTO.minPF,
   normalVolumeRatio: 1, axisVolumeRatio: 1, blockVolumeFactor: 1, dcaVolumeRatio: 1, maxOrderNotional: 0,
   microTrailRatio: .5, microMinSlDistancePct: .1, microMinTrailDistancePct: .05, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
   blockVolumeRatio: 0.2, makerFeePct: 0.02, takerFeePct: 0.05, slippagePctOfFees: 10,
@@ -64,6 +67,9 @@ export const COORDINATION_FIELDS = [
   { key: "dcaSteps", label: "DCA additions", min: 1, max: 20, step: 1 },
   { key: "dcaDistancePct", label: "DCA adverse distance (%)", min: 0.001, max: 100, step: 0.001 },
   { key: "dcaMultiplier", label: "DCA addition multiplier", min: 0.01, max: 10, step: 0.01 },
+  { key: "dcaAutoLastN", label: "DCA Auto recent observations", min: 3, max: 100, step: 1 },
+  { key: "dcaAutoMinSamples", label: "DCA Auto minimum observations", min: 3, max: 100, step: 1 },
+  { key: "dcaAutoMinPF", label: "DCA Auto minimum add PF", min: 1.01, max: 10, step: .01 },
 ]
 const ENUM_FIELDS: Record<string, readonly string[]> = { blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets'],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
 export const EXECUTION_FIELDS = [
@@ -156,6 +162,9 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if (output.axisPrevEnabled && Number(output.axisPrevious) + Number(output.axisLast) > 250) throw new Error("Axis previous and recent windows must total 250 samples or fewer.")
     if (configurationCount(output) === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
   }
+  if (output.dcaAutoMinSamples !== undefined && output.dcaAutoLastN !== undefined && Number(output.dcaAutoMinSamples) > Number(output.dcaAutoLastN)) {
+    throw new Error("DCA Auto minimum observations cannot exceed its recent observation window.")
+  }
   return output
 }
 
@@ -179,6 +188,7 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
 /** The same editable schema is used by forms, JSON imports and server writes. */
 export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;historyCandles:number}):Record<string,unknown>{
   const values:Record<string,unknown>={...structuredClone(DEFAULTS)}
+  const dcaAuto = s.coordinations.dca.auto ?? DEFAULT_DCA_AUTO
   for(const [key,value] of Object.entries(s.catalog))if(Object.hasOwn(DEFAULTS,key))values[key]=value
   return {...values,stageBlocks:s.stageBlocks??{},liveEntryMode:s.liveEntryMode??'independent',stageGateMode:s.stageGateMode??'continuous-ancestors',symbolCount:control.symbolCount,historyCandles:control.historyCandles,volumeFactor:s.volumeFactor,baseNotional:s.baseNotional,maxOrderNotional:s.maxOrderNotional??0,
     normalVolumeRatio:s.volumeRatios?.normal??1,axisVolumeRatio:s.volumeRatios?.axis??1,blockVolumeFactor:s.volumeRatios?.block??1,dcaVolumeRatio:s.volumeRatios?.dca??1,
@@ -187,6 +197,7 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
     variantBlockEnabled:s.coordinations.block.enabled,variantDcaEnabled:s.coordinations.dca.enabled,axisPrevEnabled:s.coordinations.axis.enabled,
     blockVolumeRatio:s.coordinations.block.ratio,axisPrevious:s.coordinations.axis.previous,axisLast:s.coordinations.axis.last,axisOutcome:s.coordinations.axis.outcome,axisReferenceStage:s.coordinations.axis.reference??'same-stage',
     blockBehavior:s.coordinations.block.behavior??"pyramid",blockSize:s.coordinations.block.size??3,blockPauseRounds:s.coordinations.block.pauseRounds??1,blockMaxMultiplier:s.coordinations.block.maxMultiplier??3,
-    blockSteps:s.coordinations.block.steps,blockMode:s.coordinations.block.mode,dcaSteps:s.coordinations.dca.steps,dcaDistancePct:s.coordinations.dca.distancePct,dcaMultiplier:s.coordinations.dca.multiplier}
+    blockSteps:s.coordinations.block.steps,blockMode:s.coordinations.block.mode,dcaSteps:s.coordinations.dca.steps,dcaDistancePct:s.coordinations.dca.distancePct,dcaMultiplier:s.coordinations.dca.multiplier,
+    dcaAutoEnabled:dcaAuto.enabled,dcaAutoLastN:dcaAuto.lastN,dcaAutoMinSamples:dcaAuto.minSamples,dcaAutoMinPF:dcaAuto.minPF}
 }
 

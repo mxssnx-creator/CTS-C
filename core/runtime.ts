@@ -10,6 +10,7 @@ import { getStore,type StateStore } from './store'
 import type { Candle, EngineSettings, EngineEvent } from './types'
 import { generateStrategyCatalog } from './catalog'
 import {flatEngineSettings,validateConfiguration} from './settings-schema'
+import { DEFAULT_DCA_AUTO } from './dca-auto'
 
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
@@ -391,6 +392,14 @@ export class TerminalRuntime {
       if(key==='dcaSteps'){next.coordinations.dca.steps=Number(value);continue}
       if(key==='dcaDistancePct'){next.coordinations.dca.distancePct=Number(value);continue}
       if(key==='dcaMultiplier'){next.coordinations.dca.multiplier=Number(value);continue}
+      if(key==='dcaAutoEnabled'||key==='dcaAutoLastN'||key==='dcaAutoMinSamples'||key==='dcaAutoMinPF'){
+        const policy=next.coordinations.dca.auto??={...DEFAULT_DCA_AUTO}
+        if(key==='dcaAutoEnabled')policy.enabled=value===true
+        if(key==='dcaAutoLastN')policy.lastN=Number(value)
+        if(key==='dcaAutoMinSamples')policy.minSamples=Number(value)
+        if(key==='dcaAutoMinPF')policy.minPF=Number(value)
+        continue
+      }
       throw new Error(`Unknown setting ${key}`)
     }
     validateEngineSettings(next);generateStrategyCatalog(next.connectionId,next.catalog)

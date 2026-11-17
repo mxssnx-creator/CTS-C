@@ -1,5 +1,6 @@
 import {blockPrefix,blockRequired,blockPolicyKey,checkBlockPolicy,evaluateBlocks,type BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 import {blockRoundBudget,settleBlockRound,consumeBlockPause} from "./block-rounds"
+import { dcaStepVerdict, observeDcaStep, settleDcaSteps, validateDcaAuto } from "./dca-auto"
 import {normalizedVolumeFactor,relationalVolumeSettings} from "../shared/cts-volume/ratios";
 import { strategyProcessing } from "./strategy-processing"
 import { createHash } from "node:crypto"
@@ -67,6 +68,7 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   finite(block.steps, "block steps", 1, 20, true); finite(block.ratio, "block ratio", .01, 10)
   if (!["shared", "additive"].includes(block.mode)) throw new Error("Invalid block mode")
   finite(dca.steps, "DCA steps", 1, 20, true); finite(dca.distancePct, "DCA distance", .001, 100); finite(dca.multiplier, "DCA multiplier", .01, 10)
+  if (dca.auto !== undefined) dca.auto = validateDcaAuto(dca.auto)
   for (const enabled of [axis.enabled, block.enabled, dca.enabled]) if (typeof enabled !== "boolean") throw new Error("Coordination enabled must be boolean")
   generateStrategyCatalog(settings.connectionId, settings.catalog)
   const checkedFees=new Set<string>()
@@ -289,7 +291,11 @@ export class TradingEngine {
     const s = this.state.settings
     this.volumeWeights=relationalVolumeSettings(s.catalog.relationalVolumeRatios,true)
     for (const coordination of ["normal", "axis", "block", "dca"] as const) {
-      const parameters = coordination === "normal" ? null : s.coordinations[coordination]
+      let parameters = coordination === "normal" ? null : s.coordinations[coordination]
+      if (coordination === "dca" && !s.coordinations.dca.auto?.enabled) {
+        const { auto: _auto, ...manual } = s.coordinations.dca
+        parameters = manual
+      }
       this.coordinationIds[coordination] = hashId(JSON.stringify([s.baseNotional, s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0, parameters, s.stageLastN, s.stageMinPF,...(s.stageBlocks&&Object.keys(s.stageBlocks).length?[s.stageBlocks]:[])]))
       this.processedCoordinationIds[coordination]=hashId(this.coordinationIds[coordination]+':processed-sets-v1')
     }
@@ -405,6 +411,7 @@ export class TradingEngine {
       trailingBasis: (lane.config.catalogVersion ?? 2)>=3?"peak":"entry",
       trailDistancePct:lane.config.trailDistancePct,exitPolicyVersion:lane.config.catalogVersion??2,maxOrderNotional:s.maxOrderNotional,
     }
+    if (lane.coordination === "dca" && s.coordinations.dca.auto?.enabled && !mirror) position.dcaProbePrices = []
     if(mirror){
       // Live executes the accepted Real allocation. In particular, its smaller
       // executed subset must not run a second, divergent Block recovery cycle.
@@ -426,6 +433,7 @@ export class TradingEngine {
       openedAt: open.openedAt, closedAt: candle.timestamp, entryPrice: open.entryPrice, exitPrice: candle.close,
       quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
     if(lane.coordination==="block"&&open.sizing?.block.behavior==="rounds"&&!(this.processedSets&&lane.stage==='live'))settleBlockRound(lane,netPnl,open.sizing.block)
+    if (lane.coordination === "dca") settleDcaSteps(lane, open, candle.close)
     lane.samples.unshift(netReturnPct); lane.samples.length = Math.min(lane.samples.length, this.sampleRetention(lane))
     lane.closedCount++; lane.wins += netPnl > 0 ? 1 : 0; lane.netPnl += netPnl
     if(lane.costTotal!==undefined)lane.costTotal+=cost
@@ -471,8 +479,26 @@ export class TradingEngine {
       }
     }
     if (lane.coordination === "dca" && open.addedSteps < sizing.dca.steps) {
-      const adverse = -sign * (candle.close - open.lastAddPrice) / open.lastAddPrice * 100
-      if (adverse >= sizing.dca.distancePct) { addNotional = sizing.baseBudget * sizing.dca.multiplier; kind = "dca" }
+      const auto = sizing.dca.auto
+      let allowed: boolean
+      if (auto?.enabled) {
+        if (!this.currentLane(lane)) return
+        if (lane.stage === "live" && open.parentPositionId) {
+          const real = this.cachedLane(lane.symbol, lane.configId, lane.direction, "dca", "real")?.open
+          const fill = real?.fills[open.addedSteps + 1]
+          // Real runs first for a mirrored position. Match the actual parent
+          // and its add event, including the price on equal-timestamp ticks.
+          allowed = real?.id === open.parentPositionId && fill?.kind === "dca" &&
+            fill.timestamp === candle.timestamp && fill.price === candle.close
+        } else {
+          const step = observeDcaStep(open, candle.close, sizing.dca.steps, sizing.dca.distancePct)
+          allowed = step === open.addedSteps + 1 && dcaStepVerdict(lane, step, auto).state === "qualified"
+        }
+      } else {
+        const adverse = -sign * (candle.close - open.lastAddPrice) / open.lastAddPrice * 100
+        allowed = adverse >= sizing.dca.distancePct
+      }
+      if (allowed) { addNotional = sizing.baseBudget * sizing.dca.multiplier; kind = "dca" }
     }
     if (addNotional > 0) {
       const quantity = addNotional / candle.close
