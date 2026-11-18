@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { performance } from "node:perf_hooks"
 import { generateStrategyCatalog } from "../core/catalog"
 import { DEFAULT_ENGINE_SETTINGS, TradingEngine } from "../core/engine"
+import { StateStore } from "../core/store"
 import type { Candle, EngineState, LaneState } from "../core/types"
 
 const TARGET = 1_000_000
@@ -85,7 +86,14 @@ const materializedAt = performance.now()
 const active = totalCurrent(counts)
 const beforeRestart = rss()
 let serialized = engine.serializeState()
-const serializedBytes = Buffer.byteLength(serialized)
+const fullSerializedBytes = Buffer.byteLength(serialized)
+const compactStore = new StateStore(":memory:")
+const compactSaveStarted = performance.now()
+compactStore.migrateLaneCheckpoint(engine.checkpointMetadata(), engine.checkpointLanes(true), [], engine.settings, () => {})
+const compactSaveAt = performance.now()
+const compactRecord = compactStore.database.prepare("SELECT length(data) AS bytes FROM records WHERE key='engine'").get() as { bytes:number }
+const compactRows = compactStore.database.prepare("SELECT COALESCE(SUM(length(id)+length(data)),0) AS bytes FROM engine_lanes").get() as { bytes:number }
+const compactCheckpointBytes = compactRecord.bytes + compactRows.bytes
 engine = null
 global.gc?.()
 const afterDrop = rss()
@@ -111,11 +119,14 @@ const inspection = (() => {
 const { byStage, missingParent, duplicateIds, childCountFailures, beforeDigest } = inspection
 global.gc?.()
 const restoreStarted = performance.now()
-const restored = TradingEngine.fromSerialized(serialized)
+const restoredState = compactStore.loadEngineState()
+assert.ok(restoredState)
+const restored = TradingEngine.fromOwnedCheckpoint(restoredState)
 const restoredAt = performance.now()
+compactStore.close()
 serialized = ""
 global.gc?.()
-const afterDigest = digest((JSON.parse(restored.serializeState()) as EngineState).lanes)
+const afterDigest = digest(restoredState.lanes)
 global.gc?.()
 const restoredCounts = stageCounts(restored)
 const sustainedStarted = performance.now()
@@ -134,7 +145,9 @@ const summary = {
   expectedRealChildren: roots * width ** 3,
   processedCandlesBeforeRestart: checkpoints.at(-1)?.candles ?? 0,
   activeBeforeRestart: active, stagesBeforeRestart: counts, stageObjectCounts: byStage,
-  serializedBytes, materializeSeconds: (materializedAt - started) / 1000,
+  fullSerializedBytes, compactCheckpointBytes, compactRatio: compactCheckpointBytes / fullSerializedBytes,
+  materializeSeconds: (materializedAt - started) / 1000,
+  compactSaveSeconds: (compactSaveAt - compactSaveStarted) / 1000,
   restoreSeconds: (restoredAt - restoreStarted) / 1000,
   sustainedCandles: 15 * symbols.length, sustainedSeconds: (sustainedAt - sustainedStarted) / 1000,
   activeAfterRestart: totalCurrent(restoredCounts), activeAfterLoad: totalCurrent(finalCounts),
@@ -143,7 +156,8 @@ const summary = {
   projectedMillion: {
     activeHeapDeltaBytes: active ? Math.round(activeHeapDelta * TARGET / active) : null,
     activeRssDeltaBytes: active ? Math.round(activeRssDelta * TARGET / active) : null,
-    serializedBytes: active ? Math.round(serializedBytes * TARGET / active) : null,
+    fullSerializedBytes: active ? Math.round(fullSerializedBytes * TARGET / active) : null,
+    compactCheckpointBytes: active ? Math.round(compactCheckpointBytes * TARGET / active) : null,
   },
   digestBeforeRestart: beforeDigest, digestAfterRestart: afterDigest,
   duplicateIds, missingParent, childCountFailures, pendingIntents, checkpoints,
@@ -156,10 +170,12 @@ assert.ok(active >= 20_000, `materialized only ${active} current Sets; capacity 
 assert.equal(duplicateIds, 0)
 assert.equal(missingParent, 0)
 assert.equal(childCountFailures, 0)
+assert.ok(compactCheckpointBytes < fullSerializedBytes * .8, `compact checkpoint ratio was ${compactCheckpointBytes/fullSerializedBytes}`)
 assert.equal(beforeDigest, afterDigest)
 assert.equal(totalCurrent(restoredCounts), active)
 assert.equal(pendingIntents, 0)
 console.log(JSON.stringify({ active, targetMet, byStage, width, materializeSeconds: summary.materializeSeconds,
-  restoreSeconds: summary.restoreSeconds, sustainedSeconds: summary.sustainedSeconds,
+  compactSaveSeconds: summary.compactSaveSeconds, restoreSeconds: summary.restoreSeconds, sustainedSeconds: summary.sustainedSeconds,
   rssMiB: summary.finalMemory.rss / 2 ** 20, heapMiB: summary.finalMemory.heapUsed / 2 ** 20,
-  serializedMiB: serializedBytes / 2 ** 20, missingParent, childCountFailures, pendingIntents }))
+  fullSerializedMiB: fullSerializedBytes / 2 ** 20, compactCheckpointMiB: compactCheckpointBytes / 2 ** 20,
+  compactRatio: summary.compactRatio, missingParent, childCountFailures, pendingIntents }))
