@@ -84,6 +84,22 @@ while (totalCurrent(counts) < TARGET && index < 1_800) {
 }
 const materializedAt = performance.now()
 const active = totalCurrent(counts)
+let proofState:EngineState|null = engine.exportState()
+let proofReferences=0,recursiveProofPrefixes=0,sharedRecursiveProofPrefixes=0
+const uniqueProofObjects=new Set<object>()
+for(const lane of Object.values(proofState.lanes)){
+  const chain=lane.parentProof??[]
+  for(const proof of chain){proofReferences++;uniqueProofObjects.add(proof)}
+  if(chain.length<2)continue
+  const parent=proofState.lanes[chain.at(-1)!.laneId]
+  for(let i=0;i<chain.length-1;i++){
+    recursiveProofPrefixes++
+    if(chain[i]===parent?.parentProof?.[i])sharedRecursiveProofPrefixes++
+  }
+}
+const lineageStorage={proofReferences,uniqueProofObjects:uniqueProofObjects.size,recursiveProofPrefixes,sharedRecursiveProofPrefixes}
+proofState=null
+global.gc?.()
 const beforeRestart = rss()
 let serialized = engine.serializeState()
 const fullSerializedBytes = Buffer.byteLength(serialized)
@@ -159,7 +175,7 @@ const summary = {
     fullSerializedBytes: active ? Math.round(fullSerializedBytes * TARGET / active) : null,
     compactCheckpointBytes: active ? Math.round(compactCheckpointBytes * TARGET / active) : null,
   },
-  digestBeforeRestart: beforeDigest, digestAfterRestart: afterDigest,
+  digestBeforeRestart: beforeDigest, digestAfterRestart: afterDigest, lineageStorage,
   duplicateIds, missingParent, childCountFailures, pendingIntents, checkpoints,
 }
 writeFileSync("artifacts/cts-c-million-active-parent-sets.json", JSON.stringify(summary, null, 2))
@@ -170,6 +186,9 @@ assert.ok(active >= 20_000, `materialized only ${active} current Sets; capacity 
 assert.equal(duplicateIds, 0)
 assert.equal(missingParent, 0)
 assert.equal(childCountFailures, 0)
+assert.ok(lineageStorage.recursiveProofPrefixes>0)
+assert.equal(lineageStorage.sharedRecursiveProofPrefixes,lineageStorage.recursiveProofPrefixes)
+assert.ok(lineageStorage.uniqueProofObjects<lineageStorage.proofReferences)
 assert.ok(compactCheckpointBytes < fullSerializedBytes * .8, `compact checkpoint ratio was ${compactCheckpointBytes/fullSerializedBytes}`)
 assert.equal(beforeDigest, afterDigest)
 assert.equal(totalCurrent(restoredCounts), active)
@@ -178,4 +197,4 @@ console.log(JSON.stringify({ active, targetMet, byStage, width, materializeSecon
   compactSaveSeconds: summary.compactSaveSeconds, restoreSeconds: summary.restoreSeconds, sustainedSeconds: summary.sustainedSeconds,
   rssMiB: summary.finalMemory.rss / 2 ** 20, heapMiB: summary.finalMemory.heapUsed / 2 ** 20,
   fullSerializedMiB: fullSerializedBytes / 2 ** 20, compactCheckpointMiB: compactCheckpointBytes / 2 ** 20,
-  compactRatio: summary.compactRatio, missingParent, childCountFailures, pendingIntents }))
+  compactRatio: summary.compactRatio, lineageStorage, missingParent, childCountFailures, pendingIntents }))
