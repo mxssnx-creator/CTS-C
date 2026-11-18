@@ -23,6 +23,16 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - name: Materialize, restart and drive one million active Sets
-        env:
-          NODE_OPTIONS: --max-old-space-size=6144
-        run: node --import tsx scripts/parent-branch-million-active.ts
+        run: node --max-old-space-size=6144 --expose-gc --import tsx scripts/parent-branch-million-active.ts
+      - name: Pack evidence
+        if: always()
+        run: if [ -d artifacts ]; then tar -czf cts-c-million-active-parent-sets.tgz artifacts; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cts-c-million-active-parent-sets
+          path: |
+            artifacts
+            cts-c-million-active-parent-sets.tgz
+          if-no-files-found: warn
+          retention-days: 30
