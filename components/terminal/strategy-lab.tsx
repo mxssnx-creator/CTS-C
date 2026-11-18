@@ -14,6 +14,8 @@ import {formatProfitFactor} from './profit-factor'
 import { DEFAULT_EXIT_MODES, type ProfitFactorState, type Stage, type Coordination, type ExitMode } from '@/core/types'
 
 import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
+import { STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
+import { LAST_N_STAGES, type LastNGrid } from "@/core/last-n-grid"
 
 const EXIT_LABELS: Record<ExitMode, string> = {
   fixed: "Fixed TP and SL",
@@ -23,12 +25,12 @@ const EXIT_LABELS: Record<ExitMode, string> = {
   "trailing-only-fixed": "Fixed-distance trailing-only",
 }
 
-function MultiChoice({ title, description, values, selected, onChange, format }: {
+function MultiChoice({ title, description, values, selected, onChange, format, optional = false }: {
   title: string; description: string; values: (string | number)[]; selected: (string | number)[];
-  onChange: (values: (string | number)[]) => void; format?: (value: string | number) => string
+  onChange: (values: (string | number)[]) => void; format?: (value: string | number) => string; optional?: boolean
 }) {
   const toggle = (value: string | number) => {
-    if (selected.includes(value)) { if (selected.length > 1) onChange(selected.filter(item => item !== value)) }
+    if (selected.includes(value)) { if (optional || selected.length > 1) onChange(selected.filter(item => item !== value)) }
     else onChange(values.filter(item => item === value || selected.includes(item)))
   }
   return (
@@ -85,7 +87,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
     const name = kind === "micro" ? "Micro + Low-Range" : kind === "balanced" ? "Balanced" : "Full catalog"
     dirtyRef.current = true; setDirty(true); setError(null); setMessage(`${name} preset prepared. Save to apply it to ${connectionName}.`)
     setDraft(current => ({ ...current, strategyEnabledRanges: kind === "micro" ? ["Micro", "Low-Range"] : kind === "balanced" ? RANGES.filter(r=>r!=="Low-Range") : [...RANGES],
-      strategyTpSteps: kind === "micro" ? [2, 3, 4, 5] : kind === "balanced" ? [...BALANCED_STEPS] : [...STEPS],
+      strategyPriceDistancesEnabled: false, strategyLastNGrid: {}, strategyTpSteps: kind === "micro" ? [2, 3, 4, 5] : kind === "balanced" ? [...BALANCED_STEPS] : [...STEPS],
       strategySlRatios: kind === "balanced" ? [...BALANCED_RATIOS] : kind === "micro" ? RATIOS.filter(r=>r<=1.6) : [...RATIOS], strategyExitModes: kind === "full" ? [...MODES] : [...DEFAULT_EXIT_MODES], strategyIndicationTypes: kind==="full"?[...INDICATIONS]:[...CORE_INDICATIONS],
       baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
       mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20, ...(kind==="micro"?{stageGateMode:"processed-sets",autoPfEnabled:true,blockBehavior:"rounds",microTradeStream:true,strategySignalTimeframes:[1/6,1],microTrailRatio:.5}:{} ) }))
@@ -211,7 +213,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
           <section className="terminal-panel space-y-7 p-5">
             <MultiChoice title="Strategy ranges" description="Micro 2–5 · Low-Range 2–8 · Minimal 6–8 · Short 9–12 · Normal 13–18 · Long 19–24 · Wide 25–30 TP steps." values={RANGES} selected={selected("strategyEnabledRanges")} onChange={value => change("strategyEnabledRanges", value)} />
             <MultiChoice title="Take-profit steps" description="TP distance = estimated round-trip position cost × selected step. Only steps within enabled ranges produce configurations." values={STEPS} selected={selected("strategyTpSteps")} onChange={value => change("strategyTpSteps", value)} />
-            <MultiChoice title="Stop-loss / take-profit ratio" description="Each ratio creates an independent configuration. SL distance = TP distance × ratio. Micro and Low-Range use 0.2–1.6 in 0.1 steps." values={RATIOS} selected={selected("strategySlRatios")} onChange={value => change("strategySlRatios", value)} format={value => Number(value).toFixed(1) + "×"} />
+            <label className="flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.strategyPriceDistancesEnabled === true} onChange={event => change("strategyPriceDistancesEnabled", event.target.checked)} />Use price percentages for stop-loss and trailing</label>
+            {draft.strategyPriceDistancesEnabled === true ? <>
+              <MultiChoice title="Stop-loss price distance" description="Each selected distance creates its own Set. Micro and Low-Range enforce their configured minimum distance." values={STOP_DISTANCE_PCTS} selected={selected("strategyStopDistancePcts")} onChange={value => change("strategyStopDistancePcts", value)} format={value => Number(value).toFixed(1) + "%"} />
+              <MultiChoice title="Trailing price gap" description="Each selected gap has independent dynamic and fixed-distance Sets when those exit modes are enabled." values={TRAIL_DISTANCE_PCTS} selected={selected("strategyTrailDistancePcts")} onChange={value => change("strategyTrailDistancePcts", value)} format={value => Number(value).toFixed(1) + "%"} />
+            </> : <MultiChoice title="Stop-loss / take-profit ratio" description="Each ratio creates an independent configuration. SL distance = TP distance × ratio. Micro and Low-Range use 0.2–1.6 in 0.1 steps." values={RATIOS} selected={selected("strategySlRatios")} onChange={value => change("strategySlRatios", value)} format={value => Number(value).toFixed(1) + "×"} />}
             <MultiChoice title="Exit modes" description="Fixed-distance trailing keeps the original entry-price offset. Dynamic trailing recalculates the gap from each new peak." values={MODES} selected={selected("strategyExitModes")} onChange={value => change("strategyExitModes", value)} format={mode => EXIT_LABELS[mode as ExitMode]} />
             <MultiChoice title="Indications" description="Each selected indication evaluates its own configuration history." values={INDICATIONS} selected={selected("strategyIndicationTypes")} onChange={value => change("strategyIndicationTypes", value)} format={value => String(value).replaceAll("_", " ")} />
             <MultiChoice title="Trend & Break lookbacks" description="Separate indicator periods for the new Trend and Break families. Existing indications retain their original calculations." values={[10,14,20,40,60]} selected={selected('strategySignalPeriods')} onChange={value=>change('strategySignalPeriods',value)} />
@@ -230,6 +236,16 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <p className="terminal-muted mb-5 text-xs">Real remains the final current PF gate. Mirroring links each new Live position to its fresh Real entry and uses Real evidence for Axis, without another Live evidence gate. Independent processed sets always mirror Real. Mode changes preserve prior outcomes.</p>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{NUMERIC_FIELDS.map(numberField)}</div>
             {(["base","main","real"] as const).map(stage=><BlockPolicyFields key={stage} label={stage+" Last-N blocks"} value={(draft.stageBlocks as Partial<Record<string,BlockPolicy>>|undefined)?.[stage]} onChange={policy=>{const next={...(draft.stageBlocks as Partial<Record<string,BlockPolicy>>??{})};if(policy)next[stage]=policy;else delete next[stage];change("stageBlocks",next)}}/>)}
+            <details className="mt-5 space-y-4">
+              <summary className="cursor-pointer text-sm font-semibold">Independent Last-N Sets</summary>
+              <p className="terminal-muted text-xs">Each combination of selected stage sizes runs in its own Set. An empty stage selection uses that stage’s existing window policy.</p>
+              {LAST_N_STAGES.map(stage => {
+                const grid = (draft.strategyLastNGrid ?? {}) as LastNGrid
+                const sizes = [...(grid[stage] ?? [])]
+                const options = [...new Set([1, 3, 5, 8, 10, 12, 15, 20, 25, 30, 35, 40, 50, 60, 75, 100, 150, 250, ...sizes])].sort((a, b) => a - b)
+                return <MultiChoice key={stage} title={`${stage[0].toUpperCase() + stage.slice(1)} Set window sizes`} description="Number of completed returns per window." values={options} selected={sizes} optional onChange={value => change("strategyLastNGrid", { ...grid, [stage]: value })} />
+              })}
+            </details>
 
             <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.autoPfEnabled===true} onChange={e=>change('autoPfEnabled',e.target.checked)}/>Auto PF by configuration TP distance</label>
             <p className="terminal-muted my-3 text-xs">Required PF = max(stage floor, min(cap, 1 + TP distance rounded down to 0.1% × slope)). Computed once per configuration; samples and losses remain unchanged.</p>
@@ -240,7 +256,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
         <div className="space-y-5">
           <section className="terminal-panel p-5">
             <p className="terminal-muted text-[10px] uppercase tracking-[.18em]">Configuration preview</p><p className="mt-3 font-mono text-4xl font-semibold text-[var(--terminal-blue)]">{coreCount.toLocaleString()}</p><p className="terminal-muted mt-2 text-xs">Core configurations per symbol, before direction and coordination lanes.</p>
-            <div className="mt-5 space-y-2 border-t border-[var(--terminal-border)] pt-4 text-xs"><p>{(draft.strategyEnabledRanges as string[]).join(" / ")}</p><p className="terminal-muted">{(draft.strategySlRatios as number[]).length} ratios × {(draft.strategyExitModes as string[]).length} exits × {(draft.strategyIndicationTypes as string[]).length} indications</p><p className={dirty ? "text-[var(--terminal-amber)]" : "terminal-muted"}>{dirty ? "Unsaved configuration" : "Saved values or labeled defaults"}</p></div>
+            <div className="mt-5 space-y-2 border-t border-[var(--terminal-border)] pt-4 text-xs"><p>{(draft.strategyEnabledRanges as string[]).join(" / ")}</p><p className="terminal-muted">{draft.strategyPriceDistancesEnabled === true ? `${selected("strategyStopDistancePcts").length} stop distances · ${selected("strategyTrailDistancePcts").length} trailing gaps` : `${selected("strategySlRatios").length} stop ratios`} · {selected("strategyExitModes").length} exits · {selected("strategyIndicationTypes").length} indications</p><p className={dirty ? "text-[var(--terminal-amber)]" : "terminal-muted"}>{dirty ? "Unsaved configuration" : "Saved values or labeled defaults"}</p></div>
           </section>
           <section className="terminal-panel space-y-5 p-5">
             <div><h3 className="text-sm font-semibold">Coordination lanes</h3><p className="terminal-muted mt-1 text-xs">Enable each additional evaluator independently.</p></div>

@@ -1,4 +1,5 @@
 import type {BlockPolicy} from "../shared/cts-lastn/blocks.ts";
+import type { ConfigLastN } from "./last-n-grid"
 export type Direction = "long" | "short"
 export type Stage = "base" | "main" | "real" | "live"
 export type Coordination = "normal" | "axis" | "block" | "dca" | "relate"
@@ -15,6 +16,7 @@ export interface StrategyConfig {
   roundTripCostPct?: number; maxHoldMinutes?: number; trailDistancePct?:number
   indicationSourceId?:string
   autoPfFloor?:number
+  stageLastN?: ConfigLastN
   /** Maximum peak-to-trough sum of net-return percentage points in this lane's gate window. Not account drawdown. */
   maxWindowDrawdownPct?:number
   signalTimeframeMinutes?:number

@@ -8,6 +8,7 @@ import {normalizedVolumeFactor,relationalVolumeSettings} from "../shared/cts-vol
 import { strategyProcessing } from "./strategy-processing"
 import { createHash } from "node:crypto"
 import { generateStrategyCatalog } from "./catalog"
+import { checkLastNGrid, type EvaluationStage } from "./last-n-grid"
 import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals, newSignalState } from "./replay"
 import { describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { isFixedTrailing, observedExit } from "./exits"
@@ -58,6 +59,7 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   settings.symbols = [...new Set(settings.symbols)]
   finite(settings.initialEquity, "initialEquity", .01, 1e12); finite(settings.baseNotional, "baseNotional", .000001, 1e9)
   finite(settings.volumeFactor, "volumeFactor", .000001, 100); finite(settings.maxSamples, "maxSamples", 1, 1000, true)
+  checkLastNGrid(settings.catalog.strategyLastNGrid, Math.min(250, settings.maxSamples))
   for(const coordination of COORDINATIONS)finite(settings.volumeRatios![coordination]!,`${coordination} volume ratio`,.001,100)
   finite(settings.maxOrderNotional??0,'maximum order notional',0,1e9)
   for (const stage of ["base", "main", "real"] as const) { finite(settings.stageLastN[stage], `${stage} lastN`, 1, settings.maxSamples, true); finite(settings.stageMinPF[stage], `${stage} PF`, 0, 999) }
@@ -351,7 +353,8 @@ export class TradingEngine {
   private sampleRetention(lane: Pick<LaneState, "stage" | "coordination" | "config">): number {
     const s = this.state.settings
     const source=lane.stage === "live" ? "real" : lane.stage
-    const gateWindow = s.stageBlocks?.[source]?blockRequired(s.stageBlocks[source]!):s.stageLastN[source]
+    const { required, blocks } = this.stageWindowPolicy(lane.config, source)
+    const gateWindow = blocks ? blockRequired(blocks) : required
     const axisWindow = lane.coordination === "normal" && s.coordinations.axis.enabled&&(s.coordinations.axis.reference!=='base'||lane.stage==='base')
       ? s.coordinations.axis.previous + s.coordinations.axis.last : 0
     const relateWindow = lane.coordination === "relate" && lane.stage !== "base" ? s.coordinations.relate?.lastN ?? 0 : 0
@@ -371,8 +374,14 @@ export class TradingEngine {
     const end = legacyThrough >= before ? times?.length ?? 0 : lane.samples.length
     return {config: lane.config, samples: lane.samples.slice(start, end), closedCount: lane.closedCount}
   }
-  private stageWindow(lane:LaneState | undefined,source:"base"|"main"|"real",before:number,exact=false):StageWindowResult {
-    const s=this.state.settings,required=s.stageLastN[source],minPF=s.stageMinPF[source],blocks=s.stageBlocks?.[source]
+  private stageWindowPolicy(config: StrategyConfig | undefined, source: EvaluationStage) {
+    const settings = this.state.settings
+    const own = config?.stageLastN?.[source]
+    return { required: own ?? settings.stageLastN[source], minPF: settings.stageMinPF[source],
+      blocks: own === undefined ? settings.stageBlocks?.[source] : undefined }
+  }
+  private stageWindow(lane:LaneState | undefined,source:EvaluationStage,before:number,exact=false):StageWindowResult {
+    const { required, minPF, blocks } = this.stageWindowPolicy(lane?.config, source)
     const scope=lane&&!exact?this.stageScope(lane.config):"context"
     if(!lane||scope==="context")return windowMetrics(lane&&this.contextEvidence(lane,before),required,minPF,blocks)
     const wide=windowMetrics(this.configWindows.evidence(lane,before,blocks?blockRequired(blocks):required),required,minPF,blocks)
@@ -397,13 +406,14 @@ export class TradingEngine {
     const index=STAGES.indexOf(lane.stage),s=this.state.settings
     const scope=this.stageScope(lane.config)
     const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>{
-      const source=STAGES[i] as "base"|"main"|"real",blocks=s.stageBlocks?.[source]
+      const source=STAGES[i] as EvaluationStage
+      const { required, blocks } = this.stageWindowPolicy(lane.config, source)
       const parent=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,source)
       const floor=Math.max(s.stageMinPF[source],lane.config.autoPfFloor??0),cap=lane.config.maxWindowDrawdownPct
       if(!parent||proof.stage!==source||proof.laneId!==parent.id||!proof.qualified||(proof.windowScope??"context")!==scope||
         !Number.isFinite(proof.checkedAt)||proof.checkedAt<=0||typeof proof.profitFactor!=="number"||
         !Number.isFinite(proof.profitFactor)||proof.profitFactor<floor||proof.minPF!==floor||
-        proof.count!==proof.required||proof.required!==(blocks?blockRequired(blocks):s.stageLastN[source])||
+        proof.count!==proof.required||proof.required!==(blocks?blockRequired(blocks):required)||
         (proof.blockPolicyKey??null)!==(blocks?blockPolicyKey(blocks):null)||(proof.maxDrawdownPct??0)!==(cap??0))return false
       if(cap!==undefined&&(!Number.isFinite(proof.drawdownPct)||proof.drawdownPct!<0||proof.drawdownPct!>cap))return false
       const wide=proof.configWindow
@@ -778,8 +788,9 @@ export class TradingEngine {
       if (lane.calculationOnly) continue
       const source = lane.stage === "live" ? "real" : lane.stage
       const current=this.currentLane(lane)
+      const policy = this.stageWindowPolicy(lane.config, source)
       const {windowKey,...metrics}:StageWindowResult = current ? this.stageWindow(lane,source,Infinity)
-        : windowMetrics(lane,s.stageLastN[source],s.stageMinPF[source],s.stageBlocks?.[source])
+        : windowMetrics(lane,policy.required,policy.minPF,policy.blocks)
       const stats = stageStats[lane.stage]
       stats.lanes++; stats.open += lane.open ? 1 : 0; stats.closed += lane.closedCount
       stats.enoughSamples += metrics.enoughSamples ? 1 : 0; stats.qualified += metrics.qualified ? 1 : 0
