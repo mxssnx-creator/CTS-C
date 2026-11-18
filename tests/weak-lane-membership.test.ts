@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { TradingEngine } from "../core/engine"
-import type { Candle, LaneState } from "../core/types"
+import type { Candle } from "../core/types"
 
 const symbol="BTC-USDT"
 const bars:Candle[]=Array.from({length:260},(_,i)=>{
@@ -18,18 +18,22 @@ const create=()=>new TradingEngine({
 })
 
 const membership=(engine:TradingEngine)=>engine as unknown as {
-  currentLaneIds:WeakSet<LaneState>
-  validLineages:WeakSet<LaneState>
+  currentLaneEpoch:number
+  validLineageEpoch:number
+  currentLaneIds?:unknown
+  validLineages?:unknown
 }
 
-test("current and validated lineage membership is keyed by lane object without retaining lane-id strings",()=>{
+test("current and validated lineage membership uses per-lane epochs without retained membership containers",()=>{
   const engine=create()
   engine.processMarketCandles({[symbol]:bars})
-  assert.ok(membership(engine).currentLaneIds instanceof WeakSet)
-  assert.ok(membership(engine).validLineages instanceof WeakSet)
+  assert.equal(membership(engine).currentLaneIds,undefined)
+  assert.equal(membership(engine).validLineages,undefined)
+  assert.ok(membership(engine).currentLaneEpoch>0)
+  assert.ok(membership(engine).validLineageEpoch>0)
   const serialized=engine.serializeState()
   const restored=TradingEngine.fromSerialized(serialized)
-  assert.ok(membership(restored).currentLaneIds instanceof WeakSet)
-  assert.ok(membership(restored).validLineages instanceof WeakSet)
+  assert.equal(membership(restored).currentLaneIds,undefined)
+  assert.equal(membership(restored).validLineages,undefined)
   assert.deepEqual(JSON.parse(restored.serializeState()),JSON.parse(serialized))
 })
