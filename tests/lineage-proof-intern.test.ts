@@ -47,7 +47,7 @@ test("recursive parent lineage shares immutable ancestor proofs before and after
   const active = engine.exportState()
   const stats = assertInterned(active)
   assert.ok(stats.uniqueObjects < stats.references)
-  assert.deepEqual(active, before)
+  assert.deepEqual(JSON.parse(JSON.stringify(active)), before)
 
   const restored = TradingEngine.fromSerialized(engine.serializeState())
   const restoredState = restored.exportState()
