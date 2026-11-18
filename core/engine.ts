@@ -20,7 +20,9 @@ export const STAGES: Stage[] = ["base", "main", "real", "live"]
 const STAGE_INDEX:Record<Stage,number>={base:0,main:1,real:2,live:3}
 const COORDINATIONS = ["normal", "axis", "block", "dca", "relate"] as const
 const COORDINATION_OFFSET:Record<Coordination,number>={normal:0,axis:4,block:8,dca:12,relate:16}
-type LaneContext={long:(LaneState|undefined)[];short:(LaneState|undefined)[]}
+type LaneContext=(LaneState|undefined)[]
+const contextIndex=(direction:Direction,coordination:Coordination,stage:Stage)=>
+  2*(COORDINATION_OFFSET[coordination]+STAGE_INDEX[stage])+(direction==="short"?1:0)
 type ConfigStream={config:StrategyConfig;key:string}
 const OWN_PARSED_STATE = Symbol("engine-owned JSON state")
 export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
@@ -329,12 +331,12 @@ export class TradingEngine {
   }
   private cachedLane(symbol:string,configId:string,direction:Direction,coordination:Coordination,stage:Stage):LaneState|undefined{
     const ancestor = this.branches?.get(configId)?.branch?.ancestors[STAGE_INDEX[stage]]
-    return this.contexts.get(symbol)?.get(ancestor?.configId ?? configId)?.[direction][COORDINATION_OFFSET[ancestor?.coordination ?? coordination]+STAGE_INDEX[stage]]
+    return this.contexts.get(symbol)?.get(ancestor?.configId ?? configId)?.[contextIndex(direction,ancestor?.coordination ?? coordination,stage)]
   }
   private cacheLane(lane:LaneState):void{
     let configs=this.contexts.get(lane.symbol);if(!configs){configs=new Map();this.contexts.set(lane.symbol,configs)}
-    let context=configs.get(lane.configId);if(!context){context={long:[],short:[]};configs.set(lane.configId,context)}
-    context[lane.direction][COORDINATION_OFFSET[lane.coordination]+STAGE_INDEX[lane.stage]]=lane
+    let context=configs.get(lane.configId);if(!context){context=[];configs.set(lane.configId,context)}
+    context[contextIndex(lane.direction,lane.coordination,lane.stage)]=lane
     if(this.stageScope(lane.config)!=="context")this.configWindows.add(lane,this.configWindowKey(lane))
   }
   private refreshCurrentLaneIds():void {

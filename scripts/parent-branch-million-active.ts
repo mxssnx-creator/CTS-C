@@ -134,6 +134,28 @@ const inspection = (() => {
 })()
 const { byStage, missingParent, duplicateIds, childCountFailures, beforeDigest } = inspection
 global.gc?.()
+type Clearable={clear():void}
+const profileDerivedIndex=(name:string,drop:(engine:Record<string,Clearable>)=>void)=>{
+  global.gc?.()
+  let probe:TradingEngine|null=TradingEngine.fromSerialized(serialized)
+  global.gc?.()
+  const loaded=rss()
+  drop(probe as unknown as Record<string,Clearable>)
+  global.gc?.()
+  const afterDrop=rss()
+  probe=null
+  global.gc?.()
+  return {name,loadedHeapBytes:loaded.heapUsed,afterDropHeapBytes:afterDrop.heapUsed,
+    releasedHeapBytes:Math.max(0,loaded.heapUsed-afterDrop.heapUsed)}
+}
+const derivedIndexProfiles=[
+  profileDerivedIndex("contexts",engine=>engine.contexts.clear()),
+  profileDerivedIndex("currentLaneIds",engine=>engine.currentLaneIds.clear()),
+  profileDerivedIndex("validLineages",engine=>engine.validLineages.clear()),
+  profileDerivedIndex("childrenByLane",engine=>engine.childrenByLane.clear()),
+  profileDerivedIndex("activeSets",engine=>{engine.active.clear();engine.activeMicro.clear();engine.activeMinute.clear();engine.livePositions.clear()}),
+  profileDerivedIndex("parentIndexes",engine=>{engine.contexts.clear();engine.currentLaneIds.clear();engine.validLineages.clear();engine.childrenByLane.clear()}),
+]
 const restoreStarted = performance.now()
 const restoredState = compactStore.loadEngineState()
 assert.ok(restoredState)
@@ -175,7 +197,7 @@ const summary = {
     fullSerializedBytes: active ? Math.round(fullSerializedBytes * TARGET / active) : null,
     compactCheckpointBytes: active ? Math.round(compactCheckpointBytes * TARGET / active) : null,
   },
-  digestBeforeRestart: beforeDigest, digestAfterRestart: afterDigest, lineageStorage,
+  digestBeforeRestart: beforeDigest, digestAfterRestart: afterDigest, lineageStorage, derivedIndexProfiles,
   duplicateIds, missingParent, childCountFailures, pendingIntents, checkpoints,
 }
 writeFileSync("artifacts/cts-c-million-active-parent-sets.json", JSON.stringify(summary, null, 2))
@@ -197,4 +219,4 @@ console.log(JSON.stringify({ active, targetMet, byStage, width, materializeSecon
   compactSaveSeconds: summary.compactSaveSeconds, restoreSeconds: summary.restoreSeconds, sustainedSeconds: summary.sustainedSeconds,
   rssMiB: summary.finalMemory.rss / 2 ** 20, heapMiB: summary.finalMemory.heapUsed / 2 ** 20,
   fullSerializedMiB: fullSerializedBytes / 2 ** 20, compactCheckpointMiB: compactCheckpointBytes / 2 ** 20,
-  compactRatio: summary.compactRatio, lineageStorage, missingParent, childCountFailures, pendingIntents }))
+  compactRatio: summary.compactRatio, lineageStorage, derivedIndexProfiles, missingParent, childCountFailures, pendingIntents }))
