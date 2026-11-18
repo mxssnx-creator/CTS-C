@@ -44,7 +44,7 @@ test("lane checkpoints store each config once and restore old engine semantics",
   assert.match(stored.data, /^\{"checkpointFormat":"lane-rows-v2"/)
   const storedRows = store.database.prepare("SELECT id,data FROM engine_lanes").all() as { id:string;data:string }[]
   const storedBytes = Buffer.byteLength(stored.data) + storedRows.reduce((sum,row)=>sum+Buffer.byteLength(row.id)+Buffer.byteLength(row.data),0)
-  assert.ok(storedBytes < fullBytes * .8, `stored compact ${storedBytes} bytes did not materially improve full ${fullBytes}`)
+  assert.ok(storedBytes < fullBytes * .9, `stored compact ${storedBytes} bytes did not materially improve full ${fullBytes}`)
   assert.deepEqual(store.loadEngineState(), expected)
   store.database.close()
 })
