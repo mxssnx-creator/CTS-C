@@ -119,10 +119,8 @@ const restoredState = JSON.parse(restored.serializeState()) as EngineState
 const afterDigest = digest(restoredState.lanes)
 const restoredCounts = stageCounts(restored)
 const sustainedStarted = performance.now()
-let sustainedEvents = 0
 for (let chunk = 0; chunk < 3; chunk++) {
-  const next = batch(index, 5)
-  sustainedEvents += restored.processMarketCandles(next).length
+  restored.processMarketCandles(batch(index, 5))
   index += 5
 }
 const sustainedAt = performance.now()
@@ -136,7 +134,7 @@ const summary = {
   serializedBytes, materializeSeconds: (materializedAt - started) / 1000,
   restoreSeconds: (restoredAt - restoreStarted) / 1000,
   sustainedCandles: 15 * symbols.length, sustainedSeconds: (sustainedAt - sustainedStarted) / 1000,
-  sustainedEvents, activeAfterRestart: totalCurrent(restoredCounts), activeAfterLoad: totalCurrent(finalCounts),
+  activeAfterRestart: totalCurrent(restoredCounts), activeAfterLoad: totalCurrent(finalCounts),
   stagesAfterRestart: restoredCounts, stagesAfterLoad: finalCounts,
   baselineMemory: baseline, beforeRestartMemory: beforeRestart, afterDropMemory: afterDrop, finalMemory: rss(),
   digestBeforeRestart: beforeDigest, digestAfterRestart: afterDigest,
