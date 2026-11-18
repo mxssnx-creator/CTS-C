@@ -208,10 +208,17 @@ export class TradingEngine {
   }
   /** Store loaders construct a fresh, exclusively owned state without a second whole-ledger clone. */
   static fromOwnedCheckpoint(restored:EngineState):TradingEngine{return new TradingEngine(restored.settings,restored,OWN_PARSED_STATE)}
-  checkpointMetadata():string{const {lanes,...metadata}=this.state;return JSON.stringify(metadata)}
+  /** Metadata owns immutable configuration geometry once; lane rows retain only mutable state. */
+  checkpointMetadata():string{
+    const {lanes,...state}=this.state
+    const configs:Record<string,StrategyConfig>={}
+    for(const lane of Object.values(lanes))configs[lane.configId]??=lane.config
+    return JSON.stringify({state,configs})
+  }
   *checkpointLanes(all=false):Generator<{id:string;data:string}>{
-    if(all){for(const id in this.state.lanes)yield {id,data:JSON.stringify(this.state.lanes[id])}}
-    else for(const id of this.dirtyLaneIds)yield {id,data:JSON.stringify(this.state.lanes[id])}
+    const compact=(lane:LaneState)=>{const {id:_id,config:_config,...state}=lane;return JSON.stringify(state)}
+    if(all){for(const id in this.state.lanes)yield {id,data:compact(this.state.lanes[id])}}
+    else for(const id of this.dirtyLaneIds)yield {id,data:compact(this.state.lanes[id])}
   }
   checkpointSaved():void{this.dirtyLaneIds.clear()}
   constructor(settings: Partial<EngineSettings> = {}, restored?: EngineState, ownership?: symbol) {
