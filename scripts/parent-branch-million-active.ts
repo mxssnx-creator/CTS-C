@@ -150,15 +150,16 @@ const profileDerivedIndex=(name:string,drop:(engine:Record<string,unknown>)=>voi
 }
 const derivedIndexProfiles=[
   profileDerivedIndex("contexts",engine=>clearIndex(engine.contexts)),
+  profileDerivedIndex("validLineages",engine=>clearIndex(engine.validLineages)),
   profileDerivedIndex("childrenByLane",engine=>clearIndex(engine.childrenByLane)),
   profileDerivedIndex("activeSets",engine=>{clearIndex(engine.active);clearIndex(engine.activeMicro);clearIndex(engine.activeMinute);clearIndex(engine.livePositions)}),
-  profileDerivedIndex("parentIndexes",engine=>{clearIndex(engine.contexts);clearIndex(engine.childrenByLane)}),
+  profileDerivedIndex("parentIndexes",engine=>{clearIndex(engine.contexts);clearIndex(engine.validLineages);clearIndex(engine.childrenByLane)}),
 ]
 const restoreStarted = performance.now()
 const restoredState = compactStore.loadEngineState()
 assert.ok(restoredState)
 const restored = TradingEngine.fromOwnedCheckpoint(restoredState)
-const retainedMembershipContainers=["currentLaneIds","validLineages"].filter(key=>key in (restored as unknown as Record<string,unknown>))
+const retainedCurrentLaneIndex="currentLaneIds" in (restored as unknown as Record<string,unknown>)
 const restoredAt = performance.now()
 compactStore.close()
 serialized = ""
@@ -196,7 +197,7 @@ const summary = {
     fullSerializedBytes: active ? Math.round(fullSerializedBytes * TARGET / active) : null,
     compactCheckpointBytes: active ? Math.round(compactCheckpointBytes * TARGET / active) : null,
   },
-  digestBeforeRestart: beforeDigest, digestAfterRestart: afterDigest, lineageStorage, derivedIndexProfiles, retainedMembershipContainers,
+  digestBeforeRestart: beforeDigest, digestAfterRestart: afterDigest, lineageStorage, derivedIndexProfiles, retainedCurrentLaneIndex,
   duplicateIds, missingParent, childCountFailures, pendingIntents, checkpoints,
 }
 writeFileSync("artifacts/cts-c-million-active-parent-sets.json", JSON.stringify(summary, null, 2))
@@ -212,11 +213,11 @@ assert.equal(lineageStorage.sharedRecursiveProofPrefixes,lineageStorage.recursiv
 assert.ok(lineageStorage.uniqueProofObjects<lineageStorage.proofReferences)
 assert.ok(compactCheckpointBytes < fullSerializedBytes * .8, `compact checkpoint ratio was ${compactCheckpointBytes/fullSerializedBytes}`)
 assert.equal(beforeDigest, afterDigest)
-assert.deepEqual(retainedMembershipContainers,[])
+assert.equal(retainedCurrentLaneIndex,false)
 assert.equal(totalCurrent(restoredCounts), active)
 assert.equal(pendingIntents, 0)
 console.log(JSON.stringify({ active, targetMet, byStage, width, materializeSeconds: summary.materializeSeconds,
   compactSaveSeconds: summary.compactSaveSeconds, restoreSeconds: summary.restoreSeconds, sustainedSeconds: summary.sustainedSeconds,
   rssMiB: summary.finalMemory.rss / 2 ** 20, heapMiB: summary.finalMemory.heapUsed / 2 ** 20,
   fullSerializedMiB: fullSerializedBytes / 2 ** 20, compactCheckpointMiB: compactCheckpointBytes / 2 ** 20,
-  compactRatio: summary.compactRatio, lineageStorage, derivedIndexProfiles, retainedMembershipContainers, missingParent, childCountFailures, pendingIntents }))
+  compactRatio: summary.compactRatio, lineageStorage, derivedIndexProfiles, retainedCurrentLaneIndex, missingParent, childCountFailures, pendingIntents }))
