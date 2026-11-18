@@ -11,9 +11,10 @@ test('incremental checkpoints preserve exact full state through entries, adds, c
  try{
   for(let i=0;i<300;i+=20){e.processCandles('BTC-USDT',bars.slice(i,i+20),{allowExecution:true});save(store,e);assert.deepEqual(store.loadEngineState(),JSON.parse(e.serializeState()));assert.equal([...e.checkpointLanes()].length,0)}
   e.processTick('BTC-USDT',115,bars[299].timestamp+1000);save(store,e);assert.deepEqual(store.loadEngineState(),JSON.parse(e.serializeState()))
-  const old=store.database.prepare('SELECT data FROM engine_lanes').all().map(r=>r.data)
+  const btcIds=Object.values(store.loadEngineState()!.lanes).filter(l=>l.symbol==='BTC-USDT').map(l=>l.id).sort()
+  const old=new Map((store.database.prepare('SELECT id,data FROM engine_lanes').all() as {id:string;data:string}[]).filter(r=>btcIds.includes(r.id)).map(r=>[r.id,r.data]))
   e.processCandles('ETH-USDT',bars.slice(0,40));save(store,e)
-  const btc=store.database.prepare("SELECT data FROM engine_lanes WHERE json_extract(data,'$.symbol')='BTC-USDT'").all().map(r=>r.data)
+  const btc=new Map((store.database.prepare('SELECT id,data FROM engine_lanes').all() as {id:string;data:string}[]).filter(r=>btcIds.includes(r.id)).map(r=>[r.id,r.data]))
   assert.deepEqual(btc,old,'another symbol cannot rewrite or alter committed BTC lanes')
   e.updateSettings({stageLastN:{base:1,main:1,real:1},maxSamples:10,stageGateMode:'continuous-ancestors'});save(store,e)
   assert.deepEqual(store.get('engine'),JSON.parse(e.serializeState()));assert.deepEqual(store.engineSettings(),e.settings)
