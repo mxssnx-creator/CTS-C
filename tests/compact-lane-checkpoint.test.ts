@@ -22,7 +22,7 @@ test("lane checkpoints store each config once and restore old engine semantics",
     },
   })
   engine.processMarketCandles({ [symbol]: bars })
-  const expected = engine.exportState()
+  const expected = JSON.parse(engine.serializeState())
   const rows = [...engine.checkpointLanes(true)]
   assert.ok(rows.length > 20)
   for (const row of rows) {
