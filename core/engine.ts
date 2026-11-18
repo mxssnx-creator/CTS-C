@@ -25,7 +25,6 @@ const contextIndex=(direction:Direction,coordination:Coordination,stage:Stage)=>
   2*(COORDINATION_OFFSET[coordination]+STAGE_INDEX[stage])+(direction==="short"?1:0)
 type ConfigStream={config:StrategyConfig;key:string}
 const OWN_PARSED_STATE = Symbol("engine-owned JSON state")
-const checkpointConfigRef=(configId:string)=>createHash("sha256").update(configId).digest("base64url").slice(0,22)
 export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   connectionId: "bingx-x02", symbols: ["BTC-USDT", "ETH-USDT", "SOL-USDT"], initialEquity: 10_000,
   baseNotional: 100, volumeFactor: .01, stageLastN: { base: 20, main: 8, real: 8 },
@@ -214,17 +213,13 @@ export class TradingEngine {
   checkpointMetadata():string{
     const {lanes,...state}=this.state
     const configs:Record<string,StrategyConfig>={}
-    for(const lane of Object.values(lanes)){
-      const ref=checkpointConfigRef(lane.configId),existing=configs[ref]
-      if(existing&&existing.id!==lane.configId)throw new Error("Checkpoint config reference collision")
-      configs[ref]??=lane.config
-    }
+    for(const lane of Object.values(lanes))configs[lane.configId]??=lane.config
     return JSON.stringify({laneRowsVersion:3,state,configs})
   }
   *checkpointLanes(all=false):Generator<{id:string;data:string}>{
     const compact=(lane:LaneState)=>{
       const {id:_id,config:_config,configId,...state}=lane
-      return JSON.stringify({...state,configRef:checkpointConfigRef(configId)})
+      return JSON.stringify({...state,c:configId})
     }
     if(all){for(const id in this.state.lanes)yield {id,data:compact(this.state.lanes[id])}}
     else for(const id of this.dirtyLaneIds)yield {id,data:compact(this.state.lanes[id])}
