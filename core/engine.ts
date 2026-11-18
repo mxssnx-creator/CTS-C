@@ -467,7 +467,7 @@ export class TradingEngine {
     const id = laneKey(this.state.settings.connectionId, symbol, config, direction, coordination, stage, this.coordinationIdentity(coordination,stage,config,symbol))
     if (!this.state.lanes[id]) {
       this.state.lanes[id] = { id, symbol, configId: config.id, direction, coordination, stage, ...(this.calculationOnly(config,coordination,stage) ? {calculationOnly:true} : {}), config: Object.freeze(config), samples: [], closedCount: 0, wins: 0, netPnl: 0, grossProfit: 0, grossLoss: 0, lastTimestamp: 0, admissionCount: 0, costTotal:0,admittedClosed:0,admittedProfit:0,admittedLoss:0,admittedNetPnl:0 }
-      (this.state.lanes[id] as RuntimeLaneState)[CURRENT_LANE_EPOCH]=this.currentLaneEpoch
+      ;(this.state.lanes[id] as RuntimeLaneState)[CURRENT_LANE_EPOCH]=this.currentLaneEpoch
     }
     this.cacheLane(this.state.lanes[id])
     return this.state.lanes[id]
