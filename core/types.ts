@@ -16,6 +16,7 @@ export interface StrategyConfig {
   roundTripCostPct?: number; maxHoldMinutes?: number; trailDistancePct?:number
   indicationSourceId?:string
   autoPfFloor?:number
+  branch?: { geometryId: string; ancestors: readonly { configId: string; coordination: Coordination }[] }
   stageLastN?: ConfigLastN
   /** Maximum peak-to-trough sum of net-return percentage points in this lane's gate window. Not account drawdown. */
   maxWindowDrawdownPct?:number
@@ -30,7 +31,7 @@ export type StageWindowScope = "context" | "config" | "both"
 export interface EngineSettings {
   stageBlocks?: Partial<Record<"base"|"main"|"real",BlockPolicy>>;
   liveEntryMode?:'independent'|'real-mirror'
-  stageGateMode?:'continuous-ancestors'|'processed-sets'
+  stageGateMode?:'continuous-ancestors'|'processed-sets'|'parent-branches'
   stageWindowScope?: StageWindowScope
   microStageWindowScope?: StageWindowScope | "inherit"
   connectionId: string; symbols: string[]; initialEquity: number; baseNotional: number; volumeFactor: number

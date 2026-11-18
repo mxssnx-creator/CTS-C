@@ -8,7 +8,6 @@ import { closedHistory, planHistory, validateHistory, type HistoryPlan } from '.
 import { DemoExecutor } from './executor'
 import { getStore,type StateStore } from './store'
 import type { Candle, EngineSettings, EngineEvent } from './types'
-import { generateStrategyCatalog } from './catalog'
 import {flatEngineSettings,validateConfiguration} from './settings-schema'
 import { DEFAULT_STEP_AUTO } from './step-evidence'
 import { DEFAULT_RELATE } from './relate'
@@ -62,7 +61,7 @@ export class TerminalRuntime {
     this.executor=new DemoExecutor(this.store,this.client,{connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:intent=>this.validateLiveIntent(intent)})
     const restored = this.store.loadEngineState()
     this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
-    this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId})
+    this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId,stageGateMode:"parent-branches"})
     this.engine.observeLiveCloses(trade=>this.executor.recordSimulatedClose(this.connectionId,trade))
     if(this.engine.settings.connectionId!==connectionId)throw new Error('Engine checkpoint belongs to another connection')
     this.control = { ...DEFAULT_CONTROL, ...this.store.get<Control>('control'), warmed: [] }
@@ -363,7 +362,7 @@ export class TerminalRuntime {
     input=validateConfiguration(input,{partial:true})
     validateConfiguration({...flatEngineSettings(this.engine.settings,this.control),...input})
     const current=this.engine.settings, next=structuredClone(current)
-    const catalogKeys=['strategySignalsSources','strategyLowRangeSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyPriceDistancesEnabled','strategyStopDistancePcts','strategyTrailDistancePcts','strategyLastNGrid','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
+    const catalogKeys=['strategySignalsSources','strategyLowRangeSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyPriceDistancesEnabled','strategyStopDistancePcts','strategyTrailDistancePcts','strategyLastNGrid','strategyStageCoordinations','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
     const autoFields = {
       blockAutoEnabled: ["block", "enabled"], blockAutoLastN: ["block", "lastN"],
@@ -421,7 +420,7 @@ export class TerminalRuntime {
       }
       throw new Error(`Unknown setting ${key}`)
     }
-    validateEngineSettings(next);generateStrategyCatalog(next.connectionId,next.catalog)
+    validateEngineSettings(next)
     // A settings change may disable entry lanes; their open positions retain immutable exits.
     this.engine.updateSettings(next)
     if(input.symbolCount!==undefined)this.control.symbolCount=Number(input.symbolCount)

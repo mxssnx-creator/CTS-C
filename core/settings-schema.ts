@@ -1,3 +1,4 @@
+import { checkStageCoordinations } from "./stage-branches"
 import {checkBlockPolicy,type BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 import {relationalVolumeSettings,DEFAULT_RELATIONAL_VOLUME} from "../shared/cts-volume/ratios.ts";
 import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from "../shared/cts-indications/catalog.ts"
@@ -21,9 +22,9 @@ export const MODES = [...EXIT_MODES]
 export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
-  stageGateMode: "processed-sets",
+  stageGateMode: "parent-branches",
   stageWindowScope: "context", microStageWindowScope: "inherit",
-  stageBlocks: {}, strategyLastNGrid: {},
+  stageBlocks: {}, strategyLastNGrid: {}, strategyStageCoordinations: {},
   liveEntryMode: "independent",
   baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
@@ -94,7 +95,7 @@ export const COORDINATION_FIELDS = [
   { key: "relateMaxSlRatio", label: "Relate maximum SL-to-TP ratio", min: .01, max: .5, step: .01 },
 ]
 const WINDOW_SCOPES = ["context", "config", "both"] as const
-const ENUM_FIELDS: Record<string, readonly string[]> = { blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
+const ENUM_FIELDS: Record<string, readonly string[]> = { blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
@@ -169,6 +170,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
   for (const key of Object.keys(DEFAULTS)) {
     if (!Object.prototype.hasOwnProperty.call(values, key)) {
       if (partial) continue
+      if (key === "strategyStageCoordinations") { output[key] = {}; continue }
       throw new Error(`Configuration is missing ${key}.`)
     }
     const value = values[key]
@@ -178,6 +180,8 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if(key==="stageBlocks"){
       if(!value||typeof value!=="object"||Array.isArray(value)||Object.keys(value).some(k=>!["base","main","real"].includes(k)))throw new Error("Invalid stage blocks");
       for(const policy of Object.values(value))checkBlockPolicy(policy as BlockPolicy);output[key]=structuredClone(value);
+    } else if (key === "strategyStageCoordinations") {
+      output[key] = checkStageCoordinations(value)
     } else if (key === "strategyLastNGrid") {
       output[key] = structuredClone(checkLastNGrid(value))
     } else if (key === "relationalVolumeRatios") {
@@ -204,7 +208,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     const count = configurationCount(output)
     if (count === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
     const windows = output.strategyLastNGrid as LastNGrid
-    if ((output.strategyPriceDistancesEnabled || LAST_N_STAGES.some(stage => windows[stage]?.length)) && count > EXPANDED_CATALOG_MAX) {
+    if ((output.strategyPriceDistancesEnabled || LAST_N_STAGES.some(stage => windows[stage]?.length)) && (output.stageGateMode === "parent-branches" ? count / lastNVariantCount(windows) : count) > EXPANDED_CATALOG_MAX) {
       throw new Error(`Expanded catalog exceeds ${EXPANDED_CATALOG_MAX} configurations. Select fewer distances, sources, timeframes or windows.`)
     }
   }
@@ -224,7 +228,9 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
   const result: Record<string, unknown> = structuredClone(DEFAULTS)
   for (const [key, fallback] of Object.entries(DEFAULTS)) {
     if (settings[key] === undefined) continue
-    if(key==="stageBlocks"){try{result[key]=validateConfiguration({stageBlocks:JSON.parse(settings[key])},{partial:true}).stageBlocks}catch{}} else if (key === "strategyLastNGrid") {
+    if(key==="stageBlocks"){try{result[key]=validateConfiguration({stageBlocks:JSON.parse(settings[key])},{partial:true}).stageBlocks}catch{}} else if (key === "strategyStageCoordinations") {
+      try { result[key] = checkStageCoordinations(JSON.parse(settings[key])) } catch { /* Keep legacy defaults. */ }
+    } else if (key === "strategyLastNGrid") {
       try { result[key] = checkLastNGrid(JSON.parse(settings[key])) } catch { /* Preserve defaults on invalid legacy data. */ }
     } else if (key === "relationalVolumeRatios") {
       try{result[key]=relationalVolumeSettings(JSON.parse(settings[key]),true)}catch{}

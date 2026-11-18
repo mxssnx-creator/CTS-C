@@ -29,7 +29,7 @@ test('settings are strict and independent across account state stores and restar
  const demo=new TerminalRuntime('bingx-x02',demoStore),main=new TerminalRuntime('bingx-x01',mainStore)
  try{
   main.saveFlatSettings({stageGateMode:"processed-sets",symbolCount:35,axisVolumeRatio:2,blockVolumeFactor:.3,strategyTpFactor:1.2,strategySlFactor:.8,strategyTrailRatio:.5,holdTimeFactor:2,maxOrderNotional:10})
-  assert.equal(main.engine.settings.stageGateMode,'processed-sets');assert.equal(demo.engine.settings.stageGateMode,'continuous-ancestors');assert.equal(demo.engine.settings.volumeRatios!.axis,1);assert.equal(main.engine.settings.volumeRatios!.axis,2)
+  assert.equal(main.engine.settings.stageGateMode,'processed-sets');assert.equal(demo.engine.settings.stageGateMode,'parent-branches');assert.equal(demo.engine.settings.volumeRatios!.axis,1);assert.equal(main.engine.settings.volumeRatios!.axis,2)
   assert.equal(demo.control.symbolCount,100);assert.equal(main.control.symbolCount,35)
   assert.equal(main.control.running,false);assert.equal(demo.control.running,false)
   const before=main.engine.serializeState()

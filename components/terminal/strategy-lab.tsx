@@ -15,6 +15,7 @@ import { DEFAULT_EXIT_MODES, type ProfitFactorState, type Stage, type Coordinati
 
 import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
 import { STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
+import { BRANCH_COORDINATIONS, type StageCoordinations } from "@/core/stage-branches"
 import { LAST_N_STAGES, type LastNGrid } from "@/core/last-n-grid"
 
 const EXIT_LABELS: Record<ExitMode, string> = {
@@ -226,7 +227,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
           <section className="terminal-panel p-5">
             <div className="mb-5 flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-[var(--terminal-accent)]" /><h3 className="text-sm font-semibold">Stage gates & completed evidence</h3></div>
             <p className="terminal-muted mb-5 text-xs">PF 1.0 is neutral. Each stage uses its own most recent completed samples. The Real gate controls progression into Live; exchange execution also requires a verified connection.</p>
-            <div className="mb-5">{enumField("stageGateMode", "Stage progression", [{ value: "processed-sets", label: "Independent processed sets" }, { value: "continuous-ancestors", label: "Recheck all ancestor windows" }])}</div>
+            <div className="mb-5">{enumField("stageGateMode", "Stage progression", [{ value: "parent-branches", label: "Branch from each parent entry" }, { value: "processed-sets", label: "Independent processed sets" }, { value: "continuous-ancestors", label: "Recheck all ancestor windows" }])}</div>
             <div className="mb-3 grid gap-5 sm:grid-cols-2">
               {enumField("stageWindowScope", "Stage evidence scope", windowOptions)}
               {enumField("microStageWindowScope", "Micro and Low-Range evidence scope", [{ value: "inherit", label: "Use stage evidence scope" }, ...windowOptions])}
@@ -239,6 +240,13 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <details className="mt-5 space-y-4">
               <summary className="cursor-pointer text-sm font-semibold">Independent Last-N Sets</summary>
               <p className="terminal-muted text-xs">Each combination of selected stage sizes runs in its own Set. An empty stage selection uses that stage’s existing window policy.</p>
+              {draft.stageGateMode === "parent-branches" && (["main","real"] as const).map(stage => {
+                const map = (draft.strategyStageCoordinations ?? {}) as StageCoordinations
+                return <MultiChoice key={stage} title={stage === "main" ? "Main child coordinations" : "Real child coordinations"}
+                  description="Each eligible parent creates the selected enabled coordinations. An empty selection inherits its coordination."
+                  values={[...BRANCH_COORDINATIONS]} selected={[...(map[stage] ?? [])]} optional
+                  onChange={value => change("strategyStageCoordinations", { ...map, [stage]: value })} />
+              })}
               {LAST_N_STAGES.map(stage => {
                 const grid = (draft.strategyLastNGrid ?? {}) as LastNGrid
                 const sizes = [...(grid[stage] ?? [])]
