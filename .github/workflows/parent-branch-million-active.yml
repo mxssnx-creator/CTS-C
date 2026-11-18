@@ -1,0 +1,38 @@
+name: Million active parent Set capacity
+
+on:
+  pull_request:
+    paths:
+      - "core/**"
+      - "scripts/parent-branch-million-active.ts"
+      - ".github/workflows/parent-branch-million-active.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Characterize parent Set capacity, restart and sustained load
+        run: node --max-old-space-size=6144 --expose-gc --import tsx scripts/parent-branch-million-active.ts
+      - name: Pack evidence
+        if: always()
+        run: if [ -d artifacts ]; then tar -czf cts-c-million-active-parent-sets.tgz artifacts; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cts-c-million-active-parent-sets
+          path: |
+            artifacts
+            cts-c-million-active-parent-sets.tgz
+          if-no-files-found: warn
+          retention-days: 30
