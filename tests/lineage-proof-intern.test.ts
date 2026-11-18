@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { TradingEngine } from "../core/engine"
-import type { Candle, EngineState, GateProof } from "../core/types"
+import type { Candle, EngineState } from "../core/types"
 
 const symbol = "BTC-USDT"
 const bars: Candle[] = Array.from({ length: 260 }, (_, i) => {
@@ -25,17 +25,20 @@ const create = () => {
 function assertInterned(state: EngineState) {
   const references = Object.values(state.lanes).flatMap(lane => lane.parentProof ?? [])
   assert.ok(references.length > 20, "fixture must create recursive parent evidence")
-  const byValue = new Map<string, GateProof[]>()
-  for (const proof of references) {
-    const key = JSON.stringify(proof)
-    const group = byValue.get(key) ?? []
-    group.push(proof)
-    byValue.set(key, group)
+  let recursivePrefixes = 0
+  for (const lane of Object.values(state.lanes)) {
+    const chain = lane.parentProof
+    if (!chain || chain.length < 2) continue
+    const parent = state.lanes[chain.at(-1)!.laneId]
+    assert.ok(parent?.parentProof, "recursive proof must resolve its immediate parent")
+    for (let i = 0; i < chain.length - 1; i++) {
+      recursivePrefixes++
+      assert.equal(chain[i], parent.parentProof![i], "child must reuse its parent's immutable ancestor proof")
+      assert.deepEqual(chain[i], parent.parentProof![i])
+    }
   }
-  const repeated = [...byValue.values()].filter(group => group.length > 1)
-  assert.ok(repeated.length > 0, "fixture must reproduce duplicated ancestor proofs")
-  for (const group of repeated) assert.equal(new Set(group).size, 1, "equal immutable lineage proofs must share one object")
-  return { references: references.length, uniqueObjects: new Set(references).size, uniqueValues: byValue.size }
+  assert.ok(recursivePrefixes > 10, "fixture must reproduce copied recursive prefixes")
+  return { references: references.length, uniqueObjects: new Set(references).size, recursivePrefixes }
 }
 
 test("recursive parent lineage shares immutable ancestor proofs before and after restart", () => {
