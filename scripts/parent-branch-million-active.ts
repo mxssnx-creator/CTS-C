@@ -134,13 +134,13 @@ const inspection = (() => {
 })()
 const { byStage, missingParent, duplicateIds, childCountFailures, beforeDigest } = inspection
 global.gc?.()
-type Clearable={clear():void}
-const profileDerivedIndex=(name:string,drop:(engine:Record<string,Clearable>)=>void)=>{
+const clearIndex=(value:unknown)=>(value as {clear():void}).clear()
+const profileDerivedIndex=(name:string,drop:(engine:Record<string,unknown>)=>void)=>{
   global.gc?.()
   let probe:TradingEngine|null=TradingEngine.fromSerialized(serialized)
   global.gc?.()
   const loaded=rss()
-  drop(probe as unknown as Record<string,Clearable>)
+  drop(probe as unknown as Record<string,unknown>)
   global.gc?.()
   const afterDrop=rss()
   probe=null
@@ -149,12 +149,12 @@ const profileDerivedIndex=(name:string,drop:(engine:Record<string,Clearable>)=>v
     releasedHeapBytes:Math.max(0,loaded.heapUsed-afterDrop.heapUsed)}
 }
 const derivedIndexProfiles=[
-  profileDerivedIndex("contexts",engine=>engine.contexts.clear()),
-  profileDerivedIndex("currentLaneIds",engine=>engine.currentLaneIds.clear()),
-  profileDerivedIndex("validLineages",engine=>engine.validLineages.clear()),
-  profileDerivedIndex("childrenByLane",engine=>engine.childrenByLane.clear()),
-  profileDerivedIndex("activeSets",engine=>{engine.active.clear();engine.activeMicro.clear();engine.activeMinute.clear();engine.livePositions.clear()}),
-  profileDerivedIndex("parentIndexes",engine=>{engine.contexts.clear();engine.currentLaneIds.clear();engine.validLineages.clear();engine.childrenByLane.clear()}),
+  profileDerivedIndex("contexts",engine=>clearIndex(engine.contexts)),
+  profileDerivedIndex("currentLaneIds",engine=>{engine.currentLaneIds=new WeakSet<LaneState>()}),
+  profileDerivedIndex("validLineages",engine=>{engine.validLineages=new WeakSet<LaneState>()}),
+  profileDerivedIndex("childrenByLane",engine=>clearIndex(engine.childrenByLane)),
+  profileDerivedIndex("activeSets",engine=>{clearIndex(engine.active);clearIndex(engine.activeMicro);clearIndex(engine.activeMinute);clearIndex(engine.livePositions)}),
+  profileDerivedIndex("parentIndexes",engine=>{clearIndex(engine.contexts);engine.currentLaneIds=new WeakSet<LaneState>();engine.validLineages=new WeakSet<LaneState>();clearIndex(engine.childrenByLane)}),
 ]
 const restoreStarted = performance.now()
 const restoredState = compactStore.loadEngineState()
