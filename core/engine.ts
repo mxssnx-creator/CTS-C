@@ -221,6 +221,22 @@ export class TradingEngine {
     else for(const id of this.dirtyLaneIds)yield {id,data:compact(this.state.lanes[id])}
   }
   checkpointSaved():void{this.dirtyLaneIds.clear()}
+  private immutableProof(proof:GateProof):GateProof{
+    if(proof.configWindow)Object.freeze(proof.configWindow)
+    return Object.freeze(proof)
+  }
+  /** Reuse the parent's immutable prefix instead of retaining a copied proof object in every child. */
+  private internLineageProofs():void{
+    const lanes=Object.values(this.state.lanes).sort((a,b)=>STAGE_INDEX[a.stage]-STAGE_INDEX[b.stage])
+    for(const lane of lanes){
+      const chain=lane.parentProof
+      if(!chain?.length)continue
+      const parent=this.state.lanes[chain.at(-1)!.laneId],prefix=parent?.parentProof
+      if(prefix)for(let i=0;i<Math.min(prefix.length,chain.length-1);i++)
+        if(JSON.stringify(chain[i])===JSON.stringify(prefix[i]))chain[i]=prefix[i]!
+      for(const proof of chain)this.immutableProof(proof)
+    }
+  }
   constructor(settings: Partial<EngineSettings> = {}, restored?: EngineState, ownership?: symbol) {
     const validated = validateEngineSettings({ ...restored?.settings, ...settings })
     if (restored && restored.version !== 1) throw new Error("Unsupported engine state")
@@ -230,6 +246,7 @@ export class TradingEngine {
       startedAt: Date.now(), updatedAt: 0, equity: validated.initialEquity, peakEquity: validated.initialEquity, maxDrawdownPct: 0, equityHistory: [],
     }
     this.state.settings = validated
+    this.internLineageProofs()
     this.configs = generateStrategyCatalog(validated.connectionId, executionCatalog(validated), "1970-01-01T00:00:00.000Z")
     this.refreshSymbolCatalogs()
     this.state.recentLiveTrades??=this.state.recentTrades.filter(trade=>trade.stage==="live")
@@ -531,8 +548,8 @@ export class TradingEngine {
         if(lane.stage==='live'||!lane.parentProof){
           const parent=STAGES[STAGES.indexOf(lane.stage)-1],parentLane=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,parent)!
           if(!this.validLineage(parentLane))throw new Error('Processed parent has no valid own-set lineage')
-          admission=[...(parentLane.parentProof??[]).map(p=>({...p})),proof(parent)]
-          lane.parentProof??=admission.map(p=>({...p}))
+          admission=[...(parentLane.parentProof??[]),this.immutableProof(proof(parent))]
+          lane.parentProof??=admission
         }else admission=lane.parentProof.map(p=>({...p}))
         if(!this.validLineage(lane))throw new Error('Processed set lineage does not match this configuration')
       }else admission=STAGES.slice(0,STAGES.indexOf(lane.stage)).map(proof)
