@@ -2,6 +2,7 @@ import {blockPrefix,blockRequired,blockPolicyKey,checkBlockPolicy,evaluateBlocks
 import {blockRoundBudget,settleBlockRound,consumeBlockPause} from "./block-rounds"
 import { checkBlockPyramidAdd, settleBlockSteps } from "./block-auto"
 import { validateStepAuto } from "./step-evidence"
+import { DEFAULT_RELATE, relateAllocation } from "./relate"
 import { dcaStepVerdict, observeDcaStep, settleDcaSteps, validateDcaAuto } from "./dca-auto"
 import {normalizedVolumeFactor,relationalVolumeSettings} from "../shared/cts-volume/ratios";
 import { strategyProcessing } from "./strategy-processing"
@@ -9,20 +10,21 @@ import { createHash } from "node:crypto"
 import { generateStrategyCatalog } from "./catalog"
 import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals, newSignalState } from "./replay"
 import { describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
-import { observedExit } from "./exits"
+import { isFixedTrailing, observedExit } from "./exits"
 import { ConfigStageWindows, type WindowEvidence } from "./config-stage-windows"
 import type { Candle, ClosedTrade, Coordination, Direction, EngineEvent, EngineSettings, EngineSnapshot, EngineState, ExecutionIntent, LaneState, PaperPosition, Stage, StageWindowScope, StrategyConfig,GateProof } from "./types"
 
 export const STAGES: Stage[] = ["base", "main", "real", "live"]
 const STAGE_INDEX:Record<Stage,number>={base:0,main:1,real:2,live:3}
-const COORDINATION_OFFSET:Record<Coordination,number>={normal:0,axis:4,block:8,dca:12}
+const COORDINATIONS = ["normal", "axis", "block", "dca", "relate"] as const
+const COORDINATION_OFFSET:Record<Coordination,number>={normal:0,axis:4,block:8,dca:12,relate:16}
 type LaneContext={long:(LaneState|undefined)[];short:(LaneState|undefined)[]}
 type ConfigStream={config:StrategyConfig;key:string}
 const OWN_PARSED_STATE = Symbol("engine-owned JSON state")
 export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   connectionId: "bingx-x02", symbols: ["BTC-USDT", "ETH-USDT", "SOL-USDT"], initialEquity: 10_000,
   baseNotional: 100, volumeFactor: .01, stageLastN: { base: 20, main: 8, real: 8 },
-  volumeRatios:{normal:1,axis:1,block:1,dca:1},maxOrderNotional:0,
+  volumeRatios:{normal:1,axis:1,block:1,dca:1,relate:1},maxOrderNotional:0,
   stageGateMode:'continuous-ancestors',
   stageWindowScope:"context", microStageWindowScope:"inherit",
   liveEntryMode:'independent',
@@ -30,7 +32,7 @@ export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   catalog: { strategyTpSteps: [3, 5, 8, 12, 18, 24, 30], strategySlRatios: [.6, 1, 1.4] },
   coordinations: { axis: { enabled: true, previous: 8, last: 3, outcome: "any",reference:'same-stage' },
     block: { enabled: true, steps: 3, ratio: .2, mode: "shared" },
-    dca: { enabled: true, steps: 2, distancePct: 1, multiplier: 2 } },
+    dca: { enabled: true, steps: 2, distancePct: 1, multiplier: 2 }, relate: DEFAULT_RELATE },
 }
 export function normalizeSymbol(symbol: string): string {
   const value = symbol.trim().toUpperCase().replace("/", "-").replace("_", "-")
@@ -46,7 +48,7 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
     volumeRatios:{...d.volumeRatios!,...input.volumeRatios},
     symbolFees:structuredClone(input.symbolFees??{}),
     catalog: input.catalog === undefined ? structuredClone(d.catalog) : structuredClone(input.catalog), stageLastN: { ...d.stageLastN, ...input.stageLastN }, stageMinPF: { ...d.stageMinPF, ...input.stageMinPF },
-    coordinations: { axis: { ...d.coordinations.axis, ...input.coordinations?.axis }, block: { ...d.coordinations.block, ...input.coordinations?.block }, dca: { ...d.coordinations.dca, ...input.coordinations?.dca } },
+    coordinations: { axis: { ...d.coordinations.axis, ...input.coordinations?.axis }, block: { ...d.coordinations.block, ...input.coordinations?.block }, dca: { ...d.coordinations.dca, ...input.coordinations?.dca }, relate: { ...DEFAULT_RELATE, ...input.coordinations?.relate } },
   }
   if (!settings.connectionId || settings.symbols.length < 1 || settings.symbols.length > 500 || settings.symbols.some(s => !/^[A-Z0-9]{1,30}-USDT$/.test(s))) throw new Error("Invalid connection or symbols")
   if(!['continuous-ancestors','processed-sets'].includes(settings.stageGateMode??''))throw new Error('Invalid stage gate mode')
@@ -56,7 +58,7 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   settings.symbols = [...new Set(settings.symbols)]
   finite(settings.initialEquity, "initialEquity", .01, 1e12); finite(settings.baseNotional, "baseNotional", .000001, 1e9)
   finite(settings.volumeFactor, "volumeFactor", .000001, 100); finite(settings.maxSamples, "maxSamples", 1, 1000, true)
-  for(const coordination of ['normal','axis','block','dca'] as const)finite(settings.volumeRatios![coordination],`${coordination} volume ratio`,.001,100)
+  for(const coordination of COORDINATIONS)finite(settings.volumeRatios![coordination]!,`${coordination} volume ratio`,.001,100)
   finite(settings.maxOrderNotional??0,'maximum order notional',0,1e9)
   for (const stage of ["base", "main", "real"] as const) { finite(settings.stageLastN[stage], `${stage} lastN`, 1, settings.maxSamples, true); finite(settings.stageMinPF[stage], `${stage} PF`, 0, 999) }
   if(settings.stageBlocks)for(const [stage,policy]of Object.entries(settings.stageBlocks)){
@@ -76,7 +78,17 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   if (block.auto !== undefined) block.auto = validateStepAuto(block.auto, "Block")
   finite(dca.steps, "DCA steps", 1, 20, true); finite(dca.distancePct, "DCA distance", .001, 100); finite(dca.multiplier, "DCA multiplier", .01, 10)
   if (dca.auto !== undefined) dca.auto = validateDcaAuto(dca.auto)
-  for (const enabled of [axis.enabled, block.enabled, dca.enabled]) if (typeof enabled !== "boolean") throw new Error("Coordination enabled must be boolean")
+  const relate = settings.coordinations.relate!
+  finite(relate.steps, "Relate steps", 2, 15, true)
+  finite(relate.ratio, "Relate ratio", .2, 6)
+  if (Math.abs(relate.ratio * 5 - Math.round(relate.ratio * 5)) > 1e-9) throw new Error("Relate ratio must use 0.2 increments")
+  finite(relate.lastN, "Relate recent samples", 60, 250, true)
+  finite(relate.minTrades, "Relate minimum samples", 60, relate.lastN, true)
+  finite(relate.minPF, "Relate minimum PF", 1.01, 100)
+  finite(relate.maxMultiplier, "Relate maximum multiplier", 1, 8)
+  finite(relate.maxSlRatio, "Relate maximum SL-to-TP ratio", .01, .5)
+  if (relate.enabled && relate.lastN > settings.maxSamples) throw new Error("Relate window exceeds retained samples")
+  for (const enabled of [axis.enabled, block.enabled, dca.enabled, relate.enabled]) if (typeof enabled !== "boolean") throw new Error("Coordination enabled must be boolean")
   generateStrategyCatalog(settings.connectionId, settings.catalog)
   const checkedFees=new Set<string>()
   for(const [symbol,fees] of Object.entries(settings.symbolFees??{})){
@@ -228,7 +240,7 @@ export class TradingEngine {
     this.state.settings = validateEngineSettings({ ...previous, ...input,
       volumeRatios:{...previous.volumeRatios!,...input.volumeRatios},
       stageLastN: { ...previous.stageLastN, ...input.stageLastN }, stageMinPF: { ...previous.stageMinPF, ...input.stageMinPF },
-      coordinations: { axis: { ...previous.coordinations.axis, ...input.coordinations?.axis }, block: { ...previous.coordinations.block, ...input.coordinations?.block }, dca: { ...previous.coordinations.dca, ...input.coordinations?.dca } },
+      coordinations: { axis: { ...previous.coordinations.axis, ...input.coordinations?.axis }, block: { ...previous.coordinations.block, ...input.coordinations?.block }, dca: { ...previous.coordinations.dca, ...input.coordinations?.dca }, relate: { ...previous.coordinations.relate!, ...input.coordinations?.relate } },
     })
     if(JSON.stringify(previous)===JSON.stringify(this.state.settings))return
     this.configs = generateStrategyCatalog(this.state.settings.connectionId, this.state.settings.catalog, "1970-01-01T00:00:00.000Z")
@@ -287,7 +299,7 @@ export class TradingEngine {
     const s=this.state.settings
     const symbols=new Set(s.symbols)
     this.currentLaneIds.clear();this.contexts.clear();this.validLineages.clear();this.configWindows=new ConfigStageWindows()
-    for(const lane of Object.values(this.state.lanes))if(symbols.has(lane.symbol)&&this.symbolConfigIds.get(lane.symbol)?.has(lane.configId)&&(lane.coordination==="normal"||s.coordinations[lane.coordination].enabled)
+    for(const lane of Object.values(this.state.lanes))if(symbols.has(lane.symbol)&&this.symbolConfigIds.get(lane.symbol)?.has(lane.configId)&&(lane.coordination==="normal"||s.coordinations[lane.coordination]?.enabled)
       &&lane.id===laneKey(s.connectionId,lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage,this.coordinationIdentity(lane.coordination,lane.stage,lane.config,lane.symbol))){this.currentLaneIds.add(lane.id);this.cacheLane(lane)}
   }
   /** Rechecked after asynchronous exchange preflight, immediately before a new risk write. */
@@ -304,7 +316,7 @@ export class TradingEngine {
   private refreshCoordinationIds(): void {
     const s = this.state.settings
     this.volumeWeights=relationalVolumeSettings(s.catalog.relationalVolumeRatios,true)
-    for (const coordination of ["normal", "axis", "block", "dca"] as const) {
+    for (const coordination of COORDINATIONS) {
       let parameters = coordination === "normal" ? null : s.coordinations[coordination]
       if (parameters && "auto" in parameters && !parameters.auto?.enabled) {
         const { auto: _auto, ...manual } = parameters
@@ -342,7 +354,8 @@ export class TradingEngine {
     const gateWindow = s.stageBlocks?.[source]?blockRequired(s.stageBlocks[source]!):s.stageLastN[source]
     const axisWindow = lane.coordination === "normal" && s.coordinations.axis.enabled&&(s.coordinations.axis.reference!=='base'||lane.stage==='base')
       ? s.coordinations.axis.previous + s.coordinations.axis.last : 0
-    return Math.min(s.maxSamples, Math.max(gateWindow, axisWindow)) + 1
+    const relateWindow = lane.coordination === "relate" && lane.stage !== "base" ? s.coordinations.relate?.lastN ?? 0 : 0
+    return Math.min(s.maxSamples, Math.max(gateWindow, axisWindow, relateWindow)) + 1
   }
   private trimSamples(lane:LaneState):void {
     const retained=this.sampleRetention(lane)
@@ -456,8 +469,12 @@ export class TradingEngine {
     }
     if(admission?.some(proof=>!proof.qualified))throw new Error('Cannot admit a trade without its own qualified parent evidence')
     const total = s.baseNotional * s.volumeFactor*(s.volumeRatios?.[lane.coordination]??1)*this.laneVolumeFactor(lane.coordination,lane.config,lane.symbol)
-    const notional = lane.coordination !== "block" ? total : block.behavior==="rounds" ? total*blockRoundBudget(lane,block) : block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
+    const relate = lane.coordination === "relate" && lane.stage !== "base" && !mirror
+      ? relateAllocation(this.contextEvidence(lane, candle.timestamp).samples, lane.config, s.coordinations.relate!)
+      : 1
+    const notional = lane.coordination !== "block" ? total * relate : block.behavior==="rounds" ? total*blockRoundBudget(lane,block) : block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
     const quantity = notional / candle.close
+    const exitMode = lane.config.exitMode ?? (lane.config.trailing ? "trailing" : "fixed")
     const position: PaperPosition = {
       id: `${lane.id}@${candle.timestamp}`, activationOrder:++this.state.nextActivationOrder!,openedAt: candle.timestamp, direction: lane.direction,...(admission?{admission}:{}),
       fills: [{ price: candle.close, quantity, timestamp: candle.timestamp, kind: "entry" }], quantity,
@@ -465,8 +482,9 @@ export class TradingEngine {
       entryPrice: candle.close, peak: candle.close, lastAddPrice: candle.close, addedSteps: 0,
       costPct: lane.config.roundTripCostPct ?? POSITION_COST_PCT_DEFAULT,
       takeProfitPct: lane.config.takeprofit * 100, stopLossPct: lane.config.stoploss * 100,
-      exitMode: lane.config.exitMode ?? (lane.config.trailing ? "trailing" : "fixed"), maxHoldMinutes: lane.config.maxHoldMinutes ?? 240, notional,
+      exitMode, maxHoldMinutes: lane.config.maxHoldMinutes ?? 240, notional,
       trailingBasis: (lane.config.catalogVersion ?? 2)>=3?"peak":"entry",
+      ...(isFixedTrailing(exitMode) ? { trailingReferencePrice: candle.close } : {}),
       trailDistancePct:lane.config.trailDistancePct,exitPolicyVersion:lane.config.catalogVersion??2,maxOrderNotional:s.maxOrderNotional,
     }
     if (lane.coordination === "dca" && s.coordinations.dca.auto?.enabled && !mirror) position.dcaProbePrices = []
@@ -536,7 +554,7 @@ export class TradingEngine {
     if((open.exitPolicyVersion??3)>=4){open.trailingActive=exit.trailingActive;if(exit.trailingActive)open.trailingStopPrice=exit.stop}
     const reason=exit.reason
     if (reason) return { type: "closed", laneId: lane.id, timestamp: candle.timestamp, stage: lane.stage, trade: this.close(lane, candle, reason) }
-    if(!this.symbolConfigIds.get(lane.symbol)?.has(lane.configId)||(lane.coordination!=="normal"&&!this.state.settings.coordinations[lane.coordination].enabled)||(lane.stage==="live"&&(!this.currentLane(lane)||!this.processingAllows(lane))))return
+    if(!this.symbolConfigIds.get(lane.symbol)?.has(lane.configId)||(lane.coordination!=="normal"&&!this.state.settings.coordinations[lane.coordination]?.enabled)||(lane.stage==="live"&&(!this.currentLane(lane)||!this.processingAllows(lane))))return
     if(lane.stage==="live"&&open.parentPositionId&&(lane.coordination==="block"||lane.coordination==="dca")){
       const real=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,"real")?.open
       const fill=real?.fills[open.addedSteps+1]
@@ -584,7 +602,7 @@ export class TradingEngine {
       timestamp: candle.timestamp, price: candle.close, notional: requestedQuantity * candle.close,
       takeProfitPct: position.takeProfitPct, stopLossPct: position.stopLossPct, exitMode: position.exitMode,maxOrderNotional:position.maxOrderNotional,qualificationId:position.admission?.length?hashId(JSON.stringify(position.admission)):undefined,
       ...(((lane.coordination==='block'&&position.sizing?.block.behavior!=='rounds')||lane.coordination==='dca')?{minimumAddRatio:lane.coordination==='block'?position.sizing?.block.ratio:position.sizing?.dca.multiplier}:{}),...(position.parentPositionId?{realPositionId:position.parentPositionId}:{}),source: "real-qualified", status: "pending" })
-    if(kind==='entry'&&lane.coordination==='block'&&position.sizing?.block.behavior==='rounds')this.state.intents.at(-1)!.entryAllocationRatio=position.notional/position.sizing.baseBudget
+    if(kind==='entry'&&position.sizing&&(lane.coordination==='relate'||(lane.coordination==='block'&&position.sizing.block.behavior==='rounds')))this.state.intents.at(-1)!.entryAllocationRatio=position.notional/position.sizing.baseBudget
   }
   processCandles(symbolInput: string, candles: Candle[], options: { allowExecution?: boolean;eventLimit?:number;barSeconds?:10|60 } = {}): EngineEvent[] {
     const symbol = normalizeSymbol(symbolInput), s = this.state.settings
@@ -596,6 +614,7 @@ export class TradingEngine {
     if(eventLimit!==Infinity&&(!Number.isInteger(eventLimit)||eventLimit<0))throw new Error('Invalid event limit')
     let eventIndex=0
     const emit=(event:EngineEvent)=>{if(eventLimit===0)return;if(events.length<eventLimit)events.push(event);else{events[eventIndex]=event;eventIndex=(eventIndex+1)%eventLimit}}
+    const coordinations = COORDINATIONS.filter(coordination => coordination === "normal" || s.coordinations[coordination]?.enabled)
     // Validate the complete batch before any mutation, so rejected input is atomic.
     validateObservedCandles(candles)
     const historicalSignals=new Map<string,ReturnType<typeof historicalPortedSignals>>()
@@ -641,10 +660,6 @@ export class TradingEngine {
       for (const {config,key} of streams) {
         const signal = signals.get(key)
         if (!signal) continue
-        const coordinations: Coordination[] = ["normal"]
-        if (s.coordinations.axis.enabled) coordinations.push("axis")
-        if (s.coordinations.block.enabled) coordinations.push("block")
-        if (s.coordinations.dca.enabled) coordinations.push("dca")
         for (const coordination of coordinations) {
           let realPositionId:string|undefined
           for (const stage of STAGES) {
@@ -738,7 +753,7 @@ export class TradingEngine {
   }
   hasOpenPositions(): boolean { return [...this.active.values()].some(lanes => [...lanes].some(id=>!this.state.lanes[id].calculationOnly)) }
   coordinationStats(){
-    const coordinations=['normal','axis','block','dca'] as const
+    const coordinations = COORDINATIONS.filter(coordination => coordination !== "relate" || this.state.settings.coordinations.relate?.enabled)
     const rows=STAGES.flatMap(stage=>coordinations.map(coordination=>({stage,coordination,lanes:0,closed:0,enoughSamples:0,profit:0,loss:0,netPnl:0,notionalFactor:this.state.settings.volumeRatios?.[coordination]??1})))
     const byId=new Map(rows.map(row=>[`${row.stage}:${row.coordination}`,row]))
     for(const lane of Object.values(this.state.lanes)){

@@ -11,6 +11,7 @@ import type { Candle, EngineSettings, EngineEvent } from './types'
 import { generateStrategyCatalog } from './catalog'
 import {flatEngineSettings,validateConfiguration} from './settings-schema'
 import { DEFAULT_STEP_AUTO } from './step-evidence'
+import { DEFAULT_RELATE } from './relate'
 
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
@@ -362,13 +363,17 @@ export class TerminalRuntime {
     input=validateConfiguration(input,{partial:true})
     validateConfiguration({...flatEngineSettings(this.engine.settings,this.control),...input})
     const current=this.engine.settings, next=structuredClone(current)
-    const catalogKeys=['strategySignalsSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
+    const catalogKeys=['strategySignalsSources','strategyLowRangeSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
     const autoFields = {
       blockAutoEnabled: ["block", "enabled"], blockAutoLastN: ["block", "lastN"],
       blockAutoMinSamples: ["block", "minSamples"], blockAutoMinPF: ["block", "minPF"],
       dcaAutoEnabled: ["dca", "enabled"], dcaAutoLastN: ["dca", "lastN"],
       dcaAutoMinSamples: ["dca", "minSamples"], dcaAutoMinPF: ["dca", "minPF"],
+    } as const
+    const relateFields = {
+      relateEnabled: "enabled", relateSteps: "steps", relateRatio: "ratio", relateLastN: "lastN",
+      relateMinTrades: "minTrades", relateMinPF: "minPF", relateMaxMultiplier: "maxMultiplier", relateMaxSlRatio: "maxSlRatio",
     } as const
     for(const [key,value] of Object.entries(input)) {
       if(key==='stageBlocks'){next.stageBlocks=structuredClone(value) as EngineSettings['stageBlocks'];continue}
@@ -380,7 +385,7 @@ export class TerminalRuntime {
       if(gateMap[key]){const[group,stage]=gateMap[key];next[group][stage]=Number(value);continue}
       if(key==='historyCandles'){if(!Number.isInteger(value)||Number(value)<100||Number(value)>4320)throw new Error('History candles must be 100..4320');continue}
       if(key==='symbolCount'){if(!Number.isInteger(value)||Number(value)<1||Number(value)>500)throw new Error('Symbol count must be1..500');continue}
-      const ratios:Record<string,'normal'|'axis'|'block'|'dca'>={normalVolumeRatio:'normal',axisVolumeRatio:'axis',blockVolumeFactor:'block',dcaVolumeRatio:'dca'}
+      const ratios:Record<string,'normal'|'axis'|'block'|'dca'|'relate'>={normalVolumeRatio:'normal',axisVolumeRatio:'axis',blockVolumeFactor:'block',dcaVolumeRatio:'dca',relateVolumeRatio:'relate'}
       if(ratios[key]){next.volumeRatios! [ratios[key]]=Number(value);continue}
       if(key==='volumeFactor'||key==='baseNotional'||key==='maxOrderNotional'){next[key]=Number(value);continue}
       if(key==='variantBlockEnabled'){if(typeof value!=='boolean')throw new Error('Boolean required');next.coordinations.block.enabled=value;continue}
@@ -403,6 +408,13 @@ export class TerminalRuntime {
       if (Object.hasOwn(autoFields, key)) {
         const [coordination, field] = autoFields[key as keyof typeof autoFields]
         const policy = next.coordinations[coordination].auto ??= { ...DEFAULT_STEP_AUTO }
+        if (field === "enabled") policy.enabled = value === true
+        else policy[field] = Number(value)
+        continue
+      }
+      if (Object.hasOwn(relateFields, key)) {
+        const field = relateFields[key as keyof typeof relateFields]
+        const policy = next.coordinations.relate ??= { ...DEFAULT_RELATE }
         if (field === "enabled") policy.enabled = value === true
         else policy[field] = Number(value)
         continue

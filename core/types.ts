@@ -1,9 +1,11 @@
 import type {BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 export type Direction = "long" | "short"
 export type Stage = "base" | "main" | "real" | "live"
-export type Coordination = "normal" | "axis" | "block" | "dca"
+export type Coordination = "normal" | "axis" | "block" | "dca" | "relate"
 export type StrategyRange = "Micro" | "Minimal" | "Short" | "Normal" | "Long" | "Wide" | "Low-Range"
-export type ExitMode = "fixed" | "trailing" | "trailing-only"
+export const DEFAULT_EXIT_MODES = ["fixed", "trailing", "trailing-only"] as const
+export const EXIT_MODES = [...DEFAULT_EXIT_MODES, "trailing-fixed", "trailing-only-fixed"] as const
+export type ExitMode = typeof EXIT_MODES[number]
 export type ProfitFactorState = "empty" | "flat" | "no-losses" | "finite" | "unknown"
 export interface Candle { timestamp: number; open: number; high: number; low: number; close: number; volume: number }
 export interface StrategyConfig {
@@ -30,7 +32,7 @@ export interface EngineSettings {
   stageWindowScope?: StageWindowScope
   microStageWindowScope?: StageWindowScope | "inherit"
   connectionId: string; symbols: string[]; initialEquity: number; baseNotional: number; volumeFactor: number
-  volumeRatios?:Record<Coordination,number>
+  volumeRatios?:Partial<Record<Coordination,number>>
   maxOrderNotional?:number
   symbolFees?:Record<string,{makerFeePct:number;takerFeePct:number}>
   stageLastN: { base: number; main: number; real: number }
@@ -40,9 +42,20 @@ export interface EngineSettings {
     axis: { enabled: boolean; previous: number; last: number; outcome: "positive" | "negative" | "any";reference?:'base'|'same-stage' }
     block: { enabled: boolean; steps: number; ratio: number; mode: "shared" | "additive"; behavior?: "pyramid" | "rounds"; size?:number; pauseRounds?:number; maxMultiplier?:number; auto?: StepAutoPolicy }
     dca: { enabled: boolean; steps: number; distancePct: number; multiplier: number; auto?: DcaAutoPolicy }
+    relate?: RelateSettings
   }
   /** Retention ceiling; each lane keeps only the samples its stage/Axis windows need. Lifetime metrics are retained separately. */
   maxSamples: number
+}
+export interface RelateSettings {
+  enabled: boolean
+  steps: number
+  ratio: number
+  lastN: number
+  minTrades: number
+  minPF: number
+  maxMultiplier: number
+  maxSlRatio: number
 }
 export interface StepAutoPolicy { enabled: boolean; lastN: number; minSamples: number; minPF: number }
 export type DcaAutoPolicy = StepAutoPolicy
@@ -65,6 +78,7 @@ export interface PaperPosition {
   peak: number; lastAddPrice: number; addedSteps: number; costPct: number; takeProfitPct: number; stopLossPct: number
   exitMode: ExitMode; maxHoldMinutes: number; notional: number
   trailingBasis?: "peak" | "entry"
+  trailingReferencePrice?: number
   trailDistancePct?:number;trailingActive?:boolean;trailingStopPrice?:number;exitPolicyVersion?:number;maxOrderNotional?:number
 }
 export interface ClosedTrade {

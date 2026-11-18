@@ -15,3 +15,29 @@ test('Tactic and Inverse catalog expansion preserves own source identities, time
  const v=validateConfiguration(cfg);assert.deepEqual(hydrate(Object.fromEntries(Object.entries(v).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)]))),v);
  const configs=generateStrategyCatalog('test',v);assert.equal(configs.length,7);assert.equal(configurationCount(v),7);assert.equal(new Set(configs.map(c=>c.id)).size,7);assert.ok(configs.every(c=>c.indicationSourceId));assert.ok(configs.filter(c=>c.type==='Inverse').every(c=>c.signalTimeframeMinutes!==30));
 });
+
+test("Low-Range ports each source and supported timeframe into its own Low-Range Set", () => {
+ const ids = ["low-range-6-edge-turn-standalone", "low-range-6-breakout-activity"]
+ const settings = validateConfiguration({
+  ...DEFAULTS, strategyIndicationTypes: ["Low-Range"], strategyLowRangeSources: ids,
+  strategyEnabledRanges: ["Micro", "Low-Range"], strategySignalTimeframes: [1, 5, 15, 30],
+  strategyTpSteps: [2, 6, 8], strategySlRatios: [1], strategyExitModes: ["trailing", "trailing-fixed"],
+ })
+ const catalog = generateStrategyCatalog("test", settings)
+ assert.equal(catalog.length, 24)
+ assert.equal(configurationCount(settings), catalog.length)
+ assert.equal(new Set(catalog.map(config => config.id)).size, catalog.length)
+ assert.ok(catalog.every(config => config.range === "Low-Range" && config.tpStep !== 8 && config.signalTimeframeMinutes !== 30))
+ assert.throws(() => validateConfiguration({...settings, strategyLowRangeSources: ["low-range-invalid"]}), /Choose valid/)
+ const bars = waveBars(320)
+ const output = portedStates("ASSET-USDT", 1, bars, ids)
+ assert.ok(ids.every(id => output.available[id]))
+ assert.ok(output.states[ids[0]].some(side => side !== 0))
+ assert.equal(portedStates("ASSET-USDT", 30, bars, ids).available[ids[0]], false)
+ for (const id of ids) {
+  const state = newSignalState(), onsets = entryOnsets(output.states[id])
+  const config = catalog.find(item => item.indicationSourceId === id && item.signalTimeframeMinutes === 1)!
+  assert.deepEqual(bars.map(bar => advanceConfiguredSignal(state, {...bar, timestamp: bar.timestamp + 60000}, config)),
+   Array.from(onsets, side => side > 0 ? "long" : side < 0 ? "short" : undefined))
+ }
+})

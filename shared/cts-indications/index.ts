@@ -5,10 +5,12 @@ import {SeriesCache} from "./origin/indications/cache.ts";
 import {MarketSource} from "./origin/indications/market.ts";
 import type {Bars} from "./origin/domain/types.ts";
 import {SIGNALS_BY_ID} from './signals-catalog.ts';
+import { LOW_RANGE_IDS, LOW_RANGE_TIMEFRAMES } from "./low-range-catalog.ts";
 
 export type PortedBar={timestamp:number;open:number;high:number;low:number;close:number;volume:number};
 export const PORTED_INDICATIONS=INDICATIONS.filter(s=>s.kind==="inverse"||s.kind==="tactic");
 export const PORTED_BY_ID=new Map(PORTED_INDICATIONS.map(s=>[s.id,s]));
+const lowRangeIds = new Set(LOW_RANGE_IDS);
 export const DEFAULT_TACTIC_SOURCES=["tactic-dca-bounce-8-percent-0.5-1-0.25","tactic-dca-trend-20-atr-1-2-0.5","tactic-dca-vwap-40-atr-1-3-0.5","tactic-dca-sweep-20-percent-0.5-2-0.25"];
 export const DEFAULT_INVERSE_SOURCES=["inverse-known-ema-9-21","inverse-turn-ema-9-21","inverse-zscore-20","inverse-impulse-20","inverse-failed-break-20","inverse-rsi2-turn-20"];
 export function portedBars(symbol:string,tfMin:number,rows:readonly PortedBar[]):Bars{
@@ -27,9 +29,10 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
  k.setMarket(new MarketSource(marketBars));
  const states:Record<string,Int8Array>={},available:Record<string,boolean>={};
  for(const id of new Set(ids)){
-   if(!PORTED_BY_ID.has(id)&&!SIGNALS_BY_ID.has(id))throw new Error(`Unknown indication source ${id}`);
+   const lowRange = lowRangeIds.has(id);
+   if(!PORTED_BY_ID.has(id)&&!SIGNALS_BY_ID.has(id)&&!lowRange)throw new Error(`Unknown indication source ${id}`);
    const pair=/^inverse-pair-(btc|eth)-/.exec(id);
-   available[id]=![1,5,15].includes(tfMin)&&id.startsWith("inverse-")?false:pair?symbol!==pair[1].toUpperCase()+"-USDT"&&unique.has(pair[1].toUpperCase()+"-USDT")
+   available[id]=lowRange ? LOW_RANGE_TIMEFRAMES.some(tf => tf === tfMin) : ![1,5,15].includes(tfMin)&&id.startsWith("inverse-")?false:pair?symbol!==pair[1].toUpperCase()+"-USDT"&&unique.has(pair[1].toUpperCase()+"-USDT")
      :id.includes("market-")?marketBars.length>1:true;
    states[id]=available[id]?indicationState(id,k)??new Int8Array(b.n):new Int8Array(b.n);
  }

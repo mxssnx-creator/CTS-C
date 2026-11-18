@@ -29,3 +29,23 @@ test('floor validation and the same long/short observed trailing exits retain th
   assert.equal(observedExit({...entry,peak:first.peak,price:first.stop-sign*.001,timestamp:3,trailingActive:true,trailingStopPrice:first.stop}).reason,'trailing_stop')
  }
 })
+
+test("fixed-distance and dynamic trailing ratchet independently on both sides", () => {
+ for (const direction of ["long", "short"] as const) {
+  const sign = direction === "long" ? 1 : -1
+  const entry = {direction, entryPrice:100, peak:100, price:100 + sign * 25, trailingReferencePrice:100,
+   takeProfitPct:2, stopLossPct:2, trailDistancePct:1, openedAt:1, timestamp:2, maxHoldMinutes:15}
+  const fixed = observedExit({...entry, exitMode:"trailing-fixed"})
+  const dynamic = observedExit({...entry, exitMode:"trailing"})
+  assert.equal(fixed.stop, entry.price - sign)
+  assert.equal(dynamic.stop, entry.price * (1 - sign / 100))
+  const retrace = (fixed.stop + dynamic.stop) / 2
+  const held = {...entry, entryPrice:100 + sign * 5, peak:entry.price, price:retrace, timestamp:3, trailingActive:true}
+  const fixedClose = observedExit({...held, exitMode:"trailing-fixed", trailingStopPrice:fixed.stop})
+  const dynamicClose = observedExit({...held, exitMode:"trailing", trailingStopPrice:dynamic.stop})
+  assert.equal(fixedClose.reason, direction === "long" ? "trailing_stop" : undefined)
+  assert.equal(dynamicClose.reason, direction === "short" ? "trailing_stop" : undefined)
+  assert.equal(fixedClose.stop, fixed.stop)
+  assert.equal(observedExit({...entry, price:100, exitMode:"trailing-only-fixed"}).trailingActive, true)
+ }
+})
