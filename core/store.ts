@@ -57,7 +57,7 @@ export class StateStore {
       state={...payload.state,lanes:{}}
       for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){
         const compact=JSON.parse(decodeLane(item.data)),config=payload.configs[compact.configRef] as StrategyConfig|undefined
-        if(!config||typeof compact.configRef!=='string'||configRefOf(config.id)!==compact.configRef||'id' in compact||'config' in compact||'configId' in compact)throw new Error('Bounded checkpoint lane identity mismatch')
+        if(!config||typeof config.id!=='string'||typeof compact.configRef!=='string'||configRefOf(config.id)!==compact.configRef||'id' in compact||'config' in compact||'configId' in compact)throw new Error('Bounded checkpoint lane identity mismatch')
         const {configRef:_configRef,...lane}=compact
         state.lanes[item.id]={...lane,id:item.id,configId:config.id,config}
       }
