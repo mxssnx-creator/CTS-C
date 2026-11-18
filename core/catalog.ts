@@ -1,17 +1,17 @@
 import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from "../shared/cts-indications/catalog.ts"
+import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TIMEFRAMES } from "../shared/cts-indications/low-range-catalog.ts"
 import {checkedSignalsSources} from '../shared/cts-indications/signals-catalog'
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
 import { relationalVolumeSettings } from "../shared/cts-volume/ratios"
-import type { StrategyConfig } from "./types"
+import { DEFAULT_EXIT_MODES, EXIT_MODES, type StrategyConfig } from "./types"
 import { createHash } from "node:crypto"
 import { resolveTradingCostPct } from "./metrics"
 import { CORE_INDICATIONS, INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 
 export const STRATEGY_RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"] as const
 export const STRATEGY_TYPES = INDICATIONS
-export const EXIT_MODES = ["fixed", "trailing", "trailing-only"] as const
+export { EXIT_MODES, type ExitMode } from "./types"
 export type StrategyRange = typeof STRATEGY_RANGES[number]
-export type ExitMode = typeof EXIT_MODES[number]
 const bounds = [5, 8, 12, 18, 24, 30]
 const holdMinutes = [15, 30, 60, 240, 720, 1440]
 export function strategyRangeForStep(step: number): StrategyRange {
@@ -37,7 +37,7 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   if (settings.strategyProcessingByRange !== undefined) validateProcessingByRange(settings.strategyProcessingByRange)
   const ranges = selected(settings, "strategyEnabledRanges", STRATEGY_RANGES,STRATEGY_RANGES.filter(r=>r!=="Low-Range"))
   const types = selected(settings, "strategyIndicationTypes", STRATEGY_TYPES, CORE_INDICATIONS)
-  const modes = selected(settings, "strategyExitModes", EXIT_MODES)
+  const modes = selected(settings, "strategyExitModes", EXIT_MODES, DEFAULT_EXIT_MODES)
   const periods=values(settings,'strategySignalPeriods',[20]).map(Number),timeframes=values(settings,'strategySignalTimeframes',[1]).map(Number)
   if(!periods.length||periods.some(p=>![10,14,20,40,60].includes(p))||!timeframes.length||timeframes.some(t=>![1/6,1,5,15,30].includes(t)))throw new Error('Unsupported signal periods or timeframes')
   const steps = [...new Set(values(settings, "strategyTpSteps", Array.from({length: 29}, (_, i) => i + 2)).map(Number))]
@@ -57,9 +57,10 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   const sourceKinds=new Map<string,string>(PORTED_CATALOG.map(s=>[s.id,s.kind]))
   if(selectedSources.some(id=>!sourceKinds.has(id)))throw new Error('Unknown Tactic / Inverse source')
   const signalsSources=checkedSignalsSources(settings.strategySignalsSources)
+  const lowRangeSources = selected(settings, "strategyLowRangeSources", LOW_RANGE_IDS, DEFAULT_LOW_RANGE_SOURCES)
   const maxWindowDrawdownPct=Number(settings.signalsMaxWindowDrawdownPct??3)
   if(!Number.isFinite(maxWindowDrawdownPct)||maxWindowDrawdownPct<0||maxWindowDrawdownPct>50)throw Error('Invalid Signals return drawdown limit')
-  const sourceList=(type:string)=>type==='Signals'?signalsSources:(type==='Tactic'||type==='Inverse')?selectedSources.filter(id=>sourceKinds.get(id)===type.toLowerCase()):[undefined]
+  const sourceList=(type:string)=>type==='Signals'?signalsSources:type==='Low-Range'?lowRangeSources:(type==='Tactic'||type==='Inverse')?selectedSources.filter(id=>sourceKinds.get(id)===type.toLowerCase()):[undefined]
   for(const type of types)if(!sourceList(type).length)throw new Error(`Choose at least one ${type} source`)
   const autoPfEnabled=settings.autoPfEnabled===true
   if(settings.autoPfEnabled!==undefined&&typeof settings.autoPfEnabled!=="boolean")throw new Error('Invalid auto PF enabled')
@@ -68,12 +69,15 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   const configs: StrategyConfig[] = []
   for (const step of steps) for(const range of [strategyRangeForStep(step),...(step<=8?["Low-Range" as const]:[])]) {
     if (!ranges.includes(range)) continue
-    for (const type of types) for (const indicationSourceId of sourceList(type)) for (const ratio of ratios) for (const exitMode of modes) {
+    const applicableTypes = range === "Low-Range" && LOW_RANGE_STEPS.some(candidate => candidate === step)
+      ? types : types.filter(type => type !== "Low-Range")
+    for (const type of applicableTypes) for (const indicationSourceId of sourceList(type)) for (const ratio of ratios) for (const exitMode of modes) {
      if((range==="Micro"||range==="Low-Range")&&ratio>1.6)continue
      if (exitMode !== "fixed" && !strategyProcessing(settings, {range}).trailing) continue
      const technical=(TECHNICAL_INDICATIONS as readonly string[]).includes(type),ported=!!indicationSourceId
      for(const period of technical?periods:[type==='RSI_Band'?14:20])for(const timeframe of timeframes){
       if(type==='Inverse'&&![1,5,15].includes(timeframe))continue
+      if (type === "Low-Range" && !LOW_RANGE_TIMEFRAMES.some(minutes => minutes === timeframe)) continue
       const takeprofit = cost / 100 * step*tpFactor
       const micro=range==="Micro"||range==="Low-Range"
       const stoploss = Math.max(takeprofit * ratio*slFactor,micro?microMinSl:0)

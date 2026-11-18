@@ -1,5 +1,6 @@
 import { portedStates, StreamMath } from "../shared/cts-indications/index.ts"
 import type { Candle, PseudoPosition, SignalState } from "./types"
+import { EXIT_MODES, type ExitMode } from "./types"
 import { calculatePriceMovePct, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { observedExit } from "./exits"
 import { INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
@@ -17,7 +18,7 @@ export interface ReplayStrategyConfig {
   /** Fraction of price; fixed initial protection and trailing distance. */
   stoploss: number
   trailing: boolean
-  exitMode?: "fixed" | "trailing" | "trailing-only"
+  exitMode?: ExitMode
   /** Percentage points, e.g. 0.176 = 0.176%. Already includes both execution legs. */
   roundTripCostPct?: number
   maxHoldMinutes?: number
@@ -240,7 +241,7 @@ export function replayStrategy(
     throw new Error("Invalid maximum hold time")
   }
   const mode = config.exitMode ?? (config.trailing ? "trailing" : "fixed")
-  if (!["fixed", "trailing", "trailing-only"].includes(mode)) throw new Error("Invalid exit mode")
+  if (!EXIT_MODES.includes(mode)) throw new Error("Invalid exit mode")
   const signalState=newSignalState()
   if(signalTrace&&signalTrace.length!==candles.length)throw new Error('Signal trace length does not match candles')
   let previousTime = -Infinity

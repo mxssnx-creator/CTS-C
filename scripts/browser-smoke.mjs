@@ -10,6 +10,7 @@ import {randomBytes} from 'node:crypto'
 import {chromium} from 'playwright-core'
 import {TradingEngine} from '../core/engine.ts'
 import {StateStore} from '../core/store.ts'
+import {DEFAULT_LOW_RANGE_SOURCES} from '../shared/cts-indications/low-range-catalog.ts'
 
 const directory=await mkdtemp(join(tmpdir(),'ctsc-browser-')),password=randomBytes(24).toString('hex')
 const listener=createServer();await new Promise(r=>listener.listen(0,'127.0.0.1',r));const port=listener.address().port;await new Promise(r=>listener.close(r))
@@ -89,6 +90,24 @@ try{
  assert.deepEqual(JSON.parse(micro.strategySlRatios),Array.from({length:15},(_,i)=>(i+2)/10))
  assert.deepEqual(JSON.parse(micro.strategySignalTimeframes),[1/6,1])
  assert.equal(micro.blockBehavior,'rounds');assert.equal(micro.blockSize,'4');assert.equal(micro.autoPfEnabled,'true')
+
+ await page.getByRole('button',{name:'Prepare Low-Range indications',exact:true}).click()
+ const lowRangeSources=DEFAULT_LOW_RANGE_SOURCES.slice(0,2)
+ await page.getByLabel('Low-Range source configurations',{exact:true}).selectOption(lowRangeSources)
+ const dynamicTrailing=page.getByRole('button',{name:'Dynamic trailing',exact:true})
+ const fixedTrailing=page.getByRole('button',{name:'Fixed-distance trailing',exact:true})
+ assert.equal(await dynamicTrailing.getAttribute('aria-pressed'),'true')
+ await fixedTrailing.click()
+ await page.getByRole('checkbox',{name:'Relate',exact:true}).check()
+ await page.getByLabel('Relate winning steps',{exact:true}).fill('10')
+ await page.getByRole('button',{name:'Save configuration',exact:true}).click()
+ await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
+ const lowRange=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
+ assert.deepEqual(JSON.parse(lowRange.strategyIndicationTypes),['Low-Range'])
+ assert.deepEqual(JSON.parse(lowRange.strategyEnabledRanges),['Low-Range'])
+ assert.deepEqual(JSON.parse(lowRange.strategyLowRangeSources),lowRangeSources)
+ assert.ok(JSON.parse(lowRange.strategyExitModes).includes('trailing-fixed'))
+ assert.deepEqual([lowRange.relateEnabled,lowRange.relateSteps],['true','10'])
 
  await page.getByRole('button',{name:'Prepare Signals preset',exact:true}).click()
  await page.getByLabel('Signals source configurations',{exact:true}).selectOption(['sig-ema-cross-s','sig-coord-v2-r80-n3-i3-bzikk5k'])

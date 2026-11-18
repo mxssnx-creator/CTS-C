@@ -3,6 +3,7 @@ import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
 import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES,SIGNAL_SOURCES} from '@/shared/cts-indications/signals-catalog'
+import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_CATALOG } from "@/shared/cts-indications/low-range-catalog"
 import {VolumeRatioSliders} from "../../shared/cts-volume/sliders.tsx";
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -10,9 +11,17 @@ import { Check, Download, Layers3, RotateCcw, Save, SlidersHorizontal, Upload } 
 import { ReplayStudy } from "./replay-study"
 import { CORE_INDICATIONS } from "@/core/indications"
 import {formatProfitFactor} from './profit-factor'
-import type {ProfitFactorState,Stage,Coordination} from '@/core/types'
+import { DEFAULT_EXIT_MODES, type ProfitFactorState, type Stage, type Coordination, type ExitMode } from '@/core/types'
 
 import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
+
+const EXIT_LABELS: Record<ExitMode, string> = {
+  fixed: "Fixed TP and SL",
+  trailing: "Dynamic trailing",
+  "trailing-only": "Dynamic trailing-only",
+  "trailing-fixed": "Fixed-distance trailing",
+  "trailing-only-fixed": "Fixed-distance trailing-only",
+}
 
 function MultiChoice({ title, description, values, selected, onChange, format }: {
   title: string; description: string; values: (string | number)[]; selected: (string | number)[];
@@ -77,7 +86,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
     dirtyRef.current = true; setDirty(true); setError(null); setMessage(`${name} preset prepared. Save to apply it to ${connectionName}.`)
     setDraft(current => ({ ...current, strategyEnabledRanges: kind === "micro" ? ["Micro", "Low-Range"] : kind === "balanced" ? RANGES.filter(r=>r!=="Low-Range") : [...RANGES],
       strategyTpSteps: kind === "micro" ? [2, 3, 4, 5] : kind === "balanced" ? [...BALANCED_STEPS] : [...STEPS],
-      strategySlRatios: kind === "balanced" ? [...BALANCED_RATIOS] : kind === "micro" ? RATIOS.filter(r=>r<=1.6) : [...RATIOS], strategyExitModes: [...MODES], strategyIndicationTypes: kind==="full"?[...INDICATIONS]:[...CORE_INDICATIONS],
+      strategySlRatios: kind === "balanced" ? [...BALANCED_RATIOS] : kind === "micro" ? RATIOS.filter(r=>r<=1.6) : [...RATIOS], strategyExitModes: kind === "full" ? [...MODES] : [...DEFAULT_EXIT_MODES], strategyIndicationTypes: kind==="full"?[...INDICATIONS]:[...CORE_INDICATIONS],
       baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
       mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20, ...(kind==="micro"?{stageGateMode:"processed-sets",autoPfEnabled:true,blockBehavior:"rounds",microTradeStream:true,strategySignalTimeframes:[1/6,1],microTrailRatio:.5}:{} ) }))
   }
@@ -145,13 +154,30 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
         <label className="block text-xs">Independent source configurations<select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Tactic and Inverse source configurations" value={draft.strategyIndicationSources as string[]} onChange={e=>change('strategyIndicationSources',Array.from(e.target.selectedOptions,o=>o.value))}>{sourceChoices.map(s=><option key={s.id} value={s.id}>{s.label} · {s.id}</option>)}</select></label>
         <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {PORTED_CATALOG.length} available. Tactic supports recorded 10s and 1/5/15/30m; Inverse supports 1/5/15m. Shared history retains up to 4,320 completed source candles per symbol and timeframe and periodically rebases its calculations.</p>
       </section>
-      <section className="terminal-panel space-y-4 p-5" aria-label="Relational volume"><h3 className="text-sm font-semibold">Relational volume · Indications</h3><VolumeRatioSliders overall value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{indicationTypes:INDICATIONS,indications:draft.strategyIndicationSources as string[]}}/></section>
-      <section className="terminal-panel space-y-4 p-5"><h3 className="text-sm font-semibold">Relational volume · Strategies & Ranges</h3><VolumeRatioSliders value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{strategies:['normal','axis','block','dca'],ranges:RANGES}}/></section>
+      <section className="terminal-panel space-y-4 p-5">
+        <h3 className="text-sm font-semibold">Low-Range indications</h3>
+        <p className="terminal-muted text-xs">Each source, timeframe and protection variant evaluates its own Low-Range Set.</p>
+        <button type="button" className="terminal-button" onClick={() => {
+          change("strategyIndicationTypes", ["Low-Range"])
+          change("strategyEnabledRanges", ["Low-Range"])
+          change("strategyTpSteps", [2, 3, 4, 5, 6])
+          change("strategySignalTimeframes", [1, 5, 15])
+          change("strategyLowRangeSources", [...DEFAULT_LOW_RANGE_SOURCES])
+        }}>Prepare Low-Range indications</button>
+        <label className="block text-xs">Low-Range source configurations
+          <select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Low-Range source configurations" value={draft.strategyLowRangeSources as string[]}
+            onChange={event => change("strategyLowRangeSources", [...event.target.selectedOptions].map(option => option.value))}>
+            {LOW_RANGE_CATALOG.map(source => <option value={source.id} key={source.id}>{source.label}</option>)}
+          </select>
+        </label>
+      </section>
+      <section className="terminal-panel space-y-4 p-5" aria-label="Relational volume"><h3 className="text-sm font-semibold">Relational volume · Indications</h3><VolumeRatioSliders overall value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{indicationTypes:INDICATIONS,indications:[...(draft.strategyIndicationSources as string[]), ...(draft.strategyLowRangeSources as string[])]}}/></section>
+      <section className="terminal-panel space-y-4 p-5"><h3 className="text-sm font-semibold">Relational volume · Strategies & Ranges</h3><VolumeRatioSliders value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{strategies:['normal','axis','block','dca','relate'],ranges:RANGES}}/></section>
       {Object.keys(symbolFees).length>0&&<section className="terminal-panel space-y-4 p-5"><h3 className="text-sm font-semibold">Relational volume · Symbols</h3><VolumeRatioSliders value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{symbols:Object.keys(symbolFees)}}/></section>}
       <section className="terminal-panel space-y-4 p-5" aria-label="Signals settings">
         <h3 className="text-sm font-semibold">Signals · sources &amp; independent voting bands</h3>
         <p className="terminal-muted text-xs">{SIGNAL_SOURCES.length} computed source families, short/medium variants and independent category coordinators. Each source votes once; conflicting variants abstain. These use observed exchange candles, not third-party trade recommendations.</p>
-        <button type="button" className="terminal-button" onClick={()=>{dirtyRef.current=true;setDirty(true);setDraft(current=>({...current,strategyIndicationTypes:['Signals'],strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],strategyEnabledRanges:['Micro','Low-Range','Minimal','Short'],strategyTpSteps:[2,3,5,8,12],strategySlRatios:[.6,1],strategyExitModes:[...MODES],strategySignalTimeframes:[1],stageGateMode:'processed-sets',liveEntryMode:'real-mirror',signalsMaxWindowDrawdownPct:3}));setMessage('Signals draft prepared. Save to apply it. Research results do not guarantee profitable execution.')}}>Prepare Signals preset</button>
+        <button type="button" className="terminal-button" onClick={()=>{dirtyRef.current=true;setDirty(true);setDraft(current=>({...current,strategyIndicationTypes:['Signals'],strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],strategyEnabledRanges:['Micro','Low-Range','Minimal','Short'],strategyTpSteps:[2,3,5,8,12],strategySlRatios:[.6,1],strategyExitModes:[...DEFAULT_EXIT_MODES],strategySignalTimeframes:[1],stageGateMode:'processed-sets',liveEntryMode:'real-mirror',signalsMaxWindowDrawdownPct:3}));setMessage('Signals draft prepared. Save to apply it. Research results do not guarantee profitable execution.')}}>Prepare Signals preset</button>
         <label className="block text-xs">Filter Signals sources<input className="terminal-input mt-2 w-full" aria-label="Filter Signals sources" value={signalsFilter} onChange={e=>setSignalsFilter(e.target.value)} placeholder="Trend, breakout, volume, research, minimum 3..."/></label>
         <label className="block text-xs">Signals source configurations<select multiple size={8} className="terminal-input mt-2 w-full" aria-label="Signals source configurations" value={draft.strategySignalsSources as string[]} onChange={e=>change('strategySignalsSources',Array.from(e.target.selectedOptions,o=>o.value))}>{SIGNALS_CATALOG.filter(s=>(draft.strategySignalsSources as string[]).includes(s.id)||`${s.category} ${s.label}`.toLowerCase().includes(signalsFilter.toLowerCase())).map(s=><option key={s.id} value={s.id}>{s.category} · {s.label}</option>)}</select></label>
         <p className="terminal-muted text-xs">{(draft.strategySignalsSources as string[]).length} selected / {SIGNALS_CATALOG.length} available. Gate return-drawdown limit below uses cumulative net-return percentage points in each own Last-N window. It is a qualification filter, not a future account-drawdown guarantee.</p>
@@ -186,7 +212,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <MultiChoice title="Strategy ranges" description="Micro 2–5 · Low-Range 2–8 · Minimal 6–8 · Short 9–12 · Normal 13–18 · Long 19–24 · Wide 25–30 TP steps." values={RANGES} selected={selected("strategyEnabledRanges")} onChange={value => change("strategyEnabledRanges", value)} />
             <MultiChoice title="Take-profit steps" description="TP distance = estimated round-trip position cost × selected step. Only steps within enabled ranges produce configurations." values={STEPS} selected={selected("strategyTpSteps")} onChange={value => change("strategyTpSteps", value)} />
             <MultiChoice title="Stop-loss / take-profit ratio" description="Each ratio creates an independent configuration. SL distance = TP distance × ratio. Micro and Low-Range use 0.2–1.6 in 0.1 steps." values={RATIOS} selected={selected("strategySlRatios")} onChange={value => change("strategySlRatios", value)} format={value => Number(value).toFixed(1) + "×"} />
-            <MultiChoice title="Exit modes" description="Fixed targets, trailing exits, and trailing-only each have their own configuration identity." values={MODES} selected={selected("strategyExitModes")} onChange={value => change("strategyExitModes", value)} />
+            <MultiChoice title="Exit modes" description="Fixed-distance trailing keeps the original entry-price offset. Dynamic trailing recalculates the gap from each new peak." values={MODES} selected={selected("strategyExitModes")} onChange={value => change("strategyExitModes", value)} format={mode => EXIT_LABELS[mode as ExitMode]} />
             <MultiChoice title="Indications" description="Each selected indication evaluates its own configuration history." values={INDICATIONS} selected={selected("strategyIndicationTypes")} onChange={value => change("strategyIndicationTypes", value)} format={value => String(value).replaceAll("_", " ")} />
             <MultiChoice title="Trend & Break lookbacks" description="Separate indicator periods for the new Trend and Break families. Existing indications retain their original calculations." values={[10,14,20,40,60]} selected={selected('strategySignalPeriods')} onChange={value=>change('strategySignalPeriods',value)} />
             <MultiChoice title="Signal timeframes" description="10s lanes use recorded WebSocket trades only. Minute history never supplies 10s samples. Longer frames use completed native minutes; exits also process observed trades." values={[1/6,1,5,15,30]} selected={selected('strategySignalTimeframes')} onChange={value=>change('strategySignalTimeframes',value)} format={value=>Number(value)<1?'10s':value+'m'} />
@@ -222,7 +248,8 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
               ["axisPrevEnabled", "Axis", "History and outcome coordination"],
               ["variantBlockEnabled", "Block", "Block-based volume coordination"],
               ["variantDcaEnabled", "DCA", "Independent accumulation variant"],
-            ].map(([key, label, description]) => <label key={key} className="flex cursor-pointer items-center justify-between gap-4 border-b border-[var(--terminal-border)] pb-3 last:border-0 last:pb-0"><span><span className="block text-xs font-medium">{label}</span><span className="terminal-muted mt-1 block text-[11px]">{description}{settings[key] === undefined ? " · default" : ""}</span></span><input type="checkbox" className="h-4 w-4 accent-cyan-400" checked={draft[key] === true} onChange={event => change(key, event.target.checked)} /></label>)}
+              ["relateEnabled", "Relate", "Separate post-Base sizing with its own winning returns"],
+            ].map(([key, label, description]) => <label key={key} className="flex cursor-pointer items-center justify-between gap-4 border-b border-[var(--terminal-border)] pb-3 last:border-0 last:pb-0"><span><span className="block text-xs font-medium">{label}</span><span className="terminal-muted mt-1 block text-[11px]">{description}{settings[key] === undefined ? " · default" : ""}</span></span><input type="checkbox" aria-label={label} className="h-4 w-4 accent-cyan-400" checked={draft[key] === true} onChange={event => change(key, event.target.checked)} /></label>)}
             <div className="space-y-4 border-t border-[var(--terminal-border)] pt-5"><h4 className="text-xs font-semibold">Axis windows</h4><p className="terminal-muted text-xs leading-relaxed">Previous samples must meet the stage PF gate. The separate recent window must match the selected outcome. Both windows use the same configuration and direction of the selected Normal reference. Axis still needs its own completed evidence at every stage.</p><div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("axis")).map(numberField)}</div>{enumField("axisReferenceStage","Normal reference stage",[{value:'same-stage',label:'Matching stage'},{value:'base',label:'Continuous Base history'}])}{enumField("axisOutcome", "Recent net outcome", [{ value: "any", label: "Any outcome" }, { value: "positive", label: "Positive net result" }, { value: "negative", label: "Negative net result" }])}</div>
             <div className="space-y-4 border-t border-[var(--terminal-border)] pt-5">
               <h4 className="text-xs font-semibold">Block allocation</h4>
@@ -253,6 +280,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
               </>}
             </div>
           </section>
+          {draft.relateEnabled === true && <section className="terminal-panel space-y-4 p-5">
+            <h3 className="text-sm font-semibold">Relate allocation</h3>
+            <p className="terminal-muted text-xs">Each post-Base Set sizes from its own recent returns, consecutive wins and stop-to-target ratio.</p>
+            <div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("relate")).map(numberField)}</div>
+          </section>}
           <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Market universe & position sizing</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Scan up to this many available contracts. Base notional × volume factor sets the initial sizing budget before coordination adjustments and exchange rules.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{EXECUTION_FIELDS.map(numberField)}</div><p className="terminal-muted mt-5 border-t border-[var(--terminal-border)] pt-4 text-xs">Initial sizing budget: <span className="font-mono text-[var(--terminal-fg)]">{Number.isFinite(Number(draft.baseNotional) * Number(draft.volumeFactor)) ? (Number(draft.baseNotional) * Number(draft.volumeFactor)).toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—"} USDT</span></p></section>
           <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Fee & slippage estimate</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Default taker 0.05% per side gives 0.10% round-trip fees; 10% fee-relative slippage gives 0.11% total modeled cost. The account’s exchange commission pair applies to the selected perpetual symbols. A failed refresh retains the last verified pair. Fee fields below apply when no verified pair is available. Slippage applies to the fee sum. Open positions retain their entry cost model.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{COST_FIELDS.map(numberField)}</div><details className="mt-5 text-xs"><summary className="cursor-pointer">Exchange fee coverage · {Object.keys(symbolFees).length} symbols</summary><p className="terminal-muted my-3">{!feeCheckedAt?"No startup commission check has been recorded.":feeReadFailures.length?`${feeReadFailures.length} symbol reads failed at the latest refresh. Cached pairs are labeled below; symbols without a known pair use configured fallbacks.`:"Latest startup commission reads completed without errors."}</p><div className="mt-3 max-h-60 overflow-auto"><table className="w-full text-left"><thead><tr><th>Symbol</th><th>Maker %</th><th>Taker %</th><th>Source</th></tr></thead><tbody>{Object.entries(symbolFees).map(([symbol,fee])=><tr key={symbol}><th className="py-1 font-normal">{symbol}</th><td>{fee.makerFeePct}</td><td>{fee.takerFeePct}</td><td>{feeReadFailures.includes(symbol)?"Last verified":feeCheckedAt?"Latest refresh":"Recorded"}</td></tr>)}</tbody></table></div></details></section>
           <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Ratios & distance factors</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Each lane budget = base notional × volume factor × lane ratio. TP = cost × step × TP factor. SL = TP × selected SL ratio × SL factor; trail = SL × trail ratio. Existing positions retain their captured settings. The order cap rejects exchange-rounded entries and adds above its value.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{FACTOR_FIELDS.map(numberField)}</div></section>

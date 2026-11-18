@@ -48,15 +48,16 @@ test('historical vectors preserve source ticks through rebases, higher frames, d
 })
 
 test('every indication source, range, exit, ratio, period and supported timeframe remains represented without truncation',()=>{
- const ranges=['Micro','Minimal','Short','Normal','Long','Wide'],steps=[3,8,12,18,24,30]
+ const ranges=['Micro','Low-Range','Minimal','Short','Normal','Long','Wide'],steps=[3,5,8,12,18,24,30]
+ const exits=['fixed','trailing','trailing-only','trailing-fixed','trailing-only-fixed']
  for(const [i,range] of ranges.entries()){
-  const settings={...DEFAULTS,strategyEnabledRanges:[range],strategyTpSteps:[steps[i]],strategySlRatios:[.2,1,2.2],strategyExitModes:['fixed','trailing','trailing-only'],strategyIndicationTypes:[...INDICATIONS],strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1,5,15,30]}
+  const settings={...DEFAULTS,strategyEnabledRanges:[range],strategyTpSteps:[steps[i]],strategySlRatios:[.2,1,2.2],strategyExitModes:exits,strategyIndicationTypes:[...INDICATIONS],strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1,5,15,30]}
   const configs=generateStrategyCatalog('bingx-x02',settings)
   assert.equal(configs.length,configurationCount(settings));assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)
   assert.ok(configs.every(c=>c.range===range&&c.takeprofit>0&&c.stoploss>0))
   const sources=new Set(configs.map(c=>c.indicationSourceId).filter(Boolean))
   for(const source of PORTED_CATALOG)assert.ok(sources.has(source.id),source.id+'/'+range)
-  for(const type of INDICATIONS)for(const exit of ['fixed','trailing','trailing-only'])assert.ok(configs.some(c=>c.type===type&&c.exitMode===exit),type+'/'+range+'/'+exit)
+  for(const type of INDICATIONS)for(const exit of exits)assert.equal(configs.some(c=>c.type===type&&c.exitMode===exit),type!=='Low-Range'||range==='Low-Range',type+'/'+range+'/'+exit)
  }
 })
 
