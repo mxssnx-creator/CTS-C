@@ -1,4 +1,4 @@
-name: Million active parent Sets
+name: Million active parent Set capacity
 
 on:
   pull_request:
@@ -22,7 +22,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Materialize, restart and drive one million active Sets
+      - name: Characterize parent Set capacity, restart and sustained load
         run: node --max-old-space-size=6144 --expose-gc --import tsx scripts/parent-branch-million-active.ts
       - name: Pack evidence
         if: always()
