@@ -30,9 +30,9 @@ test("v3 lane rows replace repeated config ids with stable bounded references an
   for(const row of rows){
     const compact=JSON.parse(row.data)
     assert.equal("configId" in compact,false)
-    assert.equal(typeof compact.configRef,"string")
-    assert.ok(compact.configRef.length<=22)
-    const config=envelope.configs[compact.configRef] as StrategyConfig|undefined
+    assert.equal(typeof compact.c,"string")
+    assert.equal("configRef" in compact,false)
+    const config=envelope.configs[compact.c] as StrategyConfig|undefined
     assert.equal(config?.id,expected.lanes[row.id].configId)
   }
 
