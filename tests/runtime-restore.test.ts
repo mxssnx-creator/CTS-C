@@ -25,8 +25,8 @@ test('a checkpoint changed after construction reloads outside ownership and is v
  const runtime=new TerminalRuntime('bingx-x02',store)
  try{
   const before=store.checkpointToken(),row=store.database.prepare('SELECT id FROM engine_lanes LIMIT 1').get() as {id:string},lane=persisted.lanes[row.id],oldNet=runtime.snapshot().stages.base.pf
-  lane.netPnl+=7;const {id:_id,config:_config,...compact}=lane
-  store.saveLaneCheckpoint(metadata,[{id:row.id,data:JSON.stringify(compact)}],[],engine.settings,()=>{});assert.notEqual(store.checkpointToken(),before,'lane-only commits also change the checkpoint generation')
+  lane.netPnl+=7;const {id:_id,config:_config,configId,...compact}=lane
+  store.saveLaneCheckpoint(metadata,[{id:row.id,data:JSON.stringify({...compact,c:configId})}],[],engine.settings,()=>{});assert.notEqual(store.checkpointToken(),before,'lane-only commits also change the checkpoint generation')
   runtime.pause();assert.equal(reads,2);assert.equal(runtime.snapshot().engine.processedCandles,120);assert.equal(runtime.snapshot().stages.base.pf,oldNet);assert.equal(runtime.snapshot().engine.lanes.find(l=>l.id===row.id)?.netPnl,lane.netPnl)
  }finally{runtime.shutdown();store.close();Date.now=now}
 })

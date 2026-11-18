@@ -214,10 +214,13 @@ export class TradingEngine {
     const {lanes,...state}=this.state
     const configs:Record<string,StrategyConfig>={}
     for(const lane of Object.values(lanes))configs[lane.configId]??=lane.config
-    return JSON.stringify({state,configs})
+    return JSON.stringify({laneRowsVersion:3,state,configs})
   }
   *checkpointLanes(all=false):Generator<{id:string;data:string}>{
-    const compact=(lane:LaneState)=>{const {id:_id,config:_config,...state}=lane;return JSON.stringify(state)}
+    const compact=(lane:LaneState)=>{
+      const {id:_id,config:_config,configId,...state}=lane
+      return JSON.stringify({...state,c:configId})
+    }
     if(all){for(const id in this.state.lanes)yield {id,data:compact(this.state.lanes[id])}}
     else for(const id of this.dirtyLaneIds)yield {id,data:compact(this.state.lanes[id])}
   }

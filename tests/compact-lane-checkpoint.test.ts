@@ -41,7 +41,7 @@ test("lane checkpoints store each config once and restore old engine semantics",
   const store = new StateStore(":memory:")
   store.migrateLaneCheckpoint(metadata, rows, [], engine.settings, () => {})
   const stored = store.database.prepare("SELECT data FROM records WHERE key='engine'").get() as { data: string }
-  assert.match(stored.data, /^\{"checkpointFormat":"lane-rows-v2"/)
+  assert.match(stored.data, /^\{"checkpointFormat":"lane-rows-v3"/)
   const storedRows = store.database.prepare("SELECT id,data FROM engine_lanes").all() as { id:string;data:string }[]
   const storedBytes = Buffer.byteLength(stored.data) + storedRows.reduce((sum,row)=>sum+Buffer.byteLength(row.id)+Buffer.byteLength(row.data),0)
   assert.ok(storedBytes < fullBytes * .9, `stored compact ${storedBytes} bytes did not materially improve full ${fullBytes}`)
