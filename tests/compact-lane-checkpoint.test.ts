@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import { TradingEngine } from "../core/engine"
 import { StateStore } from "../core/store"
-import type { Candle } from "../core/types"
+import type { Candle, EngineState } from "../core/types"
 
 const symbol = "BTC-USDT"
 const bars: Candle[] = Array.from({ length: 260 }, (_, i) => {
@@ -22,7 +22,7 @@ test("lane checkpoints store each config once and restore old engine semantics",
     },
   })
   engine.processMarketCandles({ [symbol]: bars })
-  const expected = JSON.parse(engine.serializeState())
+  const expected = JSON.parse(engine.serializeState()) as EngineState
   const rows = [...engine.checkpointLanes(true)]
   assert.ok(rows.length > 20)
   for (const row of rows) {
