@@ -35,13 +35,16 @@ test("lane checkpoints store each config once and restore old engine semantics",
   assert.ok(envelope.state && envelope.configs)
   assert.equal(Object.keys(envelope.configs).length, new Set(Object.values(expected.lanes).map(lane => lane.configId)).size)
   const compactBytes = Buffer.byteLength(metadata) + rows.reduce((sum, row) => sum + Buffer.byteLength(row.id) + Buffer.byteLength(row.data), 0)
-  assert.ok(compactBytes < Buffer.byteLength(engine.serializeState()) * .8,
-    `compact ${compactBytes} bytes did not materially improve the full checkpoint`)
+  const fullBytes = Buffer.byteLength(engine.serializeState())
+  assert.ok(compactBytes < fullBytes, `deduplicated ${compactBytes} bytes did not improve full ${fullBytes}`)
 
   const store = new StateStore(":memory:")
   store.migrateLaneCheckpoint(metadata, rows, [], engine.settings, () => {})
   const stored = store.database.prepare("SELECT data FROM records WHERE key='engine'").get() as { data: string }
   assert.match(stored.data, /^\{"checkpointFormat":"lane-rows-v2"/)
+  const storedRows = store.database.prepare("SELECT id,data FROM engine_lanes").all() as { id:string;data:string }[]
+  const storedBytes = Buffer.byteLength(stored.data) + storedRows.reduce((sum,row)=>sum+Buffer.byteLength(row.id)+Buffer.byteLength(row.data),0)
+  assert.ok(storedBytes < fullBytes * .8, `stored compact ${storedBytes} bytes did not materially improve full ${fullBytes}`)
   assert.deepEqual(store.loadEngineState(), expected)
   store.database.close()
 })
