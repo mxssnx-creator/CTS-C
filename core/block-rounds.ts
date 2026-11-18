@@ -1,10 +1,13 @@
 import type { EngineSettings, LaneState } from './types'
+import { blockStepVerdict } from './block-auto'
 
 type Policy = EngineSettings['coordinations']['block']
 export function blockRoundBudget(lane: LaneState, policy: Policy): number {
   const state = lane.blockRound
   if (state?.pauseRemaining) return 0
-  return Math.min(policy.maxMultiplier ?? 3, 1 + (state?.level ?? 0) * policy.ratio)
+  const level = state?.level ?? 0
+  if (level && policy.auto?.enabled && blockStepVerdict(lane, level, policy.auto).state !== "qualified") return 1
+  return Math.min(policy.maxMultiplier ?? 3, 1 + level * policy.ratio)
 }
 
 /** A completed block is evaluated once, using net PnL after costs. */

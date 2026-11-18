@@ -27,10 +27,10 @@ Full record: CTS-A-O `docs/config-wide-windows.md`.
 ## CTS-C Settings and evidence
 
 - **Exact symbol and side** is the default. **Same configuration across symbols and sides** pools only settled returns of the same config, strategy coordination, stage, fee and sizing policy. **Require both windows** applies the complete own test and the complete pooled test. Micro and Low-Range can inherit or set their own preference.
-- The timestamp-capped pooled window reads closes strictly before a decision. Each Main, Real and Live Set keeps its own parent on the same symbol, side and coordination. Every new exchange entry still requires the local Real window and, in mirror mode, the corresponding fresh Real position. Block and DCA add events mirror only that position's observed fills.
-- Existing checkpoints without pooled timestamps retain their exact-lane samples. A pooled window collects newly timestamped evidence after it is enabled. Enabling another scope starts a separate derived cohort. Current qualifying lane counts track instantiated symbol-side Sets. Validated PF aggregates each pooled window once, even when it supports several Sets.
+- Exact, pooled and combined admission all use closes strictly before the decision clock. The Normal reference used by Axis follows the same cutoff. Each Main, Real and Live Set keeps its own parent on the same symbol, side and coordination. Every new exchange entry still requires the local Real window and, in mirror mode, the corresponding fresh Real position. Block and DCA add events mirror only that position's observed fills.
+- Existing checkpoints retain their untimed exact-lane samples for later decisions. Config-wide windows use timestamped observations from each current member. Enabling another scope starts a separate derived cohort. Current qualifying lane counts track instantiated symbol-side Sets. Validated PF aggregates each pooled window once, even when it supports several Sets.
 
-## Recorded market replay
+## Recorded market replay before the uniform cutoff
 
 Eight BingX symbols, 12 hours of prehistory and 12 hours of measured minute candles per decision. The same 200 configurations, Auto PF, 20/8/8 stage windows, independent processed Sets, four coordinations and 0.11% modeled round-trip cost were used in every arm. Mixed applies both windows to Micro and Low-Range and config-wide windows elsewhere. Forward settles count only positions opened in the measured window, with all gains and losses retained. Recorded `feed.json` SHA-256 `02ad14fd7d7ba3e89dee99026962a2ec66d8145d6beb36b17ab42a89a7d2004e`.
 
@@ -46,7 +46,9 @@ Eight BingX symbols, 12 hours of prehistory and 12 hours of measured minute cand
 | 2026-10-17 09:00 | Config | 0 / 8,432 | — | 2,844 | 0.392 | 0.422 | 2.563 |
 | 2026-10-17 09:00 | Mixed | 0 / 8,432 | — | 856 | 0.772 | 0.814 | 0.372 |
 
-All nine comparisons emitted zero order intents. Mixed produced one positive realized window. Axis and Block had no profitable measured window under this mixed profile. DCA had return PF 1.280 and cash PF 1.022 on the October 13 window and lost in the other two. Exact symbol-and-side scope remains the default. These repeated historical windows and closed-bar fills provide model comparisons. Cash drawdown is the peak-to-trough sum of settled modeled P&L, without open exposure or exchange margin.
+All nine comparisons emitted zero order intents. Mixed produced one positive realized window under those clocks. Axis and Block had no profitable measured window under this mixed profile. DCA had return PF 1.280 and cash PF 1.022 on the October 13 window and lost in the other two. Exact symbol-and-side scope remains the default. These repeated historical windows and closed-bar fills provide model comparisons. Cash drawdown is the peak-to-trough sum of settled modeled P&L, without open exposure or exchange margin.
+
+The same nine arms were replayed with the uniform cutoff. The strongest mixed window (October 13) settled 5,776 positions at return PF 1.016 and cash PF 0.987. It was the only corrected arm with return PF above 1. Each corrected arm emitted zero order intents.
 
 ```sh
 node --import tsx scripts/replay-config-stage-windows.ts /path/to/feed.json /path/to/results.json

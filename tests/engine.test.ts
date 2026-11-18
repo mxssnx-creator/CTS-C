@@ -353,8 +353,9 @@ test("window-sized retention preserves every event, qualification and cumulative
   let savedSamples = 0
   for (const [id, lane] of Object.entries(small.lanes)) {
     const stageLimit = cfg.stageLastN[lane.stage === "live" ? "real" : lane.stage]
-    const limit = lane.coordination === "normal" ? Math.max(stageLimit, 7) : stageLimit
+    const limit = (lane.coordination === "normal" ? Math.max(stageLimit, 7) : stageLimit) + 1
     assert.equal(lane.samples.length, Math.min(lane.closedCount, limit))
+    assert.equal(lane.sampleTimes?.length ?? 0, lane.samples.length)
     assert.deepEqual(lane.samples, large.lanes[id].samples.slice(0, limit))
     assert.equal(lane.closedCount, large.lanes[id].closedCount)
     assert.equal(lane.grossProfit, large.lanes[id].grossProfit)
@@ -374,14 +375,14 @@ test("retention expands for changed Axis windows and respects disabled Axis and 
   engine.processCandles("BTC-USDT", candles(900))
   for (const lane of Object.values(engine.exportState().lanes)) {
     const target = lane.coordination === "normal" ? 7 : cfg.stageLastN[lane.stage === "live" ? "real" : lane.stage]
-    assert.equal(lane.samples.length, Math.min(lane.closedCount, target))
+    assert.equal(lane.samples.length, Math.min(lane.closedCount, target + 1))
   }
   engine.updateSettings({ coordinations: { ...cfg.coordinations, axis: { ...cfg.coordinations.axis, previous: 8, last: 3 } } })
   engine.processCandles("BTC-USDT", candles(900, 900))
-  assert.ok(Object.values(engine.exportState().lanes).some(l => l.coordination === "normal" && l.samples.length === 11))
+  assert.ok(Object.values(engine.exportState().lanes).some(l => l.coordination === "normal" && l.samples.length === 12))
   engine.updateSettings({ coordinations: { ...cfg.coordinations, axis: { ...cfg.coordinations.axis, enabled: false } } })
-  for (const lane of Object.values(engine.exportState().lanes)) assert.ok(lane.samples.length <= cfg.stageLastN[lane.stage === "live" ? "real" : lane.stage])
-  assert.equal(engine.settings.maxSamples, 250, "the user-configurable ceiling is preserved")
+  for (const lane of Object.values(engine.exportState().lanes)) assert.ok(lane.samples.length <= cfg.stageLastN[lane.stage === "live" ? "real" : lane.stage] + 1)
+  assert.equal(engine.settings.maxSamples, 250)
 })
 
 test("PF metadata distinguishes no-loss infinity from finite999, empty and flat results", () => {
