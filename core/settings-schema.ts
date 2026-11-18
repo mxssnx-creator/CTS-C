@@ -4,7 +4,9 @@ import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from 
 import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES} from '../shared/cts-indications/signals-catalog'
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
 import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
-import { DEFAULT_EXIT_MODES, EXIT_MODES, type EngineSettings } from "./types"
+import { DEFAULT_EXIT_MODES, EXIT_MODES, type EngineSettings, type ExitMode, type StrategyRange } from "./types"
+import { EXPANDED_CATALOG_MAX, STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS, protectionVariants } from "./protection-grid"
+import { LAST_N_STAGES, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TIMEFRAMES } from "../shared/cts-indications/low-range-catalog.ts"
 import { DEFAULT_STEP_AUTO } from "./step-evidence"
 import { DEFAULT_RELATE } from "./relate"
@@ -21,7 +23,7 @@ export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
   stageGateMode: "processed-sets",
   stageWindowScope: "context", microStageWindowScope: "inherit",
-  stageBlocks: {},
+  stageBlocks: {}, strategyLastNGrid: {},
   liveEntryMode: "independent",
   baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
@@ -29,6 +31,7 @@ export const DEFAULTS: Record<string, unknown> = {
   axisPrevious: 8, axisLast: 3, axisOutcome: "any",axisReferenceStage:'same-stage',
   blockBehavior: "pyramid", blockSize: 3, blockPauseRounds: 1, blockMaxMultiplier: 3,
   autoPfEnabled: false, autoPfRatio: .2, autoPfMax: 2, microTradeStream: false,
+  strategyPriceDistancesEnabled: false, strategyStopDistancePcts: STOP_DISTANCE_PCTS, strategyTrailDistancePcts: TRAIL_DISTANCE_PCTS,
   blockSteps: 3, blockMode: "shared", dcaSteps: 2, dcaDistancePct: 1, dcaMultiplier: 2,
   blockAutoEnabled: DEFAULT_STEP_AUTO.enabled, blockAutoLastN: DEFAULT_STEP_AUTO.lastN,
   blockAutoMinSamples: DEFAULT_STEP_AUTO.minSamples, blockAutoMinPF: DEFAULT_STEP_AUTO.minPF,
@@ -101,6 +104,7 @@ export const EXECUTION_FIELDS = [
 ]
 const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
+  strategyStopDistancePcts: STOP_DISTANCE_PCTS, strategyTrailDistancePcts: TRAIL_DISTANCE_PCTS,
   strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
   strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),
   strategyLowRangeSources:LOW_RANGE_IDS,
@@ -128,13 +132,19 @@ const sourceKinds=new Map(PORTED_CATALOG.map(s=>[s.id,s.kind]))
 export function configurationCount(values: Record<string, unknown>) {
   const ranges = values.strategyEnabledRanges as string[]
   const types=values.strategyIndicationTypes as string[],technical=types.filter(t=>(TECHNICAL_INDICATIONS as readonly string[]).includes(t)).length
+  // A draft selection can be empty while the operator is editing. The saved settings schema rejects it.
+  const price = { enabled: values.strategyPriceDistancesEnabled === true,
+    stops: (values.strategyStopDistancePcts ?? STOP_DISTANCE_PCTS) as number[],
+    trails: (values.strategyTrailDistancePcts ?? TRAIL_DISTANCE_PCTS) as number[] }
+  const variantCounts = new Map(ranges.map(range => [range, protectionVariants(range as StrategyRange,
+    (values.strategyExitModes as ExitMode[]).filter(mode => mode === "fixed" || strategyProcessing(values, { range: range as StrategyRange }).trailing),
+    values.strategySlRatios as number[], price, Number(values.microMinSlDistancePct ?? .1), Number(values.microMinTrailDistancePct ?? .05)).length]))
   let cells=0,lowRangeCells=0
   for(const step of values.strategyTpSteps as number[])for(const range of [RANGES[RANGE_BOUNDS.findIndex(bound=>step<=bound)],...(step<=8?["Low-Range"]:[])]){
     if(!ranges.includes(range))continue
-    const modes=(values.strategyExitModes as string[]).filter(mode=>mode==='fixed'||strategyProcessing(values,{range:range as import('./types').StrategyRange}).trailing)
-    const ratios=(values.strategySlRatios as number[]).filter(r=>!['Micro','Low-Range'].includes(range)||r<=1.6)
-    cells+=modes.length*ratios.length
-    if (range === "Low-Range" && LOW_RANGE_STEPS.some(candidate => candidate === step)) lowRangeCells += modes.length * ratios.length
+    const count = variantCounts.get(range) ?? 0
+    cells += count
+    if (range === "Low-Range" && LOW_RANGE_STEPS.some(candidate => candidate === step)) lowRangeCells += count
   }
   const portedTypes=types.filter(t=>t==='Tactic'||t==='Inverse')
   const sourceIds=values.strategyIndicationSources as string[]
@@ -145,7 +155,8 @@ export function configurationCount(values: Record<string, unknown>) {
   const lowRangeSources = (values.strategyLowRangeSources ?? DEFAULT_LOW_RANGE_SOURCES) as string[]
   const lowRangeCount = hasLowRange
     ? lowRangeCells * lowRangeSources.length * timeframes.filter(tf => LOW_RANGE_TIMEFRAMES.some(minutes => tf === minutes)).length : 0
-  return lowRangeCount + cells * ((types.length-technical-portedTypes.length-signals-Number(hasLowRange)+signals*signalSources.length)*timeframes.length+extra+technical*(values.strategySignalPeriods as number[]).length*timeframes.length)
+  const count = lowRangeCount + cells * ((types.length-technical-portedTypes.length-signals-Number(hasLowRange)+signals*signalSources.length)*timeframes.length+extra+technical*(values.strategySignalPeriods as number[]).length*timeframes.length)
+  return count * lastNVariantCount((values.strategyLastNGrid ?? {}) as LastNGrid)
 }
 
 export function validateConfiguration(input: unknown, { partial = false, formNumbers = false } = {}): Record<string, unknown> {
@@ -167,6 +178,8 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if(key==="stageBlocks"){
       if(!value||typeof value!=="object"||Array.isArray(value)||Object.keys(value).some(k=>!["base","main","real"].includes(k)))throw new Error("Invalid stage blocks");
       for(const policy of Object.values(value))checkBlockPolicy(policy as BlockPolicy);output[key]=structuredClone(value);
+    } else if (key === "strategyLastNGrid") {
+      output[key] = structuredClone(checkLastNGrid(value))
     } else if (key === "relationalVolumeRatios") {
       output[key]=relationalVolumeSettings(value,true)
     } else if (key === "strategyProcessingByRange") {
@@ -188,7 +201,12 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
   }
   if (!partial) {
     if (output.axisPrevEnabled && Number(output.axisPrevious) + Number(output.axisLast) > 250) throw new Error("Axis previous and recent windows must total 250 samples or fewer.")
-    if (configurationCount(output) === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
+    const count = configurationCount(output)
+    if (count === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
+    const windows = output.strategyLastNGrid as LastNGrid
+    if ((output.strategyPriceDistancesEnabled || LAST_N_STAGES.some(stage => windows[stage]?.length)) && count > EXPANDED_CATALOG_MAX) {
+      throw new Error(`Expanded catalog exceeds ${EXPANDED_CATALOG_MAX} configurations. Select fewer distances, sources, timeframes or windows.`)
+    }
   }
   for (const [label, minimum, window] of [
     ["Block Auto", output.blockAutoMinSamples, output.blockAutoLastN],
@@ -206,7 +224,9 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
   const result: Record<string, unknown> = structuredClone(DEFAULTS)
   for (const [key, fallback] of Object.entries(DEFAULTS)) {
     if (settings[key] === undefined) continue
-    if(key==="stageBlocks"){try{result[key]=validateConfiguration({stageBlocks:JSON.parse(settings[key])},{partial:true}).stageBlocks}catch{}} else if (key === "relationalVolumeRatios") {
+    if(key==="stageBlocks"){try{result[key]=validateConfiguration({stageBlocks:JSON.parse(settings[key])},{partial:true}).stageBlocks}catch{}} else if (key === "strategyLastNGrid") {
+      try { result[key] = checkLastNGrid(JSON.parse(settings[key])) } catch { /* Preserve defaults on invalid legacy data. */ }
+    } else if (key === "relationalVolumeRatios") {
       try{result[key]=relationalVolumeSettings(JSON.parse(settings[key]),true)}catch{}
     } else if (key === "strategyProcessingByRange") {
       try { result[key] = validateProcessingByRange(JSON.parse(settings[key])) } catch { /* Preserve defaults on invalid legacy data. */ }

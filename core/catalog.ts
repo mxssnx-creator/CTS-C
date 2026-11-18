@@ -7,6 +7,8 @@ import { DEFAULT_EXIT_MODES, EXIT_MODES, type StrategyConfig } from "./types"
 import { createHash } from "node:crypto"
 import { resolveTradingCostPct } from "./metrics"
 import { CORE_INDICATIONS, INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
+import { EXPANDED_CATALOG_MAX, priceProtection, protectionVariants } from "./protection-grid"
+import { checkLastNGrid, lastNVariants } from "./last-n-grid"
 
 export const STRATEGY_RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"] as const
 export const STRATEGY_TYPES = INDICATIONS
@@ -44,6 +46,9 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   if (steps.some(step => !Number.isInteger(step) || step < 2 || step > 30)) throw new Error("strategyTpSteps must contain integers 2..30")
   const ratios = [...new Set(values(settings, "strategySlRatios", Array.from({length: 15}, (_, i) => (i + 2) / 10)).map(Number))]
   if (ratios.some(r => !Number.isFinite(r) || r < .2 || r > 2.2 || Math.abs(r * 10 - Math.round(r * 10)) > 1e-9)) throw new Error("strategySlRatios must be 0.2..2.2 in steps of 0.1")
+  const price = priceProtection(settings)
+  const windowVariants = lastNVariants(checkLastNGrid(settings.strategyLastNGrid))
+  const expanded = price.enabled || windowVariants[0] !== undefined
   for (const key of ["makerFeePct", "takerFeePct", "slippagePctOfFees"]) {
     if (settings[key] !== undefined && (!Number.isFinite(Number(settings[key])) || Number(settings[key]) < 0 || Number(settings[key]) > 100)) throw new Error(`Invalid ${key}`)
   }
@@ -67,28 +72,37 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   const autoPfRatio=Number(settings.autoPfRatio??.2),autoPfMax=Number(settings.autoPfMax??2)
   if(!Number.isFinite(autoPfRatio)||autoPfRatio<0||autoPfRatio>2||!Number.isFinite(autoPfMax)||autoPfMax<1.01||autoPfMax>10)throw new Error('Invalid auto PF policy')
   const configs: StrategyConfig[] = []
+  const variants = new Map(ranges.map(range => [range, protectionVariants(range,
+    modes.filter(mode => mode === "fixed" || strategyProcessing(settings, { range }).trailing),
+    ratios, price, microDistance('microMinSlDistancePct', .1), microMinTrail)]))
   for (const step of steps) for(const range of [strategyRangeForStep(step),...(step<=8?["Low-Range" as const]:[])]) {
     if (!ranges.includes(range)) continue
     const applicableTypes = range === "Low-Range" && LOW_RANGE_STEPS.some(candidate => candidate === step)
       ? types : types.filter(type => type !== "Low-Range")
-    for (const type of applicableTypes) for (const indicationSourceId of sourceList(type)) for (const ratio of ratios) for (const exitMode of modes) {
-     if((range==="Micro"||range==="Low-Range")&&ratio>1.6)continue
-     if (exitMode !== "fixed" && !strategyProcessing(settings, {range}).trailing) continue
+    for (const type of applicableTypes) for (const indicationSourceId of sourceList(type)) for (const geometry of variants.get(range)!) {
+     const { exitMode, stopPct, trailPct } = geometry
      const technical=(TECHNICAL_INDICATIONS as readonly string[]).includes(type),ported=!!indicationSourceId
      for(const period of technical?periods:[type==='RSI_Band'?14:20])for(const timeframe of timeframes){
       if(type==='Inverse'&&![1,5,15].includes(timeframe))continue
       if (type === "Low-Range" && !LOW_RANGE_TIMEFRAMES.some(minutes => minutes === timeframe)) continue
       const takeprofit = cost / 100 * step*tpFactor
       const micro=range==="Micro"||range==="Low-Range"
-      const stoploss = Math.max(takeprofit * ratio*slFactor,micro?microMinSl:0)
-      const trailDistancePct=Math.max(stoploss*100*trailRatio*(micro?microTrailRatio:1),micro?microMinTrail:0)
+      const stoploss = stopPct === undefined ? Math.max(takeprofit * geometry.ratio * slFactor, micro ? microMinSl : 0) : stopPct / 100
+      const ratio = geometry.ratio ?? stoploss / takeprofit
+      const trailDistancePct = trailPct ?? Math.max(stoploss*100*trailRatio*(micro?microTrailRatio:1),micro?microMinTrail:0)
       if(takeprofit>=1||stoploss>=1||trailDistancePct>=100)throw new Error('TP, SL and trailing distances must be below 100%')
       const lookback = period
       const maxHoldMinutes = (range==="Low-Range"?15:holdMinutes[STRATEGY_RANGES.indexOf(range)])*holdFactor
       const autoPfFloor=autoPfEnabled?Math.max(1.01,Math.min(autoPfMax,1+Math.floor(takeprofit*1000+1e-9)/10*autoPfRatio)):undefined
       const economics = createHash("sha256").update(JSON.stringify([type, takeprofit, stoploss, cost, maxHoldMinutes, lookback, exitMode,trailDistancePct, "ratcheted-trailing-v2",...(indicationSourceId?[indicationSourceId]:[]),...(timeframe!==1||technical||ported?[timeframe,'closed-ohlcv-v1']:[]),autoPfFloor,...(type==='Signals'?['signals-risk-v1',maxWindowDrawdownPct]:[])])).digest("hex").slice(0, 20)
-      const id = `v4_${type}_${range}_tp${step}_sl${Math.round(ratio * 10)}_${exitMode}_${economics}`
-      configs.push({ id, connectionId, createdAt: now, enabled: true, catalogVersion: 4,
+      const distanceId = stopPct === undefined ? `sl${Math.round(ratio * 10)}` : `sp${Math.round(stopPct * 10)}_gp${Math.round(trailPct! * 10)}`
+      const id = `v4_${type}_${range}_tp${step}_${distanceId}_${exitMode}_${economics}`
+      if (expanded && configs.length + windowVariants.length > EXPANDED_CATALOG_MAX) {
+        throw new Error(`Expanded catalog exceeds ${EXPANDED_CATALOG_MAX} configurations. Select fewer distances, sources, timeframes or windows.`)
+      }
+      for (const stageLastN of windowVariants) configs.push({
+        id: stageLastN ? `${id}_n${stageLastN.base ?? 0}-${stageLastN.main ?? 0}-${stageLastN.real ?? 0}` : id,
+        ...(stageLastN ? { stageLastN } : {}), connectionId, createdAt: now, enabled: true, catalogVersion: 4,
         type, ...(autoPfFloor!==undefined?{autoPfFloor}:{}), ...(type==='Signals'&&maxWindowDrawdownPct>0?{maxWindowDrawdownPct}:{}), ...(indicationSourceId?{indicationSourceId}:{}), range, tpStep: step, slRatio: ratio, exitMode,
         // Indicator lookback is separate from the cost-distance step.
         position_cost_step: lookback,
