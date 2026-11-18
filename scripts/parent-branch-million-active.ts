@@ -89,34 +89,36 @@ const serializedBytes = Buffer.byteLength(serialized)
 engine = null
 global.gc?.()
 const afterDrop = rss()
-let raw: EngineState | null = JSON.parse(serialized)
-const lanes = raw.lanes
-const laneIds = Object.keys(lanes)
-const byStage = { base: 0, main: 0, real: 0, live: 0 }
-const mainChildren = new Map<string, number>(), realChildren = new Map<string, number>()
-let missingParent = 0, duplicateIds = laneIds.length - new Set(laneIds).size
-for (const lane of Object.values(lanes)) {
-  byStage[lane.stage]++
-  const parent = lane.parentProof?.at(-1)?.laneId
-  if (lane.stage !== "base" && (!parent || !lanes[parent])) missingParent++
-  if (lane.stage === "main" && parent) mainChildren.set(parent, (mainChildren.get(parent) ?? 0) + 1)
-  if (lane.stage === "real" && parent) realChildren.set(parent, (realChildren.get(parent) ?? 0) + 1)
-}
-let childCountFailures = 0
-for (const lane of Object.values(lanes)) {
-  if (lane.stage === "base" && (mainChildren.get(lane.id) ?? 0) !== width) childCountFailures++
-  if (lane.stage === "main" && (realChildren.get(lane.id) ?? 0) !== width) childCountFailures++
-}
-const beforeDigest = digest(lanes)
-raw = null
+const inspection = (() => {
+  const raw = JSON.parse(serialized) as EngineState
+  const lanes = raw.lanes
+  const laneIds = Object.keys(lanes)
+  const byStage = { base: 0, main: 0, real: 0, live: 0 }
+  const mainChildren = new Map<string, number>(), realChildren = new Map<string, number>()
+  let missingParent = 0, duplicateIds = laneIds.length - new Set(laneIds).size
+  for (const lane of Object.values(lanes)) {
+    byStage[lane.stage]++
+    const parent = lane.parentProof?.at(-1)?.laneId
+    if (lane.stage !== "base" && (!parent || !lanes[parent])) missingParent++
+    if (lane.stage === "main" && parent) mainChildren.set(parent, (mainChildren.get(parent) ?? 0) + 1)
+    if (lane.stage === "real" && parent) realChildren.set(parent, (realChildren.get(parent) ?? 0) + 1)
+  }
+  let childCountFailures = 0
+  for (const lane of Object.values(lanes)) {
+    if (lane.stage === "base" && (mainChildren.get(lane.id) ?? 0) !== width) childCountFailures++
+    if (lane.stage === "main" && (realChildren.get(lane.id) ?? 0) !== width) childCountFailures++
+  }
+  return { byStage, missingParent, duplicateIds, childCountFailures, beforeDigest: digest(lanes) }
+})()
+const { byStage, missingParent, duplicateIds, childCountFailures, beforeDigest } = inspection
 global.gc?.()
 const restoreStarted = performance.now()
 const restored = TradingEngine.fromSerialized(serialized)
 const restoredAt = performance.now()
 serialized = ""
 global.gc?.()
-const restoredState = JSON.parse(restored.serializeState()) as EngineState
-const afterDigest = digest(restoredState.lanes)
+const afterDigest = digest((JSON.parse(restored.serializeState()) as EngineState).lanes)
+global.gc?.()
 const restoredCounts = stageCounts(restored)
 const sustainedStarted = performance.now()
 for (let chunk = 0; chunk < 3; chunk++) {
