@@ -18,22 +18,17 @@ const create=()=>new TradingEngine({
 })
 
 const membership=(engine:TradingEngine)=>engine as unknown as {
-  currentLaneEpoch:number
-  validLineageEpoch:number
   currentLaneIds?:unknown
-  validLineages?:unknown
+  validLineages:Set<string>
 }
 
-test("current and validated lineage membership uses per-lane epochs without retained membership containers",()=>{
+test("current lane membership is derived from the compact context index without a retained id Set",()=>{
   const engine=create()
   engine.processMarketCandles({[symbol]:bars})
   assert.equal(membership(engine).currentLaneIds,undefined)
-  assert.equal(membership(engine).validLineages,undefined)
-  assert.ok(membership(engine).currentLaneEpoch>0)
-  assert.ok(membership(engine).validLineageEpoch>0)
+  assert.ok(membership(engine).validLineages instanceof Set)
   const serialized=engine.serializeState()
   const restored=TradingEngine.fromSerialized(serialized)
   assert.equal(membership(restored).currentLaneIds,undefined)
-  assert.equal(membership(restored).validLineages,undefined)
   assert.deepEqual(JSON.parse(restored.serializeState()),JSON.parse(serialized))
 })
