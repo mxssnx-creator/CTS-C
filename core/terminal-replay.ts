@@ -22,7 +22,7 @@ function* replaySteps(symbol: string, candles: MarketCandle[], settings: Record<
   if(!Number.isFinite(barSeconds)||barSeconds<0)throw new Error("Invalid replay interval")
   const train = candles.slice(0, split).map(c => ({ ...c, timestamp: (c.time+barSeconds) * 1000 }))
   const test = candles.slice(split).map(c => ({ ...c, timestamp: (c.time+barSeconds) * 1000 }))
-  const configs = generateStrategyCatalog("terminal-research", settings).filter(c=>barSeconds===10?(c.signalTimeframeMinutes??1)<1:(c.signalTimeframeMinutes??1)>=1)
+  const configs = generateStrategyCatalog("terminal-research", settings.stageGateMode === "parent-branches" ? { ...settings, strategyLastNGrid: undefined } : settings).filter(c=>barSeconds===10?(c.signalTimeframeMinutes??1)<1:(c.signalTimeframeMinutes??1)>=1)
   const minSamples = Math.max(1, Math.min(200, Number(settings.prevPosWindow??settings.mainEvalPosCount) || 20))
   const minPf = Math.max(1, Number(settings.baseProfitFactor) || 1.05)
   const evaluated = [] as {config:StrategyConfig;score:ReturnType<typeof metrics>;enough:boolean;passed:boolean}[]
