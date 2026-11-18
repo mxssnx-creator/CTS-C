@@ -9,7 +9,6 @@ export interface Intent { id: string; status: "reserved" | "accepted" | "rejecte
 export interface RuntimeLease { owner: string; expiresAt: number; fence: number }
 const encodeLane=(data:string)=>'z1:'+deflateRawSync(Buffer.from(data),{level:1}).toString('base64')
 const decodeLane=(data:string)=>data.startsWith('z1:')?inflateRawSync(Buffer.from(data.slice(3),'base64')).toString():data
-const configRefOf=(configId:string)=>createHash("sha256").update(configId).digest("base64url").slice(0,22)
 export class StateStore {
   readonly database: DatabaseSync
   private loadedToken:string|null=null
@@ -56,10 +55,10 @@ export class StateStore {
       if(payload?.laneRowsVersion!==3||!payload.state||!payload.configs||typeof payload.configs!=='object')throw new Error('Invalid bounded checkpoint metadata')
       state={...payload.state,lanes:{}}
       for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){
-        const compact=JSON.parse(decodeLane(item.data)),config=payload.configs[compact.configRef] as StrategyConfig|undefined
-        if(!config||typeof config.id!=='string'||typeof compact.configRef!=='string'||configRefOf(config.id)!==compact.configRef||'id' in compact||'config' in compact||'configId' in compact)throw new Error('Bounded checkpoint lane identity mismatch')
-        const {configRef:_configRef,...lane}=compact
-        state.lanes[item.id]={...lane,id:item.id,configId:config.id,config}
+        const compact=JSON.parse(decodeLane(item.data)),config=payload.configs[compact.c] as StrategyConfig|undefined
+        if(!config||typeof compact.c!=='string'||config.id!==compact.c||'id' in compact||'config' in compact||'configId' in compact)throw new Error('Bounded checkpoint lane identity mismatch')
+        const {c:configId,...lane}=compact
+        state.lanes[item.id]={...lane,id:item.id,configId,config}
       }
     }else if(decoded.checkpointFormat==='lane-rows-v2'){
       const payload=decoded.payload
