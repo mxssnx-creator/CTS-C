@@ -1,5 +1,7 @@
 import {blockPrefix,blockRequired,blockPolicyKey,checkBlockPolicy,evaluateBlocks,type BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 import {blockRoundBudget,settleBlockRound,consumeBlockPause} from "./block-rounds"
+import { checkBlockPyramidAdd, settleBlockSteps } from "./block-auto"
+import { validateStepAuto } from "./step-evidence"
 import { dcaStepVerdict, observeDcaStep, settleDcaSteps, validateDcaAuto } from "./dca-auto"
 import {normalizedVolumeFactor,relationalVolumeSettings} from "../shared/cts-volume/ratios";
 import { strategyProcessing } from "./strategy-processing"
@@ -71,6 +73,7 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   finite(block.size??3,'block size',1,100,true);finite(block.pauseRounds??1,'block pause rounds',0,100,true);finite(block.maxMultiplier??3,'block multiplier cap',1,10)
   finite(block.steps, "block steps", 1, 20, true); finite(block.ratio, "block ratio", .01, 10)
   if (!["shared", "additive"].includes(block.mode)) throw new Error("Invalid block mode")
+  if (block.auto !== undefined) block.auto = validateStepAuto(block.auto, "Block")
   finite(dca.steps, "DCA steps", 1, 20, true); finite(dca.distancePct, "DCA distance", .001, 100); finite(dca.multiplier, "DCA multiplier", .01, 10)
   if (dca.auto !== undefined) dca.auto = validateDcaAuto(dca.auto)
   for (const enabled of [axis.enabled, block.enabled, dca.enabled]) if (typeof enabled !== "boolean") throw new Error("Coordination enabled must be boolean")
@@ -92,7 +95,7 @@ type WindowResult={pfSampleCount?:number;blockPolicyKey?:string;drawdownPct?:num
 type StageWindowResult=WindowResult&Pick<GateProof,"windowScope"|"configWindow">&{windowKey?:string}
 const windowCache=new WeakMap<WindowEvidence,{closed:number;samples:number[];length:number;head:number|undefined;value:WindowResult}>()
 const blockWindowCache=new WeakMap<WindowEvidence,{closed:number;samples:number[];head:number|undefined;length:number;key:string;value:WindowResult}>()
-const axisCache=new WeakMap<LaneState,{closed:number;samples:number[];length:number;head:number|undefined;previous:number;last:number;outcome:string;threshold:number;allowed:boolean}>()
+const axisCache=new WeakMap<WindowEvidence,{closed:number;samples:number[];length:number;head:number|undefined;previous:number;last:number;outcome:string;threshold:number;allowed:boolean}>()
 function knownWindow(samples:readonly unknown[],count:number):boolean {
   for(let i=0;i<count;i++)if(typeof samples[i]!=='number'||!Number.isFinite(samples[i]))return false
   return true
@@ -201,6 +204,10 @@ export class TradingEngine {
     this.state.nextActivationOrder??=0
     const openLanes:LaneState[]=[],orders=new Set<number>()
     for (const lane of Object.values(this.state.lanes)) {
+      if ((lane.sampleTimes?.length ?? 0) < lane.samples.length && lane.untimedSamplesThrough === undefined) {
+        lane.untimedSamplesThrough = lane.sampleTimes?.at(-1) ?? lane.open?.openedAt ?? lane.lastTimestamp
+        this.dirtyLaneIds.add(lane.id)
+      }
       this.trimSamples(lane)
       if(lane.open){
         const order=lane.open.activationOrder
@@ -284,11 +291,11 @@ export class TradingEngine {
       &&lane.id===laneKey(s.connectionId,lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage,this.coordinationIdentity(lane.coordination,lane.stage,lane.config,lane.symbol))){this.currentLaneIds.add(lane.id);this.cacheLane(lane)}
   }
   /** Rechecked after asynchronous exchange preflight, immediately before a new risk write. */
-  isLiveIntentEligible(positionId:string):boolean {
+  isLiveIntentEligible(positionId:string,before=Infinity):boolean {
     const lane=this.livePositions.get(positionId)
     if(!lane?.open?.executionEligible||!this.currentLane(lane)||!this.processingAllows(lane))return false
     if(this.realMirror){const real=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,'real');if(!lane.open.parentPositionId||real?.open?.id!==lane.open.parentPositionId)return false}
-    return this.hasParentEvidence(lane.symbol,lane.config,lane.direction,lane.coordination,"live",false,Infinity,true)&&(lane.coordination!=="axis"||this.axisAllows(lane.symbol,lane.config,lane.direction,"live"))
+    return this.hasParentEvidence(lane.symbol,lane.config,lane.direction,lane.coordination,"live",false,before,true)&&(lane.coordination!=="axis"||this.axisAllows(lane.symbol,lane.config,lane.direction,"live",before))
   }
   private processingAllows(lane: Pick<LaneState, "config" | "coordination">): boolean {
     const p = strategyProcessing(this.state.settings.catalog, lane.config)
@@ -299,8 +306,8 @@ export class TradingEngine {
     this.volumeWeights=relationalVolumeSettings(s.catalog.relationalVolumeRatios,true)
     for (const coordination of ["normal", "axis", "block", "dca"] as const) {
       let parameters = coordination === "normal" ? null : s.coordinations[coordination]
-      if (coordination === "dca" && !s.coordinations.dca.auto?.enabled) {
-        const { auto: _auto, ...manual } = s.coordinations.dca
+      if (parameters && "auto" in parameters && !parameters.auto?.enabled) {
+        const { auto: _auto, ...manual } = parameters
         parameters = manual
       }
       this.coordinationIds[coordination] = hashId(JSON.stringify([s.baseNotional, s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0, parameters, s.stageLastN, s.stageMinPF,...(s.stageBlocks&&Object.keys(s.stageBlocks).length?[s.stageBlocks]:[])]))
@@ -328,27 +335,36 @@ export class TradingEngine {
     if(config&&stage!=="base"){const scope=this.stageScope(config);if(scope!=="context")identity+=`:window-scope=${scope}`}
     return coordination==='normal'&&stage==='live'&&config&&!strategyProcessing(this.state.settings.catalog,config).normal?identity+':calculation-only':identity
   }
-  /** A scoped window can exclude the newest same-clock close and still read its full Last-N. */
+  /** A decision can exclude the newest same-clock close and still read its full Last-N. */
   private sampleRetention(lane: Pick<LaneState, "stage" | "coordination" | "config">): number {
     const s = this.state.settings
     const source=lane.stage === "live" ? "real" : lane.stage
     const gateWindow = s.stageBlocks?.[source]?blockRequired(s.stageBlocks[source]!):s.stageLastN[source]
     const axisWindow = lane.coordination === "normal" && s.coordinations.axis.enabled&&(s.coordinations.axis.reference!=='base'||lane.stage==='base')
       ? s.coordinations.axis.previous + s.coordinations.axis.last : 0
-    return Math.min(s.maxSamples, Math.max(gateWindow, axisWindow))+(this.stageScope(lane.config)==="context"?0:1)
+    return Math.min(s.maxSamples, Math.max(gateWindow, axisWindow)) + 1
   }
   private trimSamples(lane:LaneState):void {
     const retained=this.sampleRetention(lane)
     if(lane.samples.length>retained){lane.samples.length=retained;this.dirtyLaneIds.add(lane.id)}
     if(lane.sampleTimes&&lane.sampleTimes.length>retained){lane.sampleTimes.length=retained;this.dirtyLaneIds.add(lane.id)}
   }
+  private contextEvidence(lane: LaneState, before: number): WindowEvidence {
+    const times = lane.sampleTimes
+    const legacyThrough = lane.untimedSamplesThrough ?? 0
+    if (Math.max(times?.[0] ?? 0, legacyThrough) < before) return lane
+    let start = 0
+    if (times) while (start < times.length && times[start] >= before) start++
+    const end = legacyThrough >= before ? times?.length ?? 0 : lane.samples.length
+    return {config: lane.config, samples: lane.samples.slice(start, end), closedCount: lane.closedCount}
+  }
   private stageWindow(lane:LaneState | undefined,source:"base"|"main"|"real",before:number,exact=false):StageWindowResult {
     const s=this.state.settings,required=s.stageLastN[source],minPF=s.stageMinPF[source],blocks=s.stageBlocks?.[source]
     const scope=lane&&!exact?this.stageScope(lane.config):"context"
-    if(!lane||scope==="context")return windowMetrics(lane,required,minPF,blocks)
+    if(!lane||scope==="context")return windowMetrics(lane&&this.contextEvidence(lane,before),required,minPF,blocks)
     const wide=windowMetrics(this.configWindows.evidence(lane,before,blocks?blockRequired(blocks):required),required,minPF,blocks)
     if(scope==="config")return {...wide,windowScope:scope,windowKey:this.configWindowKey(lane)}
-    const own=windowMetrics(lane,required,minPF,blocks)
+    const own=windowMetrics(this.contextEvidence(lane,before),required,minPF,blocks)
     return {...own,windowScope:scope,enoughSamples:own.enoughSamples&&wide.enoughSamples,qualified:own.qualified&&wide.qualified,
       configWindow:{count:wide.count,profitFactor:wide.profitFactor,qualified:wide.qualified}}
   }
@@ -398,11 +414,13 @@ export class TradingEngine {
     }
     return true
   }
-  private axisAllows(symbol: string, config: StrategyConfig, direction: Direction, stage: Stage): boolean {
+  private axisAllows(symbol: string, config: StrategyConfig, direction: Direction, stage: Stage, before=Infinity): boolean {
     const s = this.state.settings, axis = s.coordinations.axis
     const referenceStage=axis.reference==='base'?'base':stage==='live'&&this.realMirror?'real':stage
-    const source = this.cachedLane(symbol,config.id,direction,'normal',referenceStage)
-    if (!source || source.samples.length < axis.previous + axis.last) return false
+    const reference = this.cachedLane(symbol,config.id,direction,'normal',referenceStage)
+    if (!reference) return false
+    const source = this.contextEvidence(reference,before)
+    if (source.samples.length < axis.previous + axis.last) return false
     const threshold = Math.max(referenceStage === "live" ? s.stageMinPF.real : s.stageMinPF[referenceStage],config.autoPfFloor??0)
     const cached=axisCache.get(source),samples=source.samples
     if(cached&&cached.closed===source.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.previous===axis.previous&&cached.last===axis.last&&cached.outcome===axis.outcome&&cached.threshold===threshold)return cached.allowed
@@ -452,6 +470,10 @@ export class TradingEngine {
       trailDistancePct:lane.config.trailDistancePct,exitPolicyVersion:lane.config.catalogVersion??2,maxOrderNotional:s.maxOrderNotional,
     }
     if (lane.coordination === "dca" && s.coordinations.dca.auto?.enabled && !mirror) position.dcaProbePrices = []
+    if (lane.coordination === "block" && block.auto?.enabled && !mirror) {
+      if (block.behavior === "rounds") position.blockRoundLevel = lane.blockRound?.level ?? 0
+      else position.blockProbePrices = []
+    }
     if(mirror){
       // Live executes the accepted Real allocation. In particular, its smaller
       // executed subset must not run a second, divergent Block recovery cycle.
@@ -472,13 +494,15 @@ export class TradingEngine {
     const trade: ClosedTrade = { id: open.id, laneId: lane.id, configId: lane.configId, symbol: lane.symbol, direction: lane.direction, stage: lane.stage, coordination: lane.coordination,
       openedAt: open.openedAt, closedAt: candle.timestamp, entryPrice: open.entryPrice, exitPrice: candle.close,
       quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
-    if(lane.coordination==="block"&&open.sizing?.block.behavior==="rounds"&&!(this.processedSets&&lane.stage==='live'))settleBlockRound(lane,netPnl,open.sizing.block)
+    if (lane.coordination === "block") {
+      if (open.sizing?.block.behavior === "rounds" && !(this.processedSets && lane.stage === "live")) settleBlockRound(lane, netPnl, open.sizing.block)
+      settleBlockSteps(lane, open, candle.close, netReturnPct)
+    }
     if (lane.coordination === "dca") settleDcaSteps(lane, open, candle.close)
     lane.samples.unshift(netReturnPct)
-    if(lane.sampleTimes||this.stageScope(lane.config)!=="context"){
-      (lane.sampleTimes??=[]).unshift(candle.timestamp)
-      this.configWindows.settled(lane,candle.timestamp)
-    }
+    const sampleTimes = lane.sampleTimes ??= []
+    sampleTimes.unshift(candle.timestamp)
+    this.configWindows.settled(lane,candle.timestamp)
     this.trimSamples(lane)
     lane.closedCount++; lane.wins += netPnl > 0 ? 1 : 0; lane.netPnl += netPnl
     if(lane.costTotal!==undefined)lane.costTotal+=cost
@@ -526,12 +550,10 @@ export class TradingEngine {
     const s = this.state.settings
     const sizing = open.sizing ?? { baseBudget: s.baseNotional * s.volumeFactor, block: s.coordinations.block, dca: s.coordinations.dca }
     let addNotional = 0, kind: "block" | "dca" = "block"
-    if (lane.coordination === "block" && sizing.block.behavior!=="rounds" && open.addedSteps < sizing.block.steps) {
-      const fromLast = sign * (candle.close - open.lastAddPrice) / open.lastAddPrice * 100
-      if (fromLast >= open.takeProfitPct / (sizing.block.steps + 1)) {
-        const b = sizing.block
-        addNotional = sizing.baseBudget * b.ratio / (b.mode === "shared" ? 1 + b.steps * b.ratio : 1)
-      }
+    const block = sizing.block
+    if (lane.coordination === "block" && block.behavior !== "rounds" && open.addedSteps < block.steps &&
+      (!block.auto?.enabled || this.currentLane(lane)) && checkBlockPyramidAdd(lane, open, candle.close, block)) {
+      addNotional = sizing.baseBudget * block.ratio / (block.mode === "shared" ? 1 + block.steps * block.ratio : 1)
     }
     if (lane.coordination === "dca" && open.addedSteps < sizing.dca.steps) {
       const auto = sizing.dca.auto
@@ -586,7 +608,6 @@ export class TradingEngine {
     }
     for (const candle of candles) {
       if (candle.timestamp <= (cursors[symbol] ?? 0)) continue
-      const justClosed = new Set<string>()
       for (const id of (micro?this.activeMicro:this.activeMinute).get(symbol) ?? []) {
         const lane = this.state.lanes[id], position = lane.open!
         // A source candle may manage only its own timeframe family. Present-time
@@ -595,7 +616,6 @@ export class TradingEngine {
         const event = this.mark(lane, candle)
         if (event) {
           if (!lane.calculationOnly) emit(event)
-          if (event.type === "closed") justClosed.add(id)
           if (lane.stage === "live" && position.executionEligible) {
             if (event.type === "closed") this.enqueueIntent(lane, position, candle, "close", position.quantity)
             if (event.type === "added") this.enqueueIntent(lane, position, candle, "add", position.fills.at(-1)!.quantity)
@@ -630,10 +650,10 @@ export class TradingEngine {
           for (const stage of STAGES) {
             // Disabled Normal keeps an internal reference for same-stage Axis; it never receives execution funding.
             let lane=this.cachedLane(symbol,config.id,signal,coordination,stage)
-            const axisReady=coordination!=="axis"||this.axisAllows(symbol,config,signal,stage)
+            const axisReady=coordination!=="axis"||this.axisAllows(symbol,config,signal,stage,candle.timestamp)
             const parentReady=!this.processedSets||this.hasParentEvidence(symbol,config,signal,coordination,stage,!lane,candle.timestamp)
             const mirrorReady=!this.realMirror||stage!=='live'||Boolean(realPositionId)
-            if(axisReady&&parentReady&&mirrorReady&&!lane?.open&&(!lane||!justClosed.has(lane.id))){
+            if(axisReady&&parentReady&&mirrorReady&&!lane?.open&&(!lane||lane.lastTimestamp<candle.timestamp)){
               lane??=this.lane(symbol, config, signal, coordination, stage)
               if(coordination==='block'&&s.coordinations.block.behavior==='rounds'&&!(this.realMirror&&stage==='live')&&consumeBlockPause(lane,s.coordinations.block)){
                 this.dirtyLaneIds.add(lane.id)
@@ -647,7 +667,7 @@ export class TradingEngine {
               if (!lane.calculationOnly) emit({ type: "opened", laneId: lane.id, timestamp: candle.timestamp, stage })
               if (stage === "live" && !lane.calculationOnly && options.allowExecution) {
                 position.executionEligible = true
-                if(this.stageScope(config)==="context"||this.isLiveIntentEligible(position.id))this.enqueueIntent(lane, position, candle, "entry", position.quantity)
+                if(this.stageScope(config)==="context"||this.isLiveIntentEligible(position.id,candle.timestamp))this.enqueueIntent(lane, position, candle, "entry", position.quantity)
                 else position.executionEligible=false
               }
             }

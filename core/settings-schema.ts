@@ -5,7 +5,7 @@ import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES} from '../shared/cts-indications
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
 import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import type { EngineSettings } from "./types"
-import { DEFAULT_DCA_AUTO } from "./dca-auto"
+import { DEFAULT_STEP_AUTO } from "./step-evidence"
 
 export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"]
 export const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
@@ -28,8 +28,10 @@ export const DEFAULTS: Record<string, unknown> = {
   blockBehavior: "pyramid", blockSize: 3, blockPauseRounds: 1, blockMaxMultiplier: 3,
   autoPfEnabled: false, autoPfRatio: .2, autoPfMax: 2, microTradeStream: false,
   blockSteps: 3, blockMode: "shared", dcaSteps: 2, dcaDistancePct: 1, dcaMultiplier: 2,
-  dcaAutoEnabled: DEFAULT_DCA_AUTO.enabled, dcaAutoLastN: DEFAULT_DCA_AUTO.lastN,
-  dcaAutoMinSamples: DEFAULT_DCA_AUTO.minSamples, dcaAutoMinPF: DEFAULT_DCA_AUTO.minPF,
+  blockAutoEnabled: DEFAULT_STEP_AUTO.enabled, blockAutoLastN: DEFAULT_STEP_AUTO.lastN,
+  blockAutoMinSamples: DEFAULT_STEP_AUTO.minSamples, blockAutoMinPF: DEFAULT_STEP_AUTO.minPF,
+  dcaAutoEnabled: DEFAULT_STEP_AUTO.enabled, dcaAutoLastN: DEFAULT_STEP_AUTO.lastN,
+  dcaAutoMinSamples: DEFAULT_STEP_AUTO.minSamples, dcaAutoMinPF: DEFAULT_STEP_AUTO.minPF,
   normalVolumeRatio: 1, axisVolumeRatio: 1, blockVolumeFactor: 1, dcaVolumeRatio: 1, maxOrderNotional: 0,
   microTrailRatio: .5, microMinSlDistancePct: .1, microMinTrailDistancePct: .05, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
   blockVolumeRatio: 0.2, makerFeePct: 0.02, takerFeePct: 0.05, slippagePctOfFees: 10,
@@ -65,6 +67,9 @@ export const COORDINATION_FIELDS = [
   { key: "axisLast", label: "Axis recent samples", min: 1, max: 250, step: 1 },
   { key: "blockSteps", label: "Block maximum increase steps", min: 1, max: 20, step: 1 },
   { key: "blockVolumeRatio", label: "Block volume ratio", min: 0.01, max: 10, step: 0.01 },
+  { key: "blockAutoLastN", label: "Block Auto recent observations", min: 3, max: 100, step: 1 },
+  { key: "blockAutoMinSamples", label: "Block Auto minimum observations", min: 3, max: 100, step: 1 },
+  { key: "blockAutoMinPF", label: "Block Auto minimum raise PF", min: 1.01, max: 10, step: .01 },
   { key: "dcaSteps", label: "DCA additions", min: 1, max: 20, step: 1 },
   { key: "dcaDistancePct", label: "DCA adverse distance (%)", min: 0.001, max: 100, step: 0.001 },
   { key: "dcaMultiplier", label: "DCA addition multiplier", min: 0.01, max: 10, step: 0.01 },
@@ -164,8 +169,13 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if (output.axisPrevEnabled && Number(output.axisPrevious) + Number(output.axisLast) > 250) throw new Error("Axis previous and recent windows must total 250 samples or fewer.")
     if (configurationCount(output) === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
   }
-  if (output.dcaAutoMinSamples !== undefined && output.dcaAutoLastN !== undefined && Number(output.dcaAutoMinSamples) > Number(output.dcaAutoLastN)) {
-    throw new Error("DCA Auto minimum observations cannot exceed its recent observation window.")
+  for (const [label, minimum, window] of [
+    ["Block", output.blockAutoMinSamples, output.blockAutoLastN],
+    ["DCA", output.dcaAutoMinSamples, output.dcaAutoLastN],
+  ]) {
+    if (typeof minimum === "number" && typeof window === "number" && minimum > window) {
+      throw new Error(`${label} Auto minimum observations cannot exceed its recent observation window.`)
+    }
   }
   return output
 }
@@ -190,7 +200,8 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
 /** The same editable schema is used by forms, JSON imports and server writes. */
 export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;historyCandles:number}):Record<string,unknown>{
   const values:Record<string,unknown>={...structuredClone(DEFAULTS)}
-  const dcaAuto = s.coordinations.dca.auto ?? DEFAULT_DCA_AUTO
+  const blockAuto = s.coordinations.block.auto ?? DEFAULT_STEP_AUTO
+  const dcaAuto = s.coordinations.dca.auto ?? DEFAULT_STEP_AUTO
   for(const [key,value] of Object.entries(s.catalog))if(Object.hasOwn(DEFAULTS,key))values[key]=value
   return {...values,stageBlocks:s.stageBlocks??{},liveEntryMode:s.liveEntryMode??'independent',stageGateMode:s.stageGateMode??'continuous-ancestors',symbolCount:control.symbolCount,historyCandles:control.historyCandles,volumeFactor:s.volumeFactor,baseNotional:s.baseNotional,maxOrderNotional:s.maxOrderNotional??0,
     stageWindowScope:s.stageWindowScope??"context",microStageWindowScope:s.microStageWindowScope??"inherit",
@@ -200,6 +211,7 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
     variantBlockEnabled:s.coordinations.block.enabled,variantDcaEnabled:s.coordinations.dca.enabled,axisPrevEnabled:s.coordinations.axis.enabled,
     blockVolumeRatio:s.coordinations.block.ratio,axisPrevious:s.coordinations.axis.previous,axisLast:s.coordinations.axis.last,axisOutcome:s.coordinations.axis.outcome,axisReferenceStage:s.coordinations.axis.reference??'same-stage',
     blockBehavior:s.coordinations.block.behavior??"pyramid",blockSize:s.coordinations.block.size??3,blockPauseRounds:s.coordinations.block.pauseRounds??1,blockMaxMultiplier:s.coordinations.block.maxMultiplier??3,
+    blockAutoEnabled:blockAuto.enabled,blockAutoLastN:blockAuto.lastN,blockAutoMinSamples:blockAuto.minSamples,blockAutoMinPF:blockAuto.minPF,
     blockSteps:s.coordinations.block.steps,blockMode:s.coordinations.block.mode,dcaSteps:s.coordinations.dca.steps,dcaDistancePct:s.coordinations.dca.distancePct,dcaMultiplier:s.coordinations.dca.multiplier,
     dcaAutoEnabled:dcaAuto.enabled,dcaAutoLastN:dcaAuto.lastN,dcaAutoMinSamples:dcaAuto.minSamples,dcaAutoMinPF:dcaAuto.minPF}
 }

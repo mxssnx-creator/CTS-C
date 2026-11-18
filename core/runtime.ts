@@ -10,7 +10,7 @@ import { getStore,type StateStore } from './store'
 import type { Candle, EngineSettings, EngineEvent } from './types'
 import { generateStrategyCatalog } from './catalog'
 import {flatEngineSettings,validateConfiguration} from './settings-schema'
-import { DEFAULT_DCA_AUTO } from './dca-auto'
+import { DEFAULT_STEP_AUTO } from './step-evidence'
 
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
@@ -364,6 +364,12 @@ export class TerminalRuntime {
     const current=this.engine.settings, next=structuredClone(current)
     const catalogKeys=['strategySignalsSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
+    const autoFields = {
+      blockAutoEnabled: ["block", "enabled"], blockAutoLastN: ["block", "lastN"],
+      blockAutoMinSamples: ["block", "minSamples"], blockAutoMinPF: ["block", "minPF"],
+      dcaAutoEnabled: ["dca", "enabled"], dcaAutoLastN: ["dca", "lastN"],
+      dcaAutoMinSamples: ["dca", "minSamples"], dcaAutoMinPF: ["dca", "minPF"],
+    } as const
     for(const [key,value] of Object.entries(input)) {
       if(key==='stageBlocks'){next.stageBlocks=structuredClone(value) as EngineSettings['stageBlocks'];continue}
       if(key==='stageGateMode'){next.stageGateMode=value as EngineSettings['stageGateMode'];continue}
@@ -394,12 +400,11 @@ export class TerminalRuntime {
       if(key==='dcaSteps'){next.coordinations.dca.steps=Number(value);continue}
       if(key==='dcaDistancePct'){next.coordinations.dca.distancePct=Number(value);continue}
       if(key==='dcaMultiplier'){next.coordinations.dca.multiplier=Number(value);continue}
-      if(key==='dcaAutoEnabled'||key==='dcaAutoLastN'||key==='dcaAutoMinSamples'||key==='dcaAutoMinPF'){
-        const policy=next.coordinations.dca.auto??={...DEFAULT_DCA_AUTO}
-        if(key==='dcaAutoEnabled')policy.enabled=value===true
-        if(key==='dcaAutoLastN')policy.lastN=Number(value)
-        if(key==='dcaAutoMinSamples')policy.minSamples=Number(value)
-        if(key==='dcaAutoMinPF')policy.minPF=Number(value)
+      if (Object.hasOwn(autoFields, key)) {
+        const [coordination, field] = autoFields[key as keyof typeof autoFields]
+        const policy = next.coordinations[coordination].auto ??= { ...DEFAULT_STEP_AUTO }
+        if (field === "enabled") policy.enabled = value === true
+        else policy[field] = Number(value)
         continue
       }
       throw new Error(`Unknown setting ${key}`)

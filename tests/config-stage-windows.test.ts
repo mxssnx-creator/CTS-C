@@ -81,6 +81,53 @@ test("market replay rejects a second batch with an unseen earlier or same-clock 
   assert.equal(engine.serializeState(),checkpoint)
 })
 
+for (const scope of ["context", "both"] as const) {
+  test(`${scope} stage and Axis admission use strictly prior exact-lane closes`, () => {
+    const engine = new TradingEngine({
+      ...settings, symbols: [symbols[0]], stageWindowScope: scope,
+      stageLastN: {base: 1, main: 1, real: 1},
+    })
+    const closes = new Map<string, number[]>()
+    for (const bar of bars[0].slice(0, 240)) {
+      for (const event of engine.processCandles(symbols[0], [bar])) {
+        if (event.type !== "closed") continue
+        const times = closes.get(event.laneId) ?? []
+        times.push(event.timestamp)
+        closes.set(event.laneId, times)
+      }
+    }
+
+    const lanes = Object.values(engine.exportState().lanes)
+    const derived = lanes.filter(lane => lane.coordination === "normal" && lane.stage !== "base")
+    const axis = lanes.filter(lane => lane.coordination === "axis" && lane.admittedAt)
+    assert.ok(derived.some(lane => lane.stage === "live"))
+    assert.ok(axis.some(lane => lane.stage === "real"))
+    for (const lane of derived) {
+      const proof = lane.parentProof!.at(-1)!
+      const prior = closes.get(proof.laneId)?.filter(time => time < proof.checkedAt) ?? []
+      assert.ok(prior.length >= proof.required, `${lane.stage} used a same-clock exact parent close`)
+    }
+    for (const lane of axis) {
+      const referenceStage = lane.stage === "live" ? "real" : lane.stage
+      const reference = lanes.find(source => source.stage === referenceStage &&
+        source.coordination === "normal" && source.configId === lane.configId && source.direction === lane.direction)
+      const prior = closes.get(reference!.id)?.filter(time => time < lane.admittedAt!) ?? []
+      assert.ok(prior.length >= 2, `Axis ${lane.stage} used a same-clock reference close`)
+    }
+  })
+}
+
+test("a legacy checkpoint keeps its exact evidence when strictly later bars arrive", () => {
+  const selected = { ...settings, symbols: [symbols[0]], stageWindowScope: "context" as const }
+  const engine = new TradingEngine(selected)
+  engine.processCandles(symbols[0], bars[0].slice(0, 180))
+  const legacy = engine.exportState()
+  for (const lane of Object.values(legacy.lanes)) delete lane.sampleTimes
+  const restored = new TradingEngine(selected, legacy)
+  const remaining = bars[0].slice(180)
+  assert.deepEqual(restored.processCandles(symbols[0], remaining), engine.processCandles(symbols[0], remaining))
+})
+
 test("a passing pooled Real window cannot replace exact Real promotion evidence", () => {
   const engine = marketSeed()
   let state = engine.exportState()
@@ -97,7 +144,10 @@ test("a passing pooled Real window cannot replace exact Real promotion evidence"
   const times = [1,2,3,4].map(n=>state.updatedAt-n*60000)
   real.sampleTimes=times;real.samples=[2,2,2,2]
   live.open.executionEligible=true
-  assert.equal(new TradingEngine(settings,state).isLiveIntentEligible(live.open.id),true)
+  const eligible = new TradingEngine(settings,state)
+  assert.equal(eligible.isLiveIntentEligible(live.open.id),true)
+  assert.equal(eligible.isLiveIntentEligible(live.open.id,times[0]),false)
+  assert.equal(eligible.isLiveIntentEligible(live.open.id,times[0]+1),true)
   real.sampleTimes=[];real.samples=[]
   neighbor.sampleTimes=times;neighbor.samples=[2,2,2,2]
   const check = new TradingEngine(settings,state)
