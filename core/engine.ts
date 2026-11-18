@@ -21,9 +21,6 @@ const STAGE_INDEX:Record<Stage,number>={base:0,main:1,real:2,live:3}
 const COORDINATIONS = ["normal", "axis", "block", "dca", "relate"] as const
 const COORDINATION_OFFSET:Record<Coordination,number>={normal:0,axis:4,block:8,dca:12,relate:16}
 type LaneContext=(LaneState|undefined)[]
-const CURRENT_LANE_EPOCH=Symbol("current-lane-epoch")
-const VALID_LINEAGE_EPOCH=Symbol("valid-lineage-epoch")
-type RuntimeLaneState=LaneState&{[CURRENT_LANE_EPOCH]?:number;[VALID_LINEAGE_EPOCH]?:number}
 const contextIndex=(direction:Direction,coordination:Coordination,stage:Stage)=>
   2*(COORDINATION_OFFSET[coordination]+STAGE_INDEX[stage])+(direction==="short"?1:0)
 type ConfigStream={config:StrategyConfig;key:string}
@@ -198,10 +195,9 @@ export class TradingEngine {
   private activeMinute = new Map<string, Set<string>>()
   private livePositions = new Map<string,LaneState>()
   private configIds = new Set<string>()
-  private currentLaneEpoch=1
   private contexts=new Map<string,Map<string,LaneContext>>()
   private configWindows=new ConfigStageWindows()
-  private validLineageEpoch=1
+  private validLineages=new Set<string>()
   private dirtyLaneIds=new Set<string>()
   private volumeWeights=relationalVolumeSettings(undefined)
   private readonly maxRecentTrades = 1000
@@ -330,7 +326,7 @@ export class TradingEngine {
     if(lane.stage==="live"&&lane.open&&!lane.calculationOnly)this.livePositions.set(lane.open.id,lane)
   }
   private currentLane(lane:LaneState):boolean {
-    return (lane as RuntimeLaneState)[CURRENT_LANE_EPOCH]===this.currentLaneEpoch
+    return this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,lane.stage)===lane
   }
   private cachedLane(symbol:string,configId:string,direction:Direction,coordination:Coordination,stage:Stage):LaneState|undefined{
     const ancestor = this.branches?.get(configId)?.branch?.ancestors[STAGE_INDEX[stage]]
@@ -345,7 +341,7 @@ export class TradingEngine {
   private refreshCurrentLaneIds():void {
     const s=this.state.settings
     const symbols=new Set(s.symbols)
-    this.currentLaneEpoch++;this.contexts.clear();this.validLineageEpoch++;this.configWindows=new ConfigStageWindows()
+    this.contexts.clear();this.validLineages.clear();this.configWindows=new ConfigStageWindows()
     this.childrenByLane.clear()
     this.groupKeys = new WeakMap()
     for (const lane of Object.values(this.state.lanes)) {
@@ -361,7 +357,6 @@ export class TradingEngine {
         lane.config = canonical
       } else if (!this.symbolConfigIds.get(lane.symbol)?.has(lane.configId)) continue
       if (lane.id !== laneKey(s.connectionId,lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage,this.coordinationIdentity(lane.coordination,lane.stage,lane.config,lane.symbol))) continue
-      (lane as RuntimeLaneState)[CURRENT_LANE_EPOCH]=this.currentLaneEpoch
       this.cacheLane(lane)
       if (this.branches && lane.parentProof && (lane.stage === "main" || lane.stage === "real")) this.registerChild(lane)
     }
@@ -467,14 +462,13 @@ export class TradingEngine {
     const id = laneKey(this.state.settings.connectionId, symbol, config, direction, coordination, stage, this.coordinationIdentity(coordination,stage,config,symbol))
     if (!this.state.lanes[id]) {
       this.state.lanes[id] = { id, symbol, configId: config.id, direction, coordination, stage, ...(this.calculationOnly(config,coordination,stage) ? {calculationOnly:true} : {}), config: Object.freeze(config), samples: [], closedCount: 0, wins: 0, netPnl: 0, grossProfit: 0, grossLoss: 0, lastTimestamp: 0, admissionCount: 0, costTotal:0,admittedClosed:0,admittedProfit:0,admittedLoss:0,admittedNetPnl:0 }
-      ;(this.state.lanes[id] as RuntimeLaneState)[CURRENT_LANE_EPOCH]=this.currentLaneEpoch
     }
     this.cacheLane(this.state.lanes[id])
     return this.state.lanes[id]
   }
   private validLineage(lane:LaneState|undefined):boolean{
     if(!lane)return false
-    if((lane as RuntimeLaneState)[VALID_LINEAGE_EPOCH]===this.validLineageEpoch)return true
+    if(this.validLineages.has(lane.id))return true
     const index=STAGES.indexOf(lane.stage),s=this.state.settings
     const scope=this.stageScope(lane.config)
     const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>{
@@ -500,7 +494,7 @@ export class TradingEngine {
         if (JSON.stringify(chain[i]) !== JSON.stringify(parent.parentProof?.[i])) return false
       }
     }
-    (lane as RuntimeLaneState)[VALID_LINEAGE_EPOCH]=this.validLineageEpoch
+    this.validLineages.add(lane.id)
     return true
   }
   private hasParentEvidence(symbol: string, config: StrategyConfig, direction: Direction, coordination: Coordination, stage: Stage,creation=false,before=Infinity,exact=false): boolean {
