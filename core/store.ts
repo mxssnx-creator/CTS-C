@@ -1,11 +1,14 @@
 import { DatabaseSync } from "node:sqlite"
 import {createHash} from 'node:crypto'
+import {deflateRawSync,inflateRawSync} from 'node:zlib'
 import { mkdirSync, chmodSync } from "node:fs"
 import path from "node:path"
 import type {EngineState,StrategyConfig} from "./types"
 
 export interface Intent { id: string; status: "reserved" | "accepted" | "rejected" | "unknown"; payload: Record<string, unknown>; result: Record<string, unknown> | null; createdAt: number; updatedAt: number }
 export interface RuntimeLease { owner: string; expiresAt: number; fence: number }
+const encodeLane=(data:string)=>'z1:'+deflateRawSync(Buffer.from(data),{level:1}).toString('base64')
+const decodeLane=(data:string)=>data.startsWith('z1:')?inflateRawSync(Buffer.from(data.slice(3),'base64')).toString():data
 export class StateStore {
   readonly database: DatabaseSync
   private loadedToken:string|null=null
@@ -52,14 +55,14 @@ export class StateStore {
       if(!payload?.state||!payload.configs||typeof payload.configs!=='object')throw new Error('Invalid compact checkpoint metadata')
       state={...payload.state,lanes:{}}
       for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){
-        const compact=JSON.parse(item.data),config=payload.configs[compact.configId] as StrategyConfig|undefined
+        const compact=JSON.parse(decodeLane(item.data)),config=payload.configs[compact.configId] as StrategyConfig|undefined
         if(!config||config.id!==compact.configId||'id' in compact||'config' in compact)throw new Error('Compact checkpoint lane identity mismatch')
         state.lanes[item.id]={...compact,id:item.id,config}
       }
     }else if(decoded.checkpointFormat==='lane-rows-v1'){
       state={...decoded.state,lanes:{}}
       for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){
-        const lane=JSON.parse(item.data);if(lane.id!==item.id)throw new Error('Checkpoint lane identity mismatch');state.lanes[item.id]=lane
+        const lane=JSON.parse(decodeLane(item.data));if(lane.id!==item.id)throw new Error('Checkpoint lane identity mismatch');state.lanes[item.id]=lane
       }
     }else state=decoded
     const configs=new Map<string,StrategyConfig>()
@@ -84,7 +87,7 @@ export class StateStore {
     const insert=this.database.prepare('INSERT INTO engine_lanes VALUES(?,?)')
     let batch:{id:string;data:string}[]=[],guardedAt=Date.now()
     const timelyGuard=()=>{if(Date.now()-guardedAt>=500){guard();guardedAt=Date.now()}}
-    const flush=()=>{if(!batch.length)return;guard();this.database.exec('BEGIN IMMEDIATE');try{for(const row of batch){timelyGuard();insert.run(row.id,row.data)}guard();this.database.exec('COMMIT')}catch(error){this.database.exec('ROLLBACK');throw error}batch=[]}
+    const flush=()=>{if(!batch.length)return;guard();this.database.exec('BEGIN IMMEDIATE');try{for(const row of batch){timelyGuard();insert.run(row.id,encodeLane(row.data))}guard();this.database.exec('COMMIT')}catch(error){this.database.exec('ROLLBACK');throw error}batch=[]}
     for(const lane of lanes){timelyGuard();batch.push(lane);if(batch.length>=500)flush()}
     flush();this.saveLaneCheckpoint(metadata,[],events,settings,guard)
   }
@@ -96,9 +99,12 @@ export class StateStore {
         // Serialization and large retained lane rows can take longer than a lease before 500 rows exist.
         // Check elapsed work as well as count; an expired/stolen owner still fails before the row is written.
         if(Date.now()-guardedAt>=500){guard();guardedAt=Date.now()}
-        insert.run(lane.id,lane.data);if(++count%500===0){guard();guardedAt=Date.now()}
+        insert.run(lane.id,encodeLane(lane.data));if(++count%500===0){guard();guardedAt=Date.now()}
       }
-      this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run('{"checkpointFormat":"lane-rows-v2","payload":'+metadata+'}',Date.now())
+      const parsedMetadata=JSON.parse(metadata)
+      const compact=parsedMetadata?.state&&parsedMetadata?.configs&&typeof parsedMetadata.configs==='object'
+      const checkpoint=compact?JSON.stringify({checkpointFormat:'lane-rows-v2',payload:parsedMetadata}):JSON.stringify({checkpointFormat:'lane-rows-v1',state:parsedMetadata})
+      this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run(checkpoint,Date.now())
       this.advanceEngineRevision()
       this.set('engine-settings',settings)
       const eventInsert=this.database.prepare('INSERT INTO events(data,created) VALUES(?,?)');for(const event of events)eventInsert.run(JSON.stringify(event),Date.now())
