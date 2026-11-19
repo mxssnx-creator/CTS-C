@@ -4,6 +4,7 @@ import {deflateRawSync,inflateRawSync} from 'node:zlib'
 import { mkdirSync, chmodSync } from "node:fs"
 import path from "node:path"
 import type {EngineState,StrategyConfig} from "./types"
+import { expandLaneV4 } from "./lane-checkpoint-codec"
 
 export interface Intent { id: string; status: "reserved" | "accepted" | "rejected" | "unknown"; payload: Record<string, unknown>; result: Record<string, unknown> | null; createdAt: number; updatedAt: number }
 export interface RuntimeLease { owner: string; expiresAt: number; fence: number }
@@ -40,7 +41,7 @@ export class StateStore {
   /** True only for the compact format. A v1 row checkpoint is migrated atomically on the next save. */
   hasLaneCheckpoint():boolean{
     const row=this.database.prepare("SELECT substr(data,1,80) AS prefix FROM records WHERE key='engine'").get() as {prefix:string}|undefined
-    return /^\{"checkpointFormat":"lane-rows-v[23]"/.test(row?.prefix??'')
+    return /^\{"checkpointFormat":"lane-rows-v[234]"/.test(row?.prefix??'')
   }
   loadEngineState():EngineState|null{
     const ownTransaction=!this.database.isTransaction
@@ -50,7 +51,16 @@ export class StateStore {
     if(!row){this.loadedToken=null;if(ownTransaction)this.database.exec('COMMIT');return null}
     const decoded=JSON.parse(row.data)
     let state:EngineState
-    if(decoded.checkpointFormat==='lane-rows-v3'){
+    if(decoded.checkpointFormat==='lane-rows-v4'){
+      const payload=decoded.payload
+      if(payload?.laneRowsVersion!==4||!payload.state||!payload.configs||typeof payload.configs!=='object')throw new Error('Invalid v4 checkpoint metadata')
+      state={...payload.state,lanes:{}}
+      for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){
+        const compact=JSON.parse(decodeLane(item.data)),config=payload.configs[compact.c] as StrategyConfig|undefined
+        if(!config)throw new Error('Missing v4 checkpoint config')
+        state.lanes[item.id]=expandLaneV4(compact,item.id,config)
+      }
+    }else if(decoded.checkpointFormat==='lane-rows-v3'){
       const payload=decoded.payload
       if(payload?.laneRowsVersion!==3||!payload.state||!payload.configs||typeof payload.configs!=='object')throw new Error('Invalid bounded checkpoint metadata')
       state={...payload.state,lanes:{}}
@@ -113,8 +123,9 @@ export class StateStore {
       }
       const parsedMetadata=JSON.parse(metadata)
       const compact=parsedMetadata?.state&&parsedMetadata?.configs&&typeof parsedMetadata.configs==='object'
-      const version=compact&&parsedMetadata.laneRowsVersion===3?3:compact?2:1
-      const checkpoint=version===3?JSON.stringify({checkpointFormat:'lane-rows-v3',payload:parsedMetadata})
+      const version=compact&&parsedMetadata.laneRowsVersion===4?4:compact&&parsedMetadata.laneRowsVersion===3?3:compact?2:1
+      const checkpoint=version===4?JSON.stringify({checkpointFormat:'lane-rows-v4',payload:parsedMetadata})
+        :version===3?JSON.stringify({checkpointFormat:'lane-rows-v3',payload:parsedMetadata})
         :version===2?JSON.stringify({checkpointFormat:'lane-rows-v2',payload:parsedMetadata})
         :JSON.stringify({checkpointFormat:'lane-rows-v1',state:parsedMetadata})
       this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run(checkpoint,Date.now())
