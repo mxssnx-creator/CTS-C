@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {StateStore} from '../core/store'
 import {TerminalRuntime} from '../core/runtime'
 import {TradingEngine} from '../core/engine'
+import {compactLaneV4} from '../core/lane-checkpoint-codec'
 
 test('a cold journal load longer than the ownership TTL occurs before ownership and unchanged state is reused',()=>{
  const now=Date.now;let clock=1_000_000;Date.now=()=>clock
@@ -25,8 +26,8 @@ test('a checkpoint changed after construction reloads outside ownership and is v
  const runtime=new TerminalRuntime('bingx-x02',store)
  try{
   const before=store.checkpointToken(),row=store.database.prepare('SELECT id FROM engine_lanes LIMIT 1').get() as {id:string},lane=persisted.lanes[row.id],oldNet=runtime.snapshot().stages.base.pf
-  lane.netPnl+=7;const {id:_id,config:_config,configId,...compact}=lane
-  store.saveLaneCheckpoint(metadata,[{id:row.id,data:JSON.stringify({...compact,c:configId})}],[],engine.settings,()=>{});assert.notEqual(store.checkpointToken(),before,'lane-only commits also change the checkpoint generation')
+  lane.netPnl+=7
+  store.saveLaneCheckpoint(metadata,[{id:row.id,data:JSON.stringify(compactLaneV4(lane))}],[],engine.settings,()=>{});assert.notEqual(store.checkpointToken(),before,'lane-only commits also change the checkpoint generation')
   runtime.pause();assert.equal(reads,2);assert.equal(runtime.snapshot().engine.processedCandles,120);assert.equal(runtime.snapshot().stages.base.pf,oldNet);assert.equal(runtime.snapshot().engine.lanes.find(l=>l.id===row.id)?.netPnl,lane.netPnl)
  }finally{runtime.shutdown();store.close();Date.now=now}
 })

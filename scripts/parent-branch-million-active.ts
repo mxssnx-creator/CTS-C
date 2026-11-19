@@ -119,7 +119,7 @@ const inspection = (() => {
   const lanes = raw.lanes
   const {lanes:_lanes,...state}=raw
   const v2Configs:Record<string,LaneState["config"]>={}
-  let v2RowsBytes=0
+  let v2RowsBytes=0,v3RowsBytes=0
   const laneIds = Object.keys(lanes)
   const byStage = { base: 0, main: 0, real: 0, live: 0 }
   const mainChildren = new Map<string, number>(), realChildren = new Map<string, number>()
@@ -127,9 +127,12 @@ const inspection = (() => {
   for (const lane of Object.values(lanes)) {
     byStage[lane.stage]++
     v2Configs[lane.configId]??=lane.config
-    const {id,config,...compact}=lane
-    const encoded="z1:"+deflateRawSync(Buffer.from(JSON.stringify(compact)),{level:1}).toString("base64")
-    v2RowsBytes+=Buffer.byteLength(id)+Buffer.byteLength(encoded)
+    const {id,config,...v2Mutable}=lane
+    const {configId,...mutable}=v2Mutable
+    const v2Encoded="z1:"+deflateRawSync(Buffer.from(JSON.stringify(v2Mutable)),{level:1}).toString("base64")
+    const v3Encoded="z1:"+deflateRawSync(Buffer.from(JSON.stringify({...mutable,c:configId})),{level:1}).toString("base64")
+    v2RowsBytes+=Buffer.byteLength(id)+Buffer.byteLength(v2Encoded)
+    v3RowsBytes+=Buffer.byteLength(id)+Buffer.byteLength(v3Encoded)
     const parent = lane.parentProof?.at(-1)?.laneId
     if (lane.stage !== "base" && (!parent || !lanes[parent])) missingParent++
     if (lane.stage === "main" && parent) mainChildren.set(parent, (mainChildren.get(parent) ?? 0) + 1)
@@ -139,10 +142,11 @@ const inspection = (() => {
   for (const count of mainChildren.values()) if (count !== width) childCountFailures++
   for (const count of realChildren.values()) if (count !== width) childCountFailures++
   const v2MetadataBytes=Buffer.byteLength(JSON.stringify({checkpointFormat:"lane-rows-v2",payload:{state,configs:v2Configs}}))
+  const v3MetadataBytes=Buffer.byteLength(JSON.stringify({checkpointFormat:"lane-rows-v3",payload:{laneRowsVersion:3,state,configs:v2Configs}}))
   return { byStage, missingParent, duplicateIds, childCountFailures, beforeDigest: digest(lanes),
-    v2CheckpointBytes:v2MetadataBytes+v2RowsBytes }
+    v2CheckpointBytes:v2MetadataBytes+v2RowsBytes,v3CheckpointBytes:v3MetadataBytes+v3RowsBytes }
 })()
-const { byStage, missingParent, duplicateIds, childCountFailures, beforeDigest, v2CheckpointBytes } = inspection
+const { byStage, missingParent, duplicateIds, childCountFailures, beforeDigest, v2CheckpointBytes, v3CheckpointBytes } = inspection
 global.gc?.()
 const clearIndex=(value:unknown)=>(value as {clear():void}).clear()
 const profileDerivedIndex=(name:string,drop:(engine:Record<string,unknown>)=>void)=>{
@@ -193,9 +197,11 @@ const summary = {
   expectedRealChildren: roots * width ** 3,
   processedCandlesBeforeRestart: checkpoints.at(-1)?.candles ?? 0,
   activeBeforeRestart: active, stagesBeforeRestart: counts, stageObjectCounts: byStage,
-  fullSerializedBytes, v2CheckpointBytes, compactCheckpointBytes, compactRatio: compactCheckpointBytes / fullSerializedBytes,
-  configRefSavingsBytes:v2CheckpointBytes-compactCheckpointBytes,
-  configRefSavingsRatio:(v2CheckpointBytes-compactCheckpointBytes)/v2CheckpointBytes,
+  fullSerializedBytes, v2CheckpointBytes, v3CheckpointBytes, compactCheckpointBytes, compactRatio: compactCheckpointBytes / fullSerializedBytes,
+  configRefSavingsBytes:v2CheckpointBytes-v3CheckpointBytes,
+  configRefSavingsRatio:(v2CheckpointBytes-v3CheckpointBytes)/v2CheckpointBytes,
+  laneRowSavingsBytes:v3CheckpointBytes-compactCheckpointBytes,
+  laneRowSavingsRatio:(v3CheckpointBytes-compactCheckpointBytes)/v3CheckpointBytes,
   materializeSeconds: (materializedAt - started) / 1000,
   compactSaveSeconds: (compactSaveAt - compactSaveStarted) / 1000,
   restoreSeconds: (restoredAt - restoreStarted) / 1000,
@@ -208,6 +214,7 @@ const summary = {
     activeRssDeltaBytes: active ? Math.round(activeRssDelta * TARGET / active) : null,
     fullSerializedBytes: active ? Math.round(fullSerializedBytes * TARGET / active) : null,
     v2CheckpointBytes: active ? Math.round(v2CheckpointBytes * TARGET / active) : null,
+    v3CheckpointBytes: active ? Math.round(v3CheckpointBytes * TARGET / active) : null,
     compactCheckpointBytes: active ? Math.round(compactCheckpointBytes * TARGET / active) : null,
   },
   digestBeforeRestart: beforeDigest, digestAfterRestart: afterDigest, lineageStorage, derivedIndexProfiles, retainedCurrentLaneIndex,
@@ -226,6 +233,7 @@ assert.equal(lineageStorage.sharedRecursiveProofPrefixes,lineageStorage.recursiv
 assert.ok(lineageStorage.uniqueProofObjects<lineageStorage.proofReferences)
 assert.ok(compactCheckpointBytes < fullSerializedBytes * .8, `compact checkpoint ratio was ${compactCheckpointBytes/fullSerializedBytes}`)
 assert.ok(compactCheckpointBytes<v2CheckpointBytes, `bounded checkpoint ${compactCheckpointBytes} did not improve v2 ${v2CheckpointBytes}`)
+assert.ok(compactCheckpointBytes<v3CheckpointBytes, `compact lane rows ${compactCheckpointBytes} did not improve v3 ${v3CheckpointBytes}`)
 assert.equal(beforeDigest, afterDigest)
 assert.equal(retainedCurrentLaneIndex,false)
 assert.equal(totalCurrent(restoredCounts), active)
@@ -234,5 +242,6 @@ console.log(JSON.stringify({ active, targetMet, byStage, width, materializeSecon
   compactSaveSeconds: summary.compactSaveSeconds, restoreSeconds: summary.restoreSeconds, sustainedSeconds: summary.sustainedSeconds,
   rssMiB: summary.finalMemory.rss / 2 ** 20, heapMiB: summary.finalMemory.heapUsed / 2 ** 20,
   fullSerializedMiB: fullSerializedBytes / 2 ** 20, v2CheckpointMiB:v2CheckpointBytes / 2 ** 20,
-  compactCheckpointMiB: compactCheckpointBytes / 2 ** 20, compactRatio: summary.compactRatio,
-  configRefSavingsBytes:summary.configRefSavingsBytes, configRefSavingsRatio:summary.configRefSavingsRatio, lineageStorage, derivedIndexProfiles, retainedCurrentLaneIndex, missingParent, childCountFailures, pendingIntents }))
+  v3CheckpointMiB:v3CheckpointBytes / 2 ** 20, compactCheckpointMiB: compactCheckpointBytes / 2 ** 20, compactRatio: summary.compactRatio,
+  configRefSavingsBytes:summary.configRefSavingsBytes, configRefSavingsRatio:summary.configRefSavingsRatio,
+  laneRowSavingsBytes:summary.laneRowSavingsBytes,laneRowSavingsRatio:summary.laneRowSavingsRatio,lineageStorage, derivedIndexProfiles, retainedCurrentLaneIndex, missingParent, childCountFailures, pendingIntents }))

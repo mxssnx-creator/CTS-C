@@ -14,6 +14,7 @@ import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals,
 import { describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { isFixedTrailing, observedExit } from "./exits"
 import { ConfigStageWindows, type WindowEvidence } from "./config-stage-windows"
+import { compactLaneV4 } from "./lane-checkpoint-codec"
 import type { Candle, ClosedTrade, Coordination, Direction, EngineEvent, EngineSettings, EngineSnapshot, EngineState, ExecutionIntent, LaneState, PaperPosition, Stage, StageWindowScope, StrategyConfig,GateProof } from "./types"
 
 export const STAGES: Stage[] = ["base", "main", "real", "live"]
@@ -214,13 +215,10 @@ export class TradingEngine {
     const {lanes,...state}=this.state
     const configs:Record<string,StrategyConfig>={}
     for(const lane of Object.values(lanes))configs[lane.configId]??=lane.config
-    return JSON.stringify({laneRowsVersion:3,state,configs})
+    return JSON.stringify({laneRowsVersion:4,state,configs})
   }
   *checkpointLanes(all=false):Generator<{id:string;data:string}>{
-    const compact=(lane:LaneState)=>{
-      const {id:_id,config:_config,configId,...state}=lane
-      return JSON.stringify({...state,c:configId})
-    }
+    const compact=(lane:LaneState)=>JSON.stringify(compactLaneV4(lane))
     if(all){for(const id in this.state.lanes)yield {id,data:compact(this.state.lanes[id])}}
     else for(const id of this.dirtyLaneIds)yield {id,data:compact(this.state.lanes[id])}
   }

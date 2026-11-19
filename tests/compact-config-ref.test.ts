@@ -25,7 +25,7 @@ test("v3 lane rows replace repeated config ids with stable bounded references an
   const expected=JSON.parse(engine.serializeState()) as EngineState
   const metadata=engine.checkpointMetadata(),envelope=JSON.parse(metadata)
   const rows=[...engine.checkpointLanes(true)]
-  assert.equal(envelope.laneRowsVersion,3)
+  assert.equal(envelope.laneRowsVersion,4)
   assert.ok(rows.length>20)
   for(const row of rows){
     const compact=JSON.parse(row.data)
@@ -48,7 +48,7 @@ test("v3 lane rows replace repeated config ids with stable bounded references an
   const store=new StateStore(":memory:")
   store.migrateLaneCheckpoint(metadata,rows,[],engine.settings,()=>{})
   const stored=store.database.prepare("SELECT data FROM records WHERE key='engine'").get() as {data:string}
-  assert.match(stored.data,/^\{"checkpointFormat":"lane-rows-v3"/)
+  assert.match(stored.data,/^\{"checkpointFormat":"lane-rows-v4"/)
   const storedRows=store.database.prepare("SELECT id,data FROM engine_lanes").all() as {id:string;data:string}[]
   const v3Bytes=Buffer.byteLength(stored.data)+storedRows.reduce((n,row)=>n+Buffer.byteLength(row.id)+Buffer.byteLength(row.data),0)
   assert.ok(v3Bytes<v2MetadataBytes+v2RowsBytes, `v3 ${v3Bytes} did not improve v2 ${v2MetadataBytes+v2RowsBytes}`)
