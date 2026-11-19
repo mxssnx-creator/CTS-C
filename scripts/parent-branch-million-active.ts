@@ -127,8 +127,9 @@ const inspection = (() => {
   for (const lane of Object.values(lanes)) {
     byStage[lane.stage]++
     v2Configs[lane.configId]??=lane.config
-    const {id,config,configId,...mutable}=lane
-    const v2Encoded="z1:"+deflateRawSync(Buffer.from(JSON.stringify({...mutable,configId})),{level:1}).toString("base64")
+    const {id,config,...v2Mutable}=lane
+    const {configId,...mutable}=v2Mutable
+    const v2Encoded="z1:"+deflateRawSync(Buffer.from(JSON.stringify(v2Mutable)),{level:1}).toString("base64")
     const v3Encoded="z1:"+deflateRawSync(Buffer.from(JSON.stringify({...mutable,c:configId})),{level:1}).toString("base64")
     v2RowsBytes+=Buffer.byteLength(id)+Buffer.byteLength(v2Encoded)
     v3RowsBytes+=Buffer.byteLength(id)+Buffer.byteLength(v3Encoded)
