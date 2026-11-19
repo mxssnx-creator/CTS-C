@@ -114,27 +114,37 @@ const compactRows = compactStore.database.prepare("SELECT COALESCE(SUM(length(id
 const compactCheckpointBytes = compactRecord.bytes + compactRows.bytes
 const laneIdBytes=(compactStore.database.prepare("SELECT COALESCE(SUM(length(id)),0) AS bytes FROM engine_lanes").get() as {bytes:number}).bytes
 const laneStorageLayout=(()=>{
-  const rowid=new DatabaseSync(":memory:"),bounded=new DatabaseSync(":memory:")
+  const rowid=new DatabaseSync(":memory:"),bounded=new DatabaseSync(":memory:"),normalized=new DatabaseSync(":memory:")
   rowid.exec("CREATE TABLE engine_lanes(id TEXT PRIMARY KEY,data TEXT NOT NULL); BEGIN")
   bounded.exec("CREATE TABLE engine_lanes(id TEXT PRIMARY KEY,data TEXT NOT NULL) WITHOUT ROWID; BEGIN")
+  normalized.exec(`CREATE TABLE engine_lane_ids(id TEXT PRIMARY KEY,ref INTEGER NOT NULL UNIQUE) WITHOUT ROWID;
+    CREATE TABLE engine_lanes(ref INTEGER PRIMARY KEY,data TEXT NOT NULL); BEGIN`)
   const rowidInsert=rowid.prepare("INSERT INTO engine_lanes VALUES(?,?)")
   const boundedInsert=bounded.prepare("INSERT INTO engine_lanes VALUES(?,?)")
-  for(const lane of compactStore.database.prepare("SELECT id,data FROM engine_lanes").iterate() as Iterable<{id:string;data:string}>){
+  const normalizedIdInsert=normalized.prepare("INSERT INTO engine_lane_ids VALUES(?,?)")
+  const normalizedDataInsert=normalized.prepare("INSERT INTO engine_lanes VALUES(?,?)")
+  let ref=0
+  for(const lane of compactStore.database.prepare("SELECT id,data FROM engine_lanes ORDER BY id").iterate() as Iterable<{id:string;data:string}>){
     rowidInsert.run(lane.id,lane.data);boundedInsert.run(lane.id,lane.data)
+    normalizedIdInsert.run(lane.id,++ref);normalizedDataInsert.run(ref,lane.data)
   }
-  rowid.exec("COMMIT");bounded.exec("COMMIT")
+  rowid.exec("COMMIT");bounded.exec("COMMIT");normalized.exec("COMMIT")
   const liveBytes=(database:DatabaseSync)=>{
     const page=(database.prepare("PRAGMA page_count").get() as {page_count:number}).page_count
     const free=(database.prepare("PRAGMA freelist_count").get() as {freelist_count:number}).freelist_count
     const size=(database.prepare("PRAGMA page_size").get() as {page_size:number}).page_size
     return (page-free)*size
   }
-  const rowidBytes=liveBytes(rowid),withoutRowidBytes=liveBytes(bounded)
+  const rowidBytes=liveBytes(rowid),withoutRowidBytes=liveBytes(bounded),normalizedBytes=liveBytes(normalized)
   const rowidIndexes=(rowid.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='index' AND tbl_name='engine_lanes'").get() as {count:number}).count
   const withoutRowidIndexes=(bounded.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='index' AND tbl_name='engine_lanes'").get() as {count:number}).count
-  rowid.close();bounded.close()
-  return {laneIdBytes,rowidBytes,withoutRowidBytes,savingsBytes:rowidBytes-withoutRowidBytes,
-    savingsRatio:(rowidBytes-withoutRowidBytes)/rowidBytes,rowidIndexes,withoutRowidIndexes}
+  const normalizedIndexes=(normalized.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='index' AND tbl_name IN ('engine_lane_ids','engine_lanes')").get() as {count:number}).count
+  rowid.close();bounded.close();normalized.close()
+  return {laneIdBytes,rowidBytes,withoutRowidBytes,normalizedBytes,
+    withoutRowidDeltaBytes:rowidBytes-withoutRowidBytes,
+    normalizedSavingsBytes:rowidBytes-normalizedBytes,
+    normalizedSavingsRatio:(rowidBytes-normalizedBytes)/rowidBytes,
+    rowidIndexes,withoutRowidIndexes,normalizedIndexes}
 })()
 engine = null
 global.gc?.()
@@ -259,8 +269,10 @@ assert.ok(lineageStorage.uniqueProofObjects<lineageStorage.proofReferences)
 assert.ok(compactCheckpointBytes < fullSerializedBytes * .8, `compact checkpoint ratio was ${compactCheckpointBytes/fullSerializedBytes}`)
 assert.ok(compactCheckpointBytes<v2CheckpointBytes, `bounded checkpoint ${compactCheckpointBytes} did not improve v2 ${v2CheckpointBytes}`)
 assert.ok(compactCheckpointBytes<v3CheckpointBytes, `compact lane rows ${compactCheckpointBytes} did not improve v3 ${v3CheckpointBytes}`)
-assert.ok(laneStorageLayout.withoutRowidBytes<laneStorageLayout.rowidBytes,
-  `WITHOUT ROWID lane table ${laneStorageLayout.withoutRowidBytes} did not improve rowid table ${laneStorageLayout.rowidBytes}`)
+assert.ok(laneStorageLayout.withoutRowidBytes>laneStorageLayout.rowidBytes,
+  `rejected WITHOUT ROWID prototype unexpectedly improved rowid table`)
+assert.ok(laneStorageLayout.normalizedBytes<laneStorageLayout.rowidBytes,
+  `normalized lane table ${laneStorageLayout.normalizedBytes} did not improve rowid table ${laneStorageLayout.rowidBytes}`)
 assert.equal(laneStorageLayout.rowidIndexes,1)
 assert.equal(laneStorageLayout.withoutRowidIndexes,0)
 assert.equal(beforeDigest, afterDigest)
