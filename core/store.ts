@@ -24,22 +24,9 @@ export class StateStore {
       CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS intents(id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL, result TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS engine_lanes(id TEXT PRIMARY KEY,data TEXT NOT NULL) WITHOUT ROWID;
+      CREATE TABLE IF NOT EXISTS engine_lanes(id TEXT PRIMARY KEY,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runtime_lease(name TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL, fence INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS intents_status_created ON intents(status,created);
-    `)
-    this.migrateLaneStorage()
-  }
-  private migrateLaneStorage():void {
-    const row=this.database.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='engine_lanes'").get() as {sql:string}|undefined
-    if(!row||/\\bWITHOUT ROWID\\b/i.test(row.sql))return
-    this.database.exec(`
-      BEGIN IMMEDIATE;
-      ALTER TABLE engine_lanes RENAME TO engine_lanes_rowid_legacy;
-      CREATE TABLE engine_lanes(id TEXT PRIMARY KEY,data TEXT NOT NULL) WITHOUT ROWID;
-      INSERT INTO engine_lanes(id,data) SELECT id,data FROM engine_lanes_rowid_legacy;
-      DROP TABLE engine_lanes_rowid_legacy;
-      COMMIT;
     `)
   }
   saveTradeBar(symbol:string,bar:import('./trade-stream').TradeBar):void{
