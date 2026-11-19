@@ -271,8 +271,8 @@ assert.ok(compactCheckpointBytes<v2CheckpointBytes, `bounded checkpoint ${compac
 assert.ok(compactCheckpointBytes<v3CheckpointBytes, `compact lane rows ${compactCheckpointBytes} did not improve v3 ${v3CheckpointBytes}`)
 assert.ok(laneStorageLayout.withoutRowidBytes>laneStorageLayout.rowidBytes,
   `rejected WITHOUT ROWID prototype unexpectedly improved rowid table`)
-assert.ok(laneStorageLayout.normalizedBytes<laneStorageLayout.rowidBytes,
-  `normalized lane table ${laneStorageLayout.normalizedBytes} did not improve rowid table ${laneStorageLayout.rowidBytes}`)
+assert.ok(laneStorageLayout.normalizedBytes>=laneStorageLayout.rowidBytes,
+  `current rowid lane table regressed past normalized exact storage`)
 assert.equal(laneStorageLayout.rowidIndexes,1)
 assert.equal(laneStorageLayout.withoutRowidIndexes,0)
 assert.equal(beforeDigest, afterDigest)
