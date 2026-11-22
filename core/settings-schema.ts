@@ -13,6 +13,7 @@ import { DEFAULT_STEP_AUTO } from "./step-evidence"
 import { DEFAULT_RELATE } from "./relate"
 import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
+import { MAX_WARMUP_CANDLES } from "./history"
 
 export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"]
 export const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
@@ -106,7 +107,7 @@ const ENUM_FIELDS: Record<string, readonly string[]> = { autoPfMode:["set-histor
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
-  { key: "historyCandles", label: "Warm-up candles per symbol", min: 100, max: 4320, step: 1 },
+  { key: "historyCandles", label: "Warm-up candles per symbol", min: 100, max: MAX_WARMUP_CANDLES, step: 1 },
   { key: "baseNotional", label: "Base notional (USDT)", min: 0.000001, max: 1_000_000_000, step: 0.000001 },
   { key: "volumeFactor", label: "Volume factor", min: 0.000001, max: 100, step: 0.000001 },
 ]

@@ -88,7 +88,8 @@ export class ParentBranches {
 
   choices(stage: ChildStage, previous: Coordination): readonly Coordination[] {
     const choices = this.coordinations[stage]
-    return choices?.length ? choices : [previous]
+    if (choices?.length) return choices
+    return this.exec ? BRANCH_COORDINATIONS : [previous]
   }
 
   get(id: string) { return this.configs.get(id) }

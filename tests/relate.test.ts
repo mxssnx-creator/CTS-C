@@ -73,3 +73,13 @@ test("Relate's Real allocation and exact Live mirror survive a checkpoint withou
   assert.equal(seen.get(.5), 2)
   assert.equal(seen.get(1), 1)
 })
+test("Relate increases volume only when its own recent PF clears the disjoint Auto PF floor", () => {
+  const settings = {...DEFAULT_RELATE,enabled:true,lastN:60,minTrades:60}
+  const config = {...generateStrategyCatalog("test",{strategyTpSteps:[3],strategySlRatios:[.5],strategyExitModes:["fixed"]})[0],
+    autoPfPolicy:{fallback:1.1,minSamples:16,history:40,adjustment:.75,cap:2}}
+  const recent = [...Array<number>(33).fill(1),...Array<number>(27).fill(-1)]
+  const weak = [...recent,...Array<number>(16).fill(-1)]
+  assert.ok(relateAllocation(recent,config,settings,recent.length)>1)
+  assert.equal(relateAllocation(weak,config,settings,weak.length),1)
+  assert.ok(relateAllocation(weak,config,settings,weak.length-1)>1,"untimed older returns leave the fallback in force")
+})

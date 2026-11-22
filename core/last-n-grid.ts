@@ -9,7 +9,8 @@ export type LastNGrid = Partial<Record<LegacyEvaluationStage, readonly number[]>
 export type ConfigLastN = Partial<Record<LegacyEvaluationStage, number>>
 
 export const EXEC_LONG_COUNTS = [10, 20, 30, 40, 50] as const
-export const EXEC_SHORT_COUNTS = [4, 8, 12, 16] as const
+const DEFAULT_SHORT_COUNTS = [4, 8, 12, 16] as const
+const EXEC_SHORT_COUNTS = [...DEFAULT_SHORT_COUNTS, 20, 24, 28, 30] as const
 export const EXEC_LAST_COUNTS = [1, 2, 3, 4, 5] as const
 export const EXEC_LONG_MODES = ["none", "inherit"] as const
 export const EXEC_OUTCOMES = ["positive", "negative"] as const
@@ -18,9 +19,13 @@ export const DEFAULT_EXEC_MIN_PF = 1.1
 type ShortLast = { short: readonly number[]; last: readonly number[]; shortOutcomes?: readonly Polarity[]; lastOutcomes?: readonly Polarity[] }
 export type ExecWindows = { base: ShortLast & { long: readonly number[] } } &
   Record<Exclude<EvaluationStage, "base">, ShortLast & { long: readonly typeof EXEC_LONG_MODES[number][] }>
-const shortLast = { short: EXEC_SHORT_COUNTS, last: EXEC_LAST_COUNTS }
+const shortLast = { short: DEFAULT_SHORT_COUNTS, last: EXEC_LAST_COUNTS }
 const inherited = { ...shortLast, long: EXEC_LONG_MODES }
 export const DEFAULT_EXEC_WINDOWS: ExecWindows = { base: { ...shortLast, long: EXEC_LONG_COUNTS }, main: inherited, real: inherited, exec: inherited }
+
+export function stageShortCounts(stage: EvaluationStage): readonly number[] {
+  return stage === "exec" ? EXEC_SHORT_COUNTS : DEFAULT_SHORT_COUNTS
+}
 
 export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindows {
   function record(value: unknown): Record<string, unknown> {
@@ -41,16 +46,18 @@ export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindo
   for (const stage of EXEC_EVALUATION_STAGES) {
     const fields = record(input[stage])
     if (Object.keys(fields).some(name => !["long","short","last","shortOutcomes","lastOutcomes"].includes(name))) throw new Error("Invalid Exec window block")
-    const short = choices(fields.short, EXEC_SHORT_COUNTS), last = choices(fields.last, EXEC_LAST_COUNTS)
+    const short = fields.short === undefined ? DEFAULT_SHORT_COUNTS : choices(fields.short, stageShortCounts(stage))
+    const last = choices(fields.last, EXEC_LAST_COUNTS)
     const windows: ShortLast = { short,last,
       ...(fields.shortOutcomes!==undefined&&{shortOutcomes:choices(fields.shortOutcomes,EXEC_OUTCOMES)}),
       ...(fields.lastOutcomes!==undefined&&{lastOutcomes:choices(fields.lastOutcomes,EXEC_OUTCOMES)}),
     }
-    if (!short.some(n=>execShortOutcomes(windows,n).length)) throw new Error(`Exec ${stage} needs a compatible Short size and outcome`)
+    const longestShort = short.findLast(n=>execShortOutcomes(windows,n).length)
+    if (longestShort === undefined) throw new Error(`Exec ${stage} needs a compatible Short size and outcome`)
     if (stage === "base") result.base = { ...windows, long: choices(fields.long, EXEC_LONG_COUNTS) }
     else result[stage] = { ...windows, long: choices(fields.long, EXEC_LONG_MODES) }
     const baseLong = stage === "base" || result[stage].long.includes("inherit") ? Math.max(...result.base.long) : 0
-    if (baseLong + Math.max(...short) + Math.max(...last) > maxSamples) throw new Error(`Exec ${stage} windows exceed retained samples`)
+    if (baseLong + longestShort + Math.max(...last) > maxSamples) throw new Error(`Exec ${stage} windows exceed retained samples`)
   }
   return result
 }

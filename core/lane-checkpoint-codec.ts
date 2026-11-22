@@ -8,7 +8,7 @@ const LANE_KEYS:Record<string,string>={
   netPnl:"p",grossProfit:"f",grossLoss:"l",sampleTimes:"m",untimedSamplesThrough:"u",
   open:"x",admittedAt:"h",lastTimestamp:"t",admissionCount:"q",costTotal:"k",
   admittedClosed:"ec",admittedProfit:"ep",admittedLoss:"el",admittedNetPnl:"en",
-  executed:"ex",
+  executed:"ex",postStage:"ps",
 }
 const PROOF_KEYS:Record<string,string>={
   stage:"g",laneId:"i",count:"n",required:"r",minPF:"m",profitFactor:"p",pfState:"s",

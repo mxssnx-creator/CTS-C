@@ -1,4 +1,5 @@
 import { stepVerdict } from "./step-evidence"
+import { autoPfEvidence, autoPfMinimum } from "./auto-pf"
 import type { RelateSettings, StrategyConfig } from "./types"
 
 export const DEFAULT_RELATE: RelateSettings = {
@@ -7,11 +8,12 @@ export const DEFAULT_RELATE: RelateSettings = {
 }
 
 /** CTS-G's winning-run add policy applied to the exact prior Set tape. */
-export function relateAllocation(samples: readonly number[], config: StrategyConfig, policy: RelateSettings): number {
+export function relateAllocation(samples: readonly number[], config: StrategyConfig, policy: RelateSettings, timedCount = 0): number {
   if (!policy.enabled || config.exitMode === "trailing-only" || config.exitMode === "trailing-only-fixed" ||
     !(config.takeprofit > 0 && config.stoploss > 0 && config.stoploss <= config.takeprofit * policy.maxSlRatio + 1e-12)) return 1
+  const autoPf = autoPfMinimum(config.autoPfPolicy,autoPfEvidence(config.autoPfPolicy,samples,policy.lastN,timedCount))
   const verdict = stepVerdict(samples, 1, {
-    enabled: true, lastN: policy.lastN, minSamples: policy.minTrades, minPF: Math.max(policy.minPF, config.autoPfFloor ?? 0),
+    enabled: true, lastN: policy.lastN, minSamples: policy.minTrades, minPF: Math.max(policy.minPF, config.autoPfFloor ?? 0, autoPf),
   })
   if (verdict.state !== "qualified") return 1
   let wins = 0

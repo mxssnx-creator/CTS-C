@@ -8,7 +8,7 @@ import {normalizedVolumeFactor,relationalVolumeSettings,SYSTEM_VOLUME_DIVISOR} f
 import { strategyProcessing } from "./strategy-processing"
 import { createHash } from "node:crypto"
 import { generateStrategyCatalog } from "./catalog"
-import { ParentBranches, checkStageCoordinations } from "./stage-branches"
+import { BRANCH_COORDINATIONS as COORDINATIONS, ParentBranches, checkStageCoordinations } from "./stage-branches"
 import { checkExecWindows, checkLastNGrid, DEFAULT_EXEC_MIN_PF, EXEC_EVALUATION_STAGES, LAST_N_STAGES, lastNVariantCount, type EvaluationStage } from "./last-n-grid"
 import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals, newSignalState } from "./replay"
 import { describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
@@ -21,7 +21,6 @@ import type { Candle, ClosedTrade, Coordination, Direction, EngineEvent, EngineS
 export const STAGES: readonly Stage[] = [...EXEC_EVALUATION_STAGES, "live"]
 const LEGACY_STAGES = [...LAST_N_STAGES, "live"] as const
 const STAGE_INDEX:Record<Stage,number>={base:0,main:1,real:2,exec:3,live:4}
-const COORDINATIONS = ["normal", "axis", "block", "dca", "relate"] as const
 const COORDINATION_INDEX:Record<Coordination,number>={normal:0,axis:1,block:2,dca:3,relate:4}
 type LaneContext=(LaneState|undefined)[]
 const contextIndex=(direction:Direction,coordination:Coordination,stage:Stage)=>
@@ -130,6 +129,7 @@ const sharedBlockPrefixes = new WeakMap<number[], BlockPrefix>()
 const emptySamples = Object.freeze([]) as unknown as number[]
 const mirrorWindow: WindowResult = { count:0,required:0,minPF:0,profit:0,loss:0,enoughSamples:false,profitFactor:null,pfState:"empty",qualified:false }
 const axisCache=new WeakMap<WindowEvidence,{closed:number;samples:number[];length:number;head:number|undefined;previous:number;last:number;outcome:string;threshold:number;allowed:boolean}>()
+const sameProof = (one: GateProof, other: GateProof) => one === other || JSON.stringify(one) === JSON.stringify(other)
 function gatePrefix(samples:number[],required:number):BlockPrefix {
   const cached = sharedBlockPrefixes.get(samples)
   if (cached && cached.n>=Math.min(samples.length,required)) return cached
@@ -412,10 +412,15 @@ export class TradingEngine {
     if(!lane?.open?.executionEligible||!this.currentLane(lane)||!this.processingAllows(lane))return false
     if (lane.config.branch?.windows) {
       const exec = this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,"exec")
-      const proof = lane.open.admission?.at(-1)
-      return Boolean(exec?.open?.executed && lane.open.parentPositionId === exec.open.id &&
-        proof?.stage === "exec" && proof.laneId === exec.id && proof.qualified && proof.count===proof.required &&
-        proof.checkedAt===lane.open.openedAt && exec.open.executionProof?.minPF===proof.minPF)
+      const {open} = lane
+      const parent = exec?.open, admission = open.admission
+      const proof = parent?.executionProof, prefix = parent?.admission
+      if (!exec || !parent?.executed || open.parentPositionId !== parent.id || parent.openedAt !== open.openedAt ||
+          !admission || admission.length !== STAGE_INDEX.live || !prefix || prefix.length !== STAGE_INDEX.exec ||
+          !proof || proof.stage !== "exec" || proof.laneId !== exec.id || !this.validLineage(lane)) return false
+      return admission.every((item,index)=>item.checkedAt===open.openedAt&&item.laneId===lane.parentProof![index].laneId&&
+        sameProof(item,index===STAGE_INDEX.exec?proof:prefix[index])&&
+        this.validGateProof(item,lane.config,EXEC_EVALUATION_STAGES[index],"context"))
     }
     if(this.realMirror){const real=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,'real');if(!lane.open.parentPositionId||real?.open?.id!==lane.open.parentPositionId)return false}
     return this.hasParentEvidence(lane.symbol,lane.config,lane.direction,lane.coordination,"live",false,before,true)&&(lane.coordination!=="axis"||this.axisAllows(lane.symbol,lane.config,lane.direction,"live",before))
@@ -486,8 +491,8 @@ export class TradingEngine {
     const axisWindow = lane.coordination === "normal" && s.coordinations.axis.enabled&&(s.coordinations.axis.reference!=='base'||lane.stage==='base')
       ? s.coordinations.axis.previous + s.coordinations.axis.last : 0
     const relateWindow = lane.coordination === "relate" && lane.stage !== "base" ? s.coordinations.relate?.lastN ?? 0 : 0
-    const adaptiveWindow = Math.max(gateWindow, axisWindow) + (lane.config.autoPfPolicy?.history ?? 0)
-    return Math.min(s.maxSamples, Math.max(adaptiveWindow, relateWindow)) + 1
+    const retained = Math.max(gateWindow, axisWindow, relateWindow) + (lane.config.autoPfPolicy?.history ?? 0)
+    return Math.min(s.maxSamples, retained) + 1
   }
   private trimSamples(lane:LaneState):void {
     const retained=this.sampleRetention(lane)
@@ -572,6 +577,21 @@ export class TradingEngine {
     this.cacheLane(this.state.lanes[id])
     return this.state.lanes[id]
   }
+  private validGateProof(proof: GateProof, config: StrategyConfig, source: EvaluationStage, scope: StageWindowScope): boolean {
+    const { required, blocks, minPF } = this.stageWindowPolicy(config,source)
+    if (!validAutoPfEvidence(config.autoPfPolicy,proof.autoPf)) return false
+    const floor = Math.max(minPF,config.autoPfFloor??0,autoPfMinimum(config.autoPfPolicy,proof.autoPf))
+    const cap = config.maxWindowDrawdownPct
+    if (proof.stage!==source||!proof.qualified||(proof.windowScope??"context")!==scope||
+        !Number.isFinite(proof.checkedAt)||proof.checkedAt<=0||typeof proof.profitFactor!=="number"||
+        !Number.isFinite(proof.profitFactor)||proof.profitFactor<floor||proof.minPF!==floor||
+        proof.count!==proof.required||proof.required!==(blocks?blockRequired(blocks):required)||
+        (proof.blockPolicyKey??null)!==(blocks?blockPolicyKey(blocks):null)||(proof.maxDrawdownPct??0)!==(cap??0)) return false
+    if (cap!==undefined&&(!Number.isFinite(proof.drawdownPct)||proof.drawdownPct!<0||proof.drawdownPct!>cap)) return false
+    const wide = proof.configWindow
+    return scope!=="both"||Boolean(wide?.qualified&&wide.count===proof.required&&
+      typeof wide.profitFactor==="number"&&Number.isFinite(wide.profitFactor)&&wide.profitFactor>=floor)
+  }
   private validLineage(lane:LaneState|undefined):boolean{
     if(!lane)return false
     if(this.validLineages.has(lane.id))return true
@@ -580,26 +600,16 @@ export class TradingEngine {
     const scope=this.stageScope(lane.config)
     const valid=index===0||Boolean(lane.parentProof?.length===index&&lane.parentProof.every((proof,i)=>{
       const source=stages[i] as EvaluationStage
-      const { required, blocks, minPF } = this.stageWindowPolicy(lane.config, source)
       const parent=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,source)
-      if (!validAutoPfEvidence(lane.config.autoPfPolicy,proof.autoPf)) return false
-      const floor=Math.max(minPF,lane.config.autoPfFloor??0,autoPfMinimum(lane.config.autoPfPolicy,proof.autoPf)),cap=lane.config.maxWindowDrawdownPct
-      if(!parent||proof.stage!==source||proof.laneId!==parent.id||!proof.qualified||(proof.windowScope??"context")!==scope||
-        !Number.isFinite(proof.checkedAt)||proof.checkedAt<=0||typeof proof.profitFactor!=="number"||
-        !Number.isFinite(proof.profitFactor)||proof.profitFactor<floor||proof.minPF!==floor||
-        proof.count!==proof.required||proof.required!==(blocks?blockRequired(blocks):required)||
-        (proof.blockPolicyKey??null)!==(blocks?blockPolicyKey(blocks):null)||(proof.maxDrawdownPct??0)!==(cap??0))return false
-      if(cap!==undefined&&(!Number.isFinite(proof.drawdownPct)||proof.drawdownPct!<0||proof.drawdownPct!>cap))return false
-      const wide=proof.configWindow
-      return scope!=="both"||Boolean(wide?.qualified&&wide.count===proof.required&&
-        typeof wide.profitFactor==="number"&&Number.isFinite(wide.profitFactor)&&wide.profitFactor>=floor)
+      return !!parent && proof.laneId===parent.id && this.validGateProof(proof,lane.config,source,scope)
     }))
     if (!valid) return false
     if (this.branches && index > 0) {
       const chain = lane.parentProof!, last = chain[index-1], parent = this.state.lanes[last.laneId]
       if (!this.validLineage(parent) || chain.some((p,i) => i > 0 && p.checkedAt < chain[i-1].checkedAt)) return false
       for (let i=0; i<index-1; i++) {
-        if (JSON.stringify(chain[i]) !== JSON.stringify(parent.parentProof?.[i])) return false
+        const previous = parent.parentProof?.[i]
+        if (!previous || !sameProof(chain[i],previous)) return false
       }
     }
     this.validLineages.add(lane.id)
@@ -676,9 +686,10 @@ export class TradingEngine {
     }
     if(admission?.some(proof=>!proof.qualified))throw new Error('Cannot admit a trade without its own qualified parent evidence')
     const total = s.baseNotional * (s.volumeFactor / SYSTEM_VOLUME_DIVISOR)*(s.volumeRatios?.[lane.coordination]??1)*this.laneVolumeFactor(lane.coordination,lane.config,lane.symbol)
-    const relate = lane.coordination === "relate" && lane.stage !== "base" && !mirror
-      ? relateAllocation(this.contextEvidence(lane, candle.timestamp).samples, lane.config, s.coordinations.relate!)
-      : 1
+    const relateEvidence = lane.coordination === "relate" && lane.stage !== "base" && !mirror
+      ? this.contextEvidence(lane,candle.timestamp) : undefined
+    const relate = relateEvidence ? relateAllocation(relateEvidence.samples,lane.config,s.coordinations.relate!,
+      relateEvidence.timedSampleCount ?? relateEvidence.sampleTimes?.length) : 1
     const notional = lane.coordination !== "block" ? total * relate : block.behavior==="rounds" ? total*blockRoundBudget(lane,block) : block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
     const quantity = notional / candle.close
     const exitMode = lane.config.exitMode ?? (lane.config.trailing ? "trailing" : "fixed")
@@ -717,7 +728,7 @@ export class TradingEngine {
     const netReturnPct = netPnl / open.notional * 100
     const trade: ClosedTrade = { id: open.id, laneId: lane.id, configId: lane.configId, symbol: lane.symbol, direction: lane.direction, stage: lane.stage, coordination: lane.coordination,
       openedAt: open.openedAt, closedAt: candle.timestamp, entryPrice: open.entryPrice, exitPrice: candle.close,
-      quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.executed?{executed:true}:{}),...(open.executionProof?{executionProof:open.executionProof}:{}),...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
+      quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.executed?{executed:true}:{}),...(open.executionProof?{executionProof:open.executionProof}:{}),...(open.progressionProof?{progressionProof:open.progressionProof}:{}),...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
     if (lane.coordination === "block") {
       if (open.sizing?.block.behavior === "rounds" && !(this.processedSets && lane.stage === "live")) settleBlockRound(lane, netPnl, open.sizing.block)
       settleBlockSteps(lane, open, candle.close, netReturnPct)
@@ -729,15 +740,17 @@ export class TradingEngine {
     if(lane.costTotal!==undefined)lane.costTotal+=cost
     lane.grossProfit += Math.max(0, netReturnPct); lane.grossLoss += Math.max(0, -netReturnPct)
     const depth = lane.stage === "live" && !lane.config.branch?.windows ? LEGACY_STAGES.indexOf("live") : STAGE_INDEX[lane.stage]
-    if(lane.stage!=='base'&&open.admission?.length===depth&&open.admission.every(p=>p.qualified)){
+    if(lane.stage!=='base'&&open.admission?.length===depth&&open.admission.every(p=>p.qualified&&
+      (!lane.config.branch?.windows||p.count===p.required&&p.checkedAt===open.openedAt))){
       lane.admittedClosed=(lane.admittedClosed??0)+1;lane.admittedProfit=(lane.admittedProfit??0)+Math.max(0,netReturnPct);lane.admittedLoss=(lane.admittedLoss??0)+Math.max(0,-netReturnPct);lane.admittedNetPnl=(lane.admittedNetPnl??0)+netPnl
     }
-    if (lane.stage === "exec" && open.executed) {
-      const executed = lane.executed ??= { closed: 0, profit: 0, loss: 0, netPnl: 0 }
-      executed.closed++
-      executed.profit += Math.max(0, netReturnPct)
-      executed.loss += Math.max(0, -netReturnPct)
-      executed.netPnl += netPnl
+    if ((lane.stage === "exec" && open.executed) || open.progressionProof) {
+      const ledger = lane.stage === "exec" ? "executed" : "postStage"
+      const cohort = lane[ledger] ??= { closed: 0, profit: 0, loss: 0, netPnl: 0 }
+      cohort.closed++
+      cohort.profit += Math.max(0, netReturnPct)
+      cohort.loss += Math.max(0, -netReturnPct)
+      cohort.netPnl += netPnl
     }
     lane.open = undefined; this.active.get(lane.symbol)?.delete(lane.id)
     this.activeMicro.get(lane.symbol)?.delete(lane.id);this.activeMinute.get(lane.symbol)?.delete(lane.id)
@@ -825,12 +838,14 @@ export class TradingEngine {
     this.nextIntentRevision++
   }
   private axisReferenceOnly(config: StrategyConfig, coordination: Coordination, stage: Stage): boolean {
-    if (!this.branches || coordination !== "normal" || (stage !== "main" && stage !== "real" && stage !== "exec") ||
-        !this.state.settings.coordinations.axis.enabled || this.state.settings.coordinations.axis.reference === "base") return false
+    if (!this.branches || coordination !== "normal" || stage === "base" || stage === "live") return false
     const previous = config.branch?.ancestors.at(-1)
-    if (!previous) return false
-    const choices = this.branches.choices(stage,previous.coordination)
-    return choices.includes("axis") && !choices.includes("normal")
+    return previous !== undefined && this.needsAxisReference(this.branches.choices(stage,previous.coordination))
+  }
+
+  private needsAxisReference(choices: readonly Coordination[]): boolean {
+    const axis = this.state.settings.coordinations.axis
+    return axis.enabled && axis.reference !== "base" && choices.includes("axis") && !choices.includes("normal")
   }
 
   private calculationOnly(config: StrategyConfig, coordination: Coordination, stage: Stage) {
@@ -881,6 +896,7 @@ export class TradingEngine {
         }
         return
       }
+      if (plan.exec && parent && entryProof) parent.progressionProof ??= entryProof.at(-1)
       const scope = this.stageScope(config)
       const exact = baseGate ?? this.stageWindow(lane,stage,candle.timestamp,true)
       const qualified = exact.qualified &&
@@ -893,9 +909,12 @@ export class TradingEngine {
       const next = stage === "base" ? "main" : stage === "main" ? "real" : "exec"
       if (qualified) {
         const choices = plan.choices(next,coordination)
+        // Same-stage Axis may consult the Normal child of this exact parent.
+        const reference = this.needsAxisReference(choices)
+        const targets = choices === COORDINATIONS ? enabled : enabled.filter(c=>choices.includes(c) || (reference && c === "normal"))
+        if (!targets.length) return
         for (const child of plan.variants(config,coordination,next)) {
-          // Same-stage Axis may consult the Normal child of this exact parent.
-          for (const c of enabled) if (choices.includes(c) || this.axisReferenceOnly(child,c,next)) visit(child,c,next,position,nextProof)
+          for (const c of targets) visit(child,c,next,position,nextProof)
         }
       } else if (!plan.exec) {
         // Preserve the independent processing of previously admitted legacy Sets.
@@ -1136,13 +1155,13 @@ export class TradingEngine {
         ...(row.stage === "exec" && {executed: {closed:executedClosed,...describeProfitFactor(executedProfit,executedLoss,executedClosed)}})}
     })
   }
-  snapshot(options: { laneLimit?: number; positionLimit?: number; positionStage?: Stage } = {}): EngineSnapshot {
+  snapshot(options: { laneLimit?: number; laneStage?: Stage; positionLimit?: number; positionStage?: Stage } = {}): EngineSnapshot {
     const laneLimit = options.laneLimit ?? Infinity, positionLimit = options.positionLimit ?? Infinity
     for (const limit of [laneLimit, positionLimit]) if (limit !== Infinity && (!Number.isInteger(limit) || limit < 0)) throw new Error("Invalid snapshot limit")
     const s = this.state.settings
     const lanes: EngineSnapshot["lanes"] = [], positions: EngineSnapshot["positions"] = []
     const stageStats = Object.fromEntries(STAGES.map(stage => [stage, { stage, lanes: 0, open: 0, closed: 0, enoughSamples: 0, enoughSamplesPct: 0, qualified: 0, profitFactor: 1, netPnl: 0, profit: 0, loss: 0,wins:0,fees:0 as number|null,longOpen:0,shortOpen:0,currentLanes:0,currentEnoughSamples:0,currentQualified:0,admissionReady:0,blockedByParent:0,currentProfit:0,currentLoss:0,currentCount:0,currentUnknown:0,validatedProfit:0,validatedLoss:0,validatedCount:0,validatedSets:0,admittedCount:0,admittedProfit:0,admittedLoss:0,admittedNet:0 }])) as Record<Stage,StageMetricsAccumulator>
-    let executedOpen = 0, executedClosed = 0, executedProfit = 0, executedLoss = 0, executedNet = 0
+    const forwarded = STAGES.map(()=>({open:0,closed:0,profit:0,loss:0,netPnl:0}))
     let baseObserved = 0, baseEnough = 0
     const currentWindows=new Set<string>(), validatedWindows=new Set<string>()
     const feedableParents = new Map<string,boolean>()
@@ -1177,12 +1196,15 @@ export class TradingEngine {
       stats.enoughSamples += metrics.enoughSamples ? 1 : 0; stats.qualified += metrics.qualified ? 1 : 0
       stats.profit += lane.grossProfit; stats.loss += lane.grossLoss; stats.netPnl += lane.netPnl
       stats.wins+=lane.wins
-      if (lane.stage === "exec") {
-        executedOpen += Number(lane.open?.executed === true)
-        executedClosed += lane.executed?.closed ?? 0
-        executedProfit += lane.executed?.profit ?? 0
-        executedLoss += lane.executed?.loss ?? 0
-        executedNet += lane.executed?.netPnl ?? 0
+      const accepted = lane.stage === "exec" ? lane.executed : lane.postStage
+      const acceptedOpen = lane.stage === "exec" ? lane.open?.executed : lane.open?.progressionProof !== undefined
+      const post = forwarded[STAGE_INDEX[lane.stage]]
+      post.open += Number(Boolean(acceptedOpen))
+      if (accepted) {
+        post.closed += accepted.closed
+        post.profit += accepted.profit
+        post.loss += accepted.loss
+        post.netPnl += accepted.netPnl
       }
       stats.admittedCount+=lane.admittedClosed??0;stats.admittedProfit+=lane.admittedProfit??0;stats.admittedLoss+=lane.admittedLoss??0;stats.admittedNet+=lane.admittedNetPnl??0
       if(stats.fees!==null){if(lane.closedCount&&lane.costTotal===undefined)stats.fees=null;else stats.fees+=lane.costTotal??0}
@@ -1213,16 +1235,19 @@ export class TradingEngine {
           else {stats.currentProfit+=metrics.profit??0;stats.currentLoss+=metrics.loss??0;stats.currentCount+=metrics.pfSampleCount??metrics.count}
         }
       }
-      if (lanes.length < laneLimit) lanes.push({ id: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, direction: lane.direction, coordination: lane.coordination, ...metrics, current,admissionReady:parentReady&&axisReady,validated,isOpen:Boolean(lane.open),netPnl: lane.netPnl })
+      if (lanes.length < laneLimit && (!options.laneStage || options.laneStage === lane.stage)) lanes.push({ id: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, direction: lane.direction, coordination: lane.coordination, ...metrics, current,admissionReady:parentReady&&axisReady,validated,isOpen:Boolean(lane.open),netPnl: lane.netPnl })
       if (lane.open && (!options.positionStage || options.positionStage === lane.stage) && positions.length < positionLimit) positions.push({ ...lane.open, laneId: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, coordination: lane.coordination })
     }
     const stages = STAGES.filter(stage=>stage!=="exec"||this.branches?.exec||stageStats.exec.lanes>0).map(stage => {
       const { profit, loss,currentProfit,currentLoss,currentCount,currentUnknown,validatedProfit,validatedLoss,validatedCount,validatedSets,admittedCount,admittedProfit,admittedLoss,admittedNet, ...stats } = stageStats[stage]
       stats.enoughSamplesPct = stats.lanes ? 100 * stats.enoughSamples / stats.lanes : 0
       const current=currentUnknown?{profitFactor:null,pfState:'unknown' as const}:describeProfitFactor(currentProfit,currentLoss,currentCount)
+      const {profit:postProfit,loss:postLoss,...forward} = forwarded[STAGE_INDEX[stage]]
+      const post = {...forward,...describeProfitFactor(postProfit,postLoss,forward.closed)}
       return { ...stats, ...describeProfitFactor(profit, loss, stats.closed),currentProfitFactor:current.profitFactor,currentPfState:current.pfState,validatedWindow:{samples:validatedCount,sets:validatedSets,profit:validatedProfit,loss:validatedLoss,...describeProfitFactor(validatedProfit,validatedLoss,validatedCount)},admittedForward:{closes:admittedCount,...describeProfitFactor(admittedProfit,admittedLoss,admittedCount),netPnl:admittedNet,unprovenCloses:stats.closed-admittedCount},
         ...(stage === "base" && this.branches?.exec && {baseCandidates:{observed:baseObserved,enoughSamples:baseEnough}}),
-        ...(stage === "exec" && {executed:{open:executedOpen,closed:executedClosed,netPnl:executedNet,...describeProfitFactor(executedProfit,executedLoss,executedClosed)}}) }
+        ...(stage !== "live" && (this.branches?.exec || forward.open || forward.closed) && {postStage:post}),
+        ...(stage === "exec" && {executed:post}) }
     })
     return structuredClone({ settings: s, catalogCount: this.configs.length * (this.branches && !this.branches.exec ? lastNVariantCount(checkLastNGrid(s.catalog.strategyLastNGrid)) : 1), symbolCount: s.symbols.length, processedCandles: this.state.processedCandles, updatedAt: this.state.updatedAt,
       equity: this.state.equity, peakEquity: this.state.peakEquity, maxDrawdownPct: this.state.maxDrawdownPct, stages,

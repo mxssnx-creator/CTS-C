@@ -70,6 +70,8 @@ export interface StepVerdict {
 }
 export interface EntryFill { price: number; quantity: number; timestamp: number; kind: "entry" | "block" | "dca" }
 export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number|null;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number;windowScope?:StageWindowScope;configWindow?:{count:number;profitFactor:number|null;qualified:boolean};autoPf?:AutoPfEvidence}
+interface SettledCohort {closed:number;profit:number;loss:number;netPnl:number}
+type ForwardMetrics = Omit<SettledCohort,"profit"|"loss"> & {open:number;profitFactor:number;pfState:ProfitFactorState}
 export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   activationOrder?:number
@@ -77,6 +79,8 @@ export interface PaperPosition {
   /** This Exec entry passed its own completed-position gate at the entry clock. */
   executed?: boolean
   executionProof?: GateProof
+  /** Base, Main or Real entry that actually opened at least one qualifying child. */
+  progressionProof?: GateProof
   parentPositionId?:string
   admission?:GateProof[]
   sizing?: { baseBudget: number; block: EngineSettings["coordinations"]["block"]; dca: EngineSettings["coordinations"]["dca"] }
@@ -97,6 +101,7 @@ export interface ClosedTrade {
   source: "paper"
   executed?: boolean
   executionProof?: GateProof
+  progressionProof?: GateProof
   admission?:GateProof[]
   parentPositionId?:string
 }
@@ -118,7 +123,8 @@ export interface LaneState {
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
   costTotal?: number
   admittedClosed?:number;admittedProfit?:number;admittedLoss?:number;admittedNetPnl?:number
-  executed?:{closed:number;profit:number;loss:number;netPnl:number}
+  executed?: SettledCohort
+  postStage?: SettledCohort
   parentProof?:GateProof[]
 }
 export interface SignalState {
@@ -164,7 +170,8 @@ export interface StageMetrics { stage: Stage; lanes: number; open: number; close
   autoPf?:{historySets:number;fallbackSets:number;minThreshold:number;maxThreshold:number}
   validatedWindow?:{samples:number;sets:number;profitFactor:number;pfState:ProfitFactorState;profit?:number;loss?:number}
   admittedForward?:{closes:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;unprovenCloses:number}
-  executed?:{open:number;closed:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number}
+  postStage?: ForwardMetrics
+  executed?: ForwardMetrics
 }
 export interface EngineSnapshot {
   settings: EngineSettings; catalogCount: number; symbolCount: number; processedCandles: number; updatedAt: number

@@ -2,8 +2,8 @@ import { generateStrategyCatalog, STRATEGY_RANGES } from "./catalog"
 import { replayStrategy,strategySignalTrace } from "./replay"
 import { aggregateCostNormalizedResults, describeProfitFactor } from "./metrics"
 import { STAGES, TradingEngine, windowMetrics } from "./engine"
-import type { MarketCandle } from "./market"
-import type { StrategyConfig, PseudoPosition, EngineSettings } from "./types"
+import { MAX_RESEARCH_CANDLES, type MarketCandle } from "./market"
+import type { StrategyConfig, PseudoPosition, EngineSettings, ClosedTrade } from "./types"
 
 function metrics(positions: PseudoPosition[]) {
   const closed = positions.filter(p => p.status === "closed")
@@ -17,7 +17,7 @@ function metrics(positions: PseudoPosition[]) {
 /** Parameters are ranked on a chronological training slice only. Holdout is
  * read after the shortlist is frozen and never updates engine settings. */
 function* replaySteps(symbol: string, candles: MarketCandle[], settings: Record<string, unknown> = {}) {
-  if (candles.length < 100 || candles.length > 20000) throw new Error("Replay needs 100..20000 chronological candles")
+  if (candles.length < 100 || candles.length > MAX_RESEARCH_CANDLES) throw new Error(`Replay needs 100..${MAX_RESEARCH_CANDLES} chronological candles`)
   const split = Math.floor(candles.length * .65)
   const barSeconds=Number(settings.replayBarSeconds??0)
   if(!Number.isFinite(barSeconds)||barSeconds<0)throw new Error("Invalid replay interval")
@@ -89,18 +89,24 @@ export async function runExecProgressionReplay(symbol: string, candles: MarketCa
   const split = Math.floor(candles.length * .65)
   const holdout = (candles[split].time + 60) * 1000
   const engine = new TradingEngine({ ...settings, symbols: [symbol] })
-  const totals = Object.fromEntries([...STAGES, "executed"].map(stage=>[stage,{ closed:0, wins:0, profit:0, loss:0, net:0, cost:0 }]))
+  const totals = () => ({ closed:0, wins:0, profit:0, loss:0, net:0, cost:0 })
+  const books = Object.fromEntries([...STAGES, "executed"].map(stage=>[stage,totals()]))
+  const forwarded = new Map(STAGES.filter(stage=>stage!=="live").map(stage=>[stage,totals()]))
+  const record = (row: ReturnType<typeof totals>, trade: Readonly<ClosedTrade>) => {
+    row.closed++
+    row.wins += Number(trade.netReturnPct>0)
+    row.profit += Math.max(0,trade.netReturnPct)
+    row.loss += Math.max(0,-trade.netReturnPct)
+    row.net += trade.netPnl
+    row.cost += trade.cost
+  }
+  const summarize = ({profit,loss,...row}: ReturnType<typeof totals>) => ({...row,...describeProfitFactor(profit,loss,row.closed)})
   engine.observeStageCloses(trade=>{
     if (trade.openedAt < holdout) return
-    for (const stage of trade.executed ? [trade.stage,"executed"] : [trade.stage]) {
-      const row = totals[stage]
-      row.closed++
-      row.wins += Number(trade.netReturnPct>0)
-      row.profit += Math.max(0,trade.netReturnPct)
-      row.loss += Math.max(0,-trade.netReturnPct)
-      row.net += trade.netPnl
-      row.cost += trade.cost
-    }
+    record(books[trade.stage],trade)
+    if (trade.executed) record(books.executed,trade)
+    const row = trade.stage === "live" ? undefined : forwarded.get(trade.stage)
+    if (row && (trade.progressionProof || trade.executed)) record(row,trade)
   })
   let nextYield = performance.now()+20
   for (const bar of candles) {
@@ -111,5 +117,10 @@ export async function runExecProgressionReplay(symbol: string, candles: MarketCa
       nextYield = performance.now()+20
     }
   }
-  return Object.entries(totals).map(([stage,{profit,loss,...row}])=>({stage,...row,...describeProfitFactor(profit,loss,row.closed)}))
+  return ([...STAGES,"executed"] as const).map(stage=>{
+    const postStage = stage === "live" || stage === "executed" ? undefined : forwarded.get(stage)
+    return {stage,...summarize(books[stage]),...(postStage&&{postStage:summarize(postStage)})}
+  })
 }
+
+export type ExecProgressionReplay = Awaited<ReturnType<typeof runExecProgressionReplay>>

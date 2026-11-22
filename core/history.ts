@@ -3,14 +3,17 @@ import type { Candle } from './types'
 
 interface HistorySource { candles(symbol:string,interval:string,limit:number,endTime?:number):Promise<VenueCandle[]> }
 const MINUTE = 60_000
+const MAX_PAGE_HISTORY_CANDLES = 4320
+export const MAX_WARMUP_CANDLES = 14 * 1440
 export interface HistoryPlan { count:number; cutoff:number; cursor:number|null }
 /** Fetch the oldest missing chunk first, even when the interruption exceeds the configured history size. */
 export function planHistory(configuredCount:number,cursor:number|null,now=Date.now()):HistoryPlan {
-  if(!Number.isInteger(configuredCount)||configuredCount<100||configuredCount>4320)throw new Error('History count must be 100..4320')
+  if(!Number.isInteger(configuredCount)||configuredCount<100||configuredCount>MAX_WARMUP_CANDLES)throw new Error(`History count must be 100..${MAX_WARMUP_CANDLES}`)
   const latest=Math.floor(now/MINUTE)*MINUTE
-  if(cursor===null)return {count:configuredCount,cutoff:latest,cursor}
+  const page = Math.min(configuredCount,MAX_PAGE_HISTORY_CANDLES)
+  if(cursor===null)return {count:page,cutoff:latest-(configuredCount-page)*MINUTE,cursor}
   if(!Number.isSafeInteger(cursor)||cursor<=0||cursor%MINUTE!==0||cursor>latest)throw new Error('Invalid or future history cursor')
-  const cutoff=Math.min(latest,cursor+configuredCount*MINUTE)
+  const cutoff=Math.min(latest,cursor+page*MINUTE)
   return {count:(cutoff-cursor)/MINUTE,cutoff,cursor}
 }
 /** Reject gaps before mutating the indicator, stage or position ledger. */
@@ -27,7 +30,7 @@ export function validateHistory(symbol:string,candles:Candle[],plan:HistoryPlan)
 }
 /** Backfill observed closed minutes; BingX VST may cap a page at 1,000. */
 export async function closedHistory(source:HistorySource,symbol:string,count:number,cutoff=Date.now()):Promise<Candle[]> {
-  if(!Number.isInteger(count)||count<1||count>4320)throw new Error('History page count must be 1..4320')
+  if(!Number.isInteger(count)||count<1||count>MAX_PAGE_HISTORY_CANDLES)throw new Error(`History page count must be 1..${MAX_PAGE_HISTORY_CANDLES}`)
   const rows=new Map<number,VenueCandle>()
   let endTime=Math.floor(cutoff/60_000)*60_000-1
   for(let page=0;page<Math.ceil(count/1000)+1&&rows.size<count;page++){

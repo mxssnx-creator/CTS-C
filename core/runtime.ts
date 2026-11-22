@@ -423,7 +423,7 @@ export class TerminalRuntime {
       if(key==='liveEntryMode'){next.liveEntryMode=value as EngineSettings['liveEntryMode'];continue}
       if(catalogKeys.includes(key)){next.catalog[key]=value;continue}
       if(gateMap[key]){const[group,stage]=gateMap[key];next[group][stage]=Number(value);continue}
-      if(key==='historyCandles'){if(!Number.isInteger(value)||Number(value)<100||Number(value)>4320)throw new Error('History candles must be 100..4320');continue}
+      if(key==='historyCandles')continue
       if(key==='symbolCount'){if(!Number.isInteger(value)||Number(value)<1||Number(value)>500)throw new Error('Symbol count must be1..500');continue}
       const ratios:Record<string,'normal'|'axis'|'block'|'dca'|'relate'>={normalVolumeRatio:'normal',axisVolumeRatio:'axis',blockVolumeFactor:'block',dcaVolumeRatio:'dca',relateVolumeRatio:'relate'}
       if(ratios[key]){next.volumeRatios! [ratios[key]]=Number(value);continue}
@@ -480,7 +480,7 @@ export class TerminalRuntime {
       const candidates = stage.baseCandidates
       const eligibleForSampling = candidates?.observed ?? stage.currentLanes
       const enoughSamples = candidates?.enoughSamples ?? stage.currentEnoughSamples
-      return [stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:mirror?null:enoughSamples,sampleSetCount:eligibleForSampling,samplesPercent:!mirror&&eligibleForSampling?100*enoughSamples/eligibleForSampling:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:mirror?null:stage.currentProfitFactor,windowPfState:mirror?undefined:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,validatedWindow:mirror?undefined:stage.validatedWindow,admittedForward:stage.admittedForward,executed:stage.executed,autoPf:stage.autoPf,...sampleSizes}]
+      return [stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:mirror?null:enoughSamples,sampleSetCount:eligibleForSampling,samplesPercent:!mirror&&eligibleForSampling?100*enoughSamples/eligibleForSampling:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:mirror?null:stage.currentProfitFactor,windowPfState:mirror?undefined:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,validatedWindow:mirror?undefined:stage.validatedWindow,admittedForward:stage.admittedForward,postStage:stage.postStage,executed:stage.executed,autoPf:stage.autoPf,...sampleSizes}]
     }))
     const settings=Object.fromEntries(Object.entries(flatEngineSettings(s.settings,this.control)).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)]))
     const positions=s.positions.filter(p=>p.stage==='live')

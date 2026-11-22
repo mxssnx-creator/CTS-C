@@ -3,6 +3,7 @@ import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES } from "@/shared/cts-indications/research-sources"
+import execDcaTrendPreset from "@/research-data/exec-dca-trend-preset.json"
 import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, THIN_OSCILLATOR_SOURCE_IDS } from "@/shared/cts-indications/oscillator-sources"
 import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES,SIGNAL_SOURCES} from '@/shared/cts-indications/signals-catalog'
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_CATALOG } from "@/shared/cts-indications/low-range-catalog"
@@ -19,7 +20,7 @@ import { DEFAULT_EXIT_MODES, type ProfitFactorState, type Stage, type Coordinati
 import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, EXEC_PF_FIELD, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
 import { SELECTABLE_STOP_DISTANCE_PCTS, SELECTABLE_TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
 import { BRANCH_COORDINATIONS, type StageCoordinations } from "@/core/stage-branches"
-import { EXEC_EVALUATION_STAGES, EXEC_LONG_COUNTS, EXEC_SHORT_COUNTS, EXEC_LAST_COUNTS, EXEC_LONG_MODES, EXEC_OUTCOMES, POSITIVE_EXEC_OUTCOME, LAST_N_STAGES, execPathCount, type ExecWindows, type LastNGrid } from "@/core/last-n-grid"
+import { EXEC_EVALUATION_STAGES, EXEC_LONG_COUNTS, EXEC_LAST_COUNTS, EXEC_LONG_MODES, EXEC_OUTCOMES, POSITIVE_EXEC_OUTCOME, LAST_N_STAGES, execPathCount, stageShortCounts, type ExecWindows, type LastNGrid } from "@/core/last-n-grid"
 
 const EXIT_LABELS: Record<ExitMode, string> = {
   fixed: "Fixed TP and SL",
@@ -234,6 +235,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
       <div className="terminal-panel flex flex-wrap items-center justify-between gap-4 p-5">
         <div><p className="terminal-muted text-[10px] uppercase tracking-[.2em]">{connectionName.toUpperCase()} / Configuration studio</p><h2 className="mt-1 text-xl font-semibold">Independent strategy combinations</h2><p className="terminal-muted mt-2 max-w-2xl text-xs leading-relaxed">Ranges, distances, exit modes, and indications generate separate core configurations. Axis, Block, and DCA coordinate their progression.</p></div>
         <div className="flex flex-wrap gap-2">
+          <button type="button" className="terminal-button" disabled={busy || saving} onClick={()=>{
+            dirtyRef.current=true; setDirty(true); setError(null)
+            setDraft(current=>({...current,...structuredClone(execDcaTrendPreset)}))
+            setMessage("Trend + DCA replay draft prepared with 10 days of warm-up. Review the settings before saving.")
+          }}>Prepare Trend + DCA replay preset</button>
           <button type="button" onClick={() => preset("balanced")} className="terminal-button" disabled={busy || saving}>Balanced · 252</button>
           <button type="button" onClick={() => preset("micro")} className="terminal-button" disabled={busy || saving}><Layers3 className="mr-2 inline h-4 w-4" />Micro + Low-Range</button>
           <button type="button" onClick={() => preset("full")} className="terminal-button" disabled={busy || saving}>Full catalog</button>
@@ -280,7 +286,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
               {(execEnabled || draft.stageGateMode === "parent-branches") && (execEnabled ? (["main","real","exec"] as const) : (["main","real"] as const)).map(stage => {
                 const map = (draft.strategyStageCoordinations ?? {}) as StageCoordinations
                 return <MultiChoice key={stage} title={stage[0].toUpperCase()+stage.slice(1)+" child coordinations"}
-                  description="Each eligible parent creates the selected enabled coordinations. An empty selection inherits its coordination."
+                  description={execEnabled?"Each eligible parent creates the selected enabled coordinations. An empty selection runs all enabled coordinations.":"Each eligible parent creates the selected enabled coordinations. An empty selection inherits its coordination."}
                   values={[...BRANCH_COORDINATIONS]} selected={[...(map[stage] ?? [])]} optional
                   onChange={value => change("strategyStageCoordinations", { ...map, [stage]: value })} />
               })}
@@ -290,7 +296,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
                 return <section key={stage} className="grid gap-4 border-t border-[var(--terminal-border)] pt-4 sm:grid-cols-2">
                   <h4 className="text-sm font-semibold sm:col-span-2">{label}</h4>
                   <MultiChoice title={label+" Long"} description={stage==="base"?"Completed positions in the oldest block.":"Inherit the originating Base Set’s Long count or omit the block."} values={stage==="base"?[...EXEC_LONG_COUNTS]:[...EXEC_LONG_MODES]} selected={[...windows.long]} onChange={value=>updateExecBlock(stage,"long",value)} format={value=>value==="none"?"No Long":value==="inherit"?"Base Long":String(value)}/>
-                  <MultiChoice title={label+" Short"} description="Completed positions immediately before Last." values={[...EXEC_SHORT_COUNTS]} selected={[...windows.short]} onChange={value=>updateExecBlock(stage,"short",value)}/>
+                  <MultiChoice title={label+" Short"} description="Completed positions immediately before Last." values={[...stageShortCounts(stage)]} selected={[...windows.short]} onChange={value=>updateExecBlock(stage,"short",value)}/>
                   <MultiChoice title={label+" Last"} description="Most recent completed positions." values={[...EXEC_LAST_COUNTS]} selected={[...windows.last]} onChange={value=>updateExecBlock(stage,"last",value)}/>
                   <MultiChoice title={label+" Short outcomes"} description="Negative Short is available for 4, 8 and 12 positions. The full window must still pass PF." values={EXEC_OUTCOMES} selected={[...(windows.shortOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"shortOutcomes",value)}/>
                   <MultiChoice title={label+" Last outcomes"} description="Each outcome is an independent Set. A negative Last must sit inside a profitable full window." values={EXEC_OUTCOMES} selected={[...(windows.lastOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"lastOutcomes",value)}/>

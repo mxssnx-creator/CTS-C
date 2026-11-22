@@ -15,6 +15,23 @@ type Totals = { closes:number; wins:number; profit:number; loss:number; fees:num
 const empty = (): Totals => ({ closes:0,wins:0,profit:0,loss:0,fees:0,pnl:0 })
 type Cohort = { fit: Totals; holdout: Totals }
 const cohort = (): Cohort => ({ fit:empty(),holdout:empty() })
+const periods = ["fit","holdout"] as const
+const score = (row:Totals) => ({...row,...describeProfitFactor(row.profit,row.loss,row.closes)})
+const scoredCohorts = (rows:Record<string,Cohort>) => Object.fromEntries(Object.entries(rows)
+  .map(([key,row])=>[key,{fit:score(row.fit),holdout:score(row.holdout)}]))
+function merge(target:Record<string,Cohort>, source:Record<string,Cohort>) {
+  for (const [key, seasons] of Object.entries(source)) {
+    const row = target[key]??=cohort()
+    for (const period of periods) {
+      for (const metric of Object.keys(seasons[period]) as (keyof Totals)[]) row[period][metric]+=seasons[period][metric]
+    }
+  }
+}
+function shortWidth(configId:string):string {
+  const short = /\.exec\d+-(\d+)-\d+(?:-sn)?(?:-ln)?$/.exec(configId)?.[1]
+  if (!short) throw new Error(`Missing Exec Short for ${configId}`)
+  return short
+}
 
 function run({file,family,profile,scenario}: Job) {
   const start = performance.now()
@@ -45,12 +62,17 @@ function run({file,family,profile,scenario}: Job) {
     },
   })
   const stages = Object.fromEntries([...STAGES,"executed"].map(stage=>[stage,cohort()]))
+  const postStages = Object.fromEntries(STAGES.filter(stage=>stage!=="live").map(stage=>[stage,cohort()]))
+  const execShorts = checkExecWindows(engine.settings.catalog.strategyExecWindows).exec.short
+  const shortBooks = Object.fromEntries(execShorts.map(count=>[count,cohort()]))
+  const shortAccepted = Object.fromEntries(execShorts.map(count=>[count,cohort()]))
   const variants: Record<string, Cohort> = {}
   const groups: Record<string, Cohort> = {}
   const sources = scenario.groupSources ? new Map(generateStrategyCatalog(engine.settings.connectionId,{
     ...engine.settings.catalog,...engine.settings.symbolFees?.[symbol],strategyLastNGrid:undefined,
   }).map(config=>[config.id,config.indicationSourceId??config.type])) : undefined
-  const unique = {fit:new Set<string>(),holdout:new Set<string>()}
+  const distinct = {fit:new Map<string,{n:number;returns:number}>(),holdout:new Map<string,{n:number;returns:number}>()}
+  const shortPaths = Object.fromEntries(execShorts.map(count=>[count,{fit:new Set<string>(),holdout:new Set<string>()}]))
   const awaitingMirror = new Map<string,Readonly<ClosedTrade>>()
   let crossingCloses = 0
   engine.observeStageCloses(trade=>{
@@ -77,6 +99,12 @@ function run({file,family,profile,scenario}: Job) {
       row.pnl += trade.netPnl
     }
     record(stages[trade.stage][period])
+    if (trade.progressionProof || trade.executed) record(postStages[trade.stage][period])
+    if (trade.stage === "exec") {
+      const short = shortWidth(trade.configId)
+      record(shortBooks[short][period])
+      if (trade.executed) record(shortAccepted[short][period])
+    }
     const geometry = trade.configId.split(".branch2")[0]
     if (sources) {
       const source = sources.get(geometry)
@@ -90,30 +118,51 @@ function run({file,family,profile,scenario}: Job) {
     }
     if (trade.executed) {
       record(stages.executed[period])
-      const checks = trade.configId.split(".").slice(1).filter(part=>/^(base|main|real|exec)\d/.test(part))
-      const key = [geometry,trade.coordination,...checks].join("/")
+      const key = [trade.configId,trade.coordination,trade.direction].join("/")
       record((variants[key]??=cohort())[period])
       const [type,range] = geometry.slice(3).split(/_(?=(?:Micro|Low-Range|Minimal|Short|Normal|Long|Wide)_)/,2)
       for (const group of [type, range?.split("_")[0], trade.coordination, trade.executionProof?.autoPf?.mode ?? "static"].filter(Boolean)) {
         record((groups[group]??=cohort())[period])
       }
-      unique[period].add([trade.direction,trade.openedAt,trade.closedAt,trade.entryPrice,trade.exitPrice].join("/"))
+      const path = [trade.direction,trade.openedAt,trade.closedAt,trade.entryPrice,trade.exitPrice].join("/")
+      const outcome = distinct[period].get(path) ?? {n:0,returns:0}
+      outcome.n++
+      outcome.returns += trade.netReturnPct
+      distinct[period].set(path,outcome)
+      shortPaths[shortWidth(trade.configId)][period].add(path)
     }
   })
   engine.processCandles(symbol,bars,{eventLimit:0})
-  const snapshot = engine.snapshot({laneLimit:0,positionStage:"exec"})
+  const snapshot = engine.snapshot({laneStage:"exec",positionStage:"exec"})
   const executed = snapshot.stages.find(row=>row.stage==="exec")!.executed!
   if (awaitingMirror.size || executed.closed !== snapshot.stages.find(row=>row.stage==="live")!.closed ||
       stages.executed.fit.closes !== stages.live.fit.closes || stages.executed.holdout.closes !== stages.live.holdout.closes) {
     throw new Error(`Exec/Live paper close divergence for ${symbol}`)
   }
+  const shortCoverage = Object.fromEntries(execShorts.map(count=>[count,{sets:0,ready:0}]))
+  for (const lane of snapshot.lanes) if (lane.current) {
+    const row = shortCoverage[shortWidth(lane.configId)]
+    row.sets++
+    row.ready += Number(lane.enoughSamples)
+  }
+  const unique = {fit:distinct.fit.size,holdout:distinct.holdout.size}
+  const distinctReturns = Object.fromEntries(periods.map(period=>{
+    let profit=0,loss=0
+    for (const path of distinct[period].values()) {
+      const net=path.returns/path.n
+      profit+=Math.max(0,net)
+      loss+=Math.max(0,-net)
+    }
+    return [period,{closed:unique[period],profit,loss}]
+  }))
   return { symbol, ms:performance.now()-start, heapMiB:process.memoryUsage().heapUsed/2**20,
     tape:{firstClose:bars[0].timestamp,lastClose:bars.at(-1)!.timestamp,sha256:createHash("sha256").update(bytes).digest("hex")},
     lanes:Object.fromEntries(snapshot.stages.map(row=>[row.stage,row.currentLanes])),
     enoughSamples:Object.fromEntries(snapshot.stages.map(row=>[row.stage,row.currentEnoughSamples])),
     baseCandidates:snapshot.stages[0].baseCandidates,
     open:snapshot.positions.filter(position=>position.executed&&position.openedAt>=from).length,
-    unique:{fit:unique.fit.size,holdout:unique.holdout.size},crossingCloses,stages,variants,groups }
+    unique,distinctReturns,crossingCloses,stages,postStages,shortBooks,shortAccepted,shortCoverage,variants,groups,
+    shortUnique:Object.fromEntries(execShorts.map(n=>[n,{fit:shortPaths[n].fit.size,holdout:shortPaths[n].holdout.size}])) }
 }
 
 async function main() {
@@ -152,27 +201,41 @@ async function main() {
       process.stderr.write(`${result.symbol} ${Math.round(result.ms)} ms · ${result.lanes.exec} Exec Sets · ${result.stages.executed.fit.closes}/${result.stages.executed.holdout.closes} scored closes\n`)
     }
   }))
-  const stages: Record<string,Cohort> = {}, variants: Record<string,Cohort> = {}, groups: Record<string,Cohort> = {}
-  function merge(target:Record<string,Cohort>, source:Record<string,Cohort>) {
-    for (const [key, seasons] of Object.entries(source)) {
-      const row = target[key]??=cohort()
-      for (const period of ["fit","holdout"] as const) {
-        for (const metric of Object.keys(seasons[period]) as (keyof Totals)[]) row[period][metric]+=seasons[period][metric]
-      }
+  const stages:Record<string,Cohort> = {}, variants:Record<string,Cohort> = {}, groups:Record<string,Cohort> = {}
+  const postStages:Record<string,Cohort> = {}, shortBooks:Record<string,Cohort> = {}, shortAccepted:Record<string,Cohort> = {}
+  const shortCoverage:Record<string,{sets:number;ready:number}> = {}
+  const shortUnique:Record<string,{fit:number;holdout:number}> = {}
+  for (const result of results) {
+    merge(stages,result.stages); merge(variants,result.variants); merge(groups,result.groups)
+    merge(postStages,result.postStages); merge(shortBooks,result.shortBooks); merge(shortAccepted,result.shortAccepted)
+    for (const [count,observed] of Object.entries(result.shortCoverage)) {
+      const row = shortCoverage[count]??={sets:0,ready:0}
+      row.sets += observed.sets
+      row.ready += observed.ready
+      const unique = shortUnique[count]??={fit:0,holdout:0}
+      for (const period of periods) unique[period] += result.shortUnique[count][period]
     }
   }
-  for (const result of results) { merge(stages,result.stages); merge(variants,result.variants); merge(groups,result.groups) }
-  const addPF = (row:Totals) => ({...row,...describeProfitFactor(row.profit,row.loss,row.closes)})
+  const distinctReturns = Object.fromEntries(periods.map(period=>{
+    const totals={closed:0,profit:0,loss:0}
+    for (const result of results) {
+      const row = result.distinctReturns[period]
+      totals.closed+=row.closed
+      totals.profit+=row.profit
+      totals.loss+=row.loss
+    }
+    return [period,{...totals,...describeProfitFactor(totals.profit,totals.loss,totals.closed)}]
+  }))
   const rank = Object.entries(variants).filter(([,row])=>row.fit.closes>=30)
-    .sort(([,a],[,b])=>addPF(b.fit).profitFactor-addPF(a.fit).profitFactor).slice(0,10)
-    .map(([config,row])=>({config,fit:addPF(row.fit),holdout:addPF(row.holdout)}))
+    .sort(([,a],[,b])=>score(b.fit).profitFactor-score(a.fit).profitFactor).slice(0,10)
+    .map(([config,row])=>({config,fit:score(row.fit),holdout:score(row.holdout)}))
   writeFileSync(output,JSON.stringify({
     profile:profileText,family:familyText, symbols:results.length,workers,durationMs:performance.now()-fullDuration,
     warmupMinutes, fitMinutes, holdoutMinutes:tapeMinutes-warmupMinutes-fitMinutes, settings:scenario.settings,
-    stages:Object.fromEntries(Object.entries(stages).map(([stage, row])=>[stage,{fit:addPF(row.fit),holdout:addPF(row.holdout)}])),
-    groups:Object.fromEntries(Object.entries(groups).map(([group, row])=>[group,{fit:addPF(row.fit),holdout:addPF(row.holdout)}])),
-    unique:Object.fromEntries((["fit","holdout"] as const).map(period=>[period,results.reduce((sum,result)=>sum+result.unique[period],0)])),
-    rank, results:results.sort((a,b)=>a.symbol.localeCompare(b.symbol)),
+    stages:scoredCohorts(stages),postStages:scoredCohorts(postStages),groups:scoredCohorts(groups),
+    execShort:{coverage:shortCoverage,book:scoredCohorts(shortBooks),accepted:scoredCohorts(shortAccepted),unique:shortUnique},
+    unique:Object.fromEntries(periods.map(period=>[period,distinctReturns[period].closed])),
+    distinctReturns,rank,results:results.sort((a,b)=>a.symbol.localeCompare(b.symbol)),
   },null,2)+"\n")
 }
 

@@ -198,7 +198,7 @@ export function TradingTerminal() {
                 <div className="terminal-stage-foot">
                   {data.executed ? <>Executed PF {formatProfitFactor(data.executed.profitFactor,data.executed.pfState)}<br/>{data.executed.closed.toLocaleString()} closed</>
                     : data.directMirror ? <>Paper PF {formatProfitFactor(data.pf,data.pfState)}</>
-                    : <>Validated PF {formatProfitFactor(data.validatedWindow?.profitFactor,data.validatedWindow?.pfState)}<br/>Forward PF {formatProfitFactor(data.admittedForward?.profitFactor,data.admittedForward?.pfState)}</>}
+                    : <>Validated PF {formatProfitFactor(data.validatedWindow?.profitFactor,data.validatedWindow?.pfState)}<br/>Post-stage PF {formatProfitFactor(data.postStage?.profitFactor,data.postStage?.pfState)}</>}
                 </div>
               </div>
             })}</div>

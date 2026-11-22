@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/core/auth'
-import { getResearchCandles, intervalSeconds, marketSymbol, marketInterval, marketVenue } from '@/core/market'
+import { getResearchCandles, intervalSeconds, marketSymbol, marketInterval, marketVenue, MAX_RESEARCH_CANDLES } from '@/core/market'
 import { runExecProgressionReplay, runTerminalReplayAsync } from '@/core/terminal-replay'
 import { getStore } from '@/core/store'
 import {connectionInfo} from '@/core/connections'
@@ -20,15 +20,16 @@ export async function POST(request: NextRequest) {
     try{symbol=marketSymbol(body.symbol??'BTC-USDT');interval=marketInterval(body.interval??'5m');venue=marketVenue(body.exchange??'bingx')}
     catch(error){return NextResponse.json({success:false,error:error instanceof Error?error.message:'Invalid market selection'},{status:400})}
     const limit=body.candles??1000
-    if(!Number.isInteger(limit)||limit<100||limit>5000)return NextResponse.json({success:false,error:'Choose 100..5000 research candles'},{status:400})
+    if(!Number.isInteger(limit)||limit<100||limit>MAX_RESEARCH_CANDLES)return NextResponse.json({success:false,error:`Choose 100..${MAX_RESEARCH_CANDLES} research candles`},{status:400})
     const connection=connectionInfo(body.connectionId??undefined)
     const settings=getStore(connection.id).engineSettings()
     if(interval!=='1m'&&Array.isArray(settings?.catalog.strategyIndicationTypes)&&settings.catalog.strategyIndicationTypes.some(t=>(TECHNICAL_INDICATIONS as readonly unknown[]).includes(t)))return NextResponse.json({success:false,error:'Trend and Break timeframe grids require one-minute source candles. Select 1m.'},{status:400})
-    const candles=await getResearchCandles(venue,symbol,interval,typeof body.demo==='boolean'?body.demo:connection.demo,limit)
+    const demo=venue==='bingx'&&(typeof body.demo==='boolean'?body.demo:connection.demo)
+    const candles=await getResearchCandles(venue,symbol,interval,demo,limit,undefined,request.signal)
     const study=await runTerminalReplayAsync(symbol,candles,{...settings?.catalog,...settings?.symbolFees?.[symbol],stageGateMode:settings?.stageGateMode,mainEvalPosCount:settings?.stageLastN.base??20,baseProfitFactor:settings?.stageMinPF.base??1.1,replayBarSeconds:intervalSeconds(interval)},request.signal)
     const progression = interval==="1m"&&settings?.stageGateMode==="exec-branches"
       ? await runExecProgressionReplay(symbol,candles,settings,request.signal) : undefined
-    const result={success:true,connectionId:connection.id,source:`${venue}:${connection.demo?'demo':'public'}`,createdAt:Date.now(),...study,progression}
+    const result={success:true,connectionId:connection.id,source:`${venue}:${demo?'demo':'public'}`,createdAt:Date.now(),...study,progression}
     getStore(connection.id).set('lastReplay',result)
     return NextResponse.json(result)
   } catch(error) {return NextResponse.json({success:false,error:error instanceof Error?`Replay unavailable: ${error.message}`:'Replay unavailable'},{status:502})}
