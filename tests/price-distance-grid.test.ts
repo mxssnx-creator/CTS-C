@@ -6,6 +6,7 @@ import { LAST_N_STAGES } from "../core/last-n-grid"
 import { STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS } from "../core/protection-grid"
 import { DEFAULTS, configurationCount, hydrate, validateConfiguration } from "../core/settings-schema"
 import { EXIT_MODES, type Candle } from "../core/types"
+import { observedExit } from "../core/exits"
 
 test("all exact protection distances and both trailing types have their own catalog IDs and Auto PF", () => {
   const settings = validateConfiguration({ ...DEFAULTS, stageGateMode:"parent-branches", strategyEnabledRanges: ["Short"], strategyTpSteps: [12],
@@ -22,6 +23,29 @@ test("all exact protection distances and both trailing types have their own cata
     [key, typeof value === "object" ? JSON.stringify(value) : String(value)]))), settings)
   assert.throws(() => generateStrategyCatalog("offline", { ...settings, strategyStopDistancePcts: [.21] }), /0.1 percentage-point/)
   assert.throws(() => validateConfiguration({ strategyLastNGrid: { main: [8, 8] } }, { partial: true }), /Last-N grid/)
+})
+
+test("wider optional trailing gaps preserve independent fixed and dynamic protection",()=>{
+  const gaps=[2.6,3,4,5,6,8]
+  const settings=validateConfiguration({...DEFAULTS,strategyEnabledRanges:["Short"],strategyTpSteps:[12],
+    strategyIndicationTypes:["Trend"],strategyExitModes:["trailing","trailing-fixed"],
+    strategyPriceDistancesEnabled:true,strategyStopDistancePcts:[.4],strategyTrailDistancePcts:gaps})
+  const rows=generateStrategyCatalog("offline",settings)
+  assert.equal(rows.length,gaps.length*2)
+  assert.equal(configurationCount(settings),rows.length)
+  assert.equal(new Set(rows.map(row=>row.id)).size,rows.length)
+  assert.deepEqual([...new Set(rows.map(row=>row.trailDistancePct))],gaps)
+  assert.deepEqual(hydrate(Object.fromEntries(Object.entries(settings).map(([key,value])=>
+    [key,typeof value==="object"?JSON.stringify(value):String(value)]))),settings)
+  for(const direction of ["long","short"] as const){
+    const sign=direction==="long"?1:-1,price=100+sign*25
+    const position={direction,entryPrice:100,peak:100,price,takeProfitPct:2,stopLossPct:10,
+      trailDistancePct:8,openedAt:1,timestamp:2,maxHoldMinutes:15}
+    const fixed=observedExit({...position,exitMode:"trailing-fixed"})
+    const dynamic=observedExit({...position,exitMode:"trailing"})
+    assert.equal(fixed.stop,price-sign*8)
+    assert.equal(dynamic.stop,price-sign*price*.08)
+  }
 })
 
 test("Base, Main, Real and restored Live retain the owning exact geometry and Last-N proof", () => {

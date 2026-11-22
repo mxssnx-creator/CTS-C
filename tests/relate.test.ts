@@ -83,3 +83,30 @@ test("Relate increases volume only when its own recent PF clears the disjoint Au
   assert.equal(relateAllocation(weak,config,settings,weak.length),1)
   assert.ok(relateAllocation(weak,config,settings,weak.length-1)>1,"untimed older returns leave the fallback in force")
 })
+
+test("a full 250-close Relate window retains older Auto PF evidence across restart", () => {
+  const adaptiveCatalog = {...catalog, strategySlRatios:[.5], autoPfEnabled:true, autoPfMode:"set-history",
+    autoPfFallback:1.1, autoPfMinSamples:16, autoPfHistory:40, autoPfAdjustment:.75, autoPfMax:2}
+  const engine = new TradingEngine({symbols:[symbol],catalog:adaptiveCatalog,
+    coordinations:{...validateEngineSettings().coordinations,relate:{...DEFAULT_RELATE,enabled:true}}})
+  const internal = engine as any
+  const config = generateStrategyCatalog("bingx-x02",adaptiveCatalog)[0]
+  const weak = internal.lane(symbol,config,"long","relate","real")
+  const other = internal.lane(symbol,config,"short","relate","real")
+  const recent = [...Array<number>(138).fill(1),...Array<number>(112).fill(-1)]
+  const older = Array<number>(16).fill(-1)
+  for (const [index,value] of [...recent,...older].reverse().entries()) {
+    internal.recordSample(weak,value,1_790_000_000_000+index*60_000)
+    weak.closedCount++
+  }
+  for (const [index,value] of recent.slice().reverse().entries()) {
+    internal.recordSample(other,value,1_790_000_000_000+index*60_000)
+    other.closedCount++
+  }
+  assert.equal(weak.samples.length,266)
+  assert.equal(relateAllocation(weak.samples,weak.config,engine.settings.coordinations.relate!,weak.sampleTimes.length),1)
+  assert.ok(relateAllocation(other.samples,other.config,engine.settings.coordinations.relate!,other.sampleTimes.length)>1)
+  const restored = TradingEngine.fromSerialized(engine.serializeState()).exportState().lanes
+  assert.equal(restored[weak.id].samples.length,266)
+  assert.equal(relateAllocation(restored[weak.id].samples,restored[weak.id].config,engine.settings.coordinations.relate!,restored[weak.id].sampleTimes!.length),1)
+})

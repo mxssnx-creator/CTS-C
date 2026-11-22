@@ -58,9 +58,9 @@ test("positive and negative outcomes make independent paths and preserve the ful
   const plan = new ParentBranches({strategyExecWindows:windows},true)
   const config = generateStrategyCatalog("test",settings.catalog)[0]
   const base = plan.variants(config,undefined,"base")
-  assert.equal(base.length,6)
-  assert.equal(new Set(base.map(lane=>lane.id)).size,6)
-  assert.equal(base.filter(lane=>lane.branch?.windows?.base?.shortPolarity==="negative").length,2)
+  assert.equal(base.length,8)
+  assert.equal(new Set(base.map(lane=>lane.id)).size,8)
+  assert.equal(base.filter(lane=>lane.branch?.windows?.base?.shortPolarity==="negative").length,4)
   const parent = base.find(lane=>lane.branch?.windows?.base?.minimalPolarity==="negative")!
   const next = plan.variants(parent,"normal","main")
   assert.equal(next.length,8)
@@ -138,16 +138,18 @@ test("fresh parent entries fund independent child Sets and Exec mirrors without 
   } finally { db.close() }
 })
 
-test("only Exec can select Short up to 30 and each width uses its own complete window", () => {
+test("Real and Exec Short sizes up to 30 each use their own complete window", () => {
   const initial = checkExecWindows(settings.catalog!.strategyExecWindows)
   const exec = {...initial.exec,short:[30,20,28,24]}
   const windows = checkExecWindows({...initial,exec})
   assert.deepEqual(windows.exec.short,[20,24,28,30])
-  assert.throws(()=>checkExecWindows({real:{short:[30]}}),/distinct Exec window choices/)
+  assert.deepEqual(checkExecWindows({...initial,real:{...initial.real,short:[30,20]}}).real.short,[20,30])
+  assert.throws(()=>checkExecWindows({main:{short:[30]}}),/distinct Exec window choices/)
   assert.throws(()=>checkExecWindows({...initial,exec:{...exec,short:[31]}}),/distinct Exec window choices/)
   assert.throws(()=>checkExecWindows({...initial,exec},50),/exceed retained/)
   const minimal = {long:["none"],short:[4,30],last:[1],shortOutcomes:["negative"]}
-  assert.doesNotThrow(()=>checkExecWindows({...initial,exec:minimal},25))
+  assert.throws(()=>checkExecWindows({...initial,exec:minimal},25),/exceed retained/)
+  assert.doesNotThrow(()=>checkExecWindows({...initial,exec:minimal},31))
   const engine = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows}})
   const traded:ClosedTrade[]=[]
   engine.observeStageCloses(trade=>{if(trade.executed) traded.push(trade)})
@@ -156,6 +158,33 @@ test("only Exec can select Short up to 30 and each width uses its own complete w
   assert.ok(closings.includes(31),"30 Short closes plus one Last close are needed for the no-Long variant")
   assert.ok(closings.includes(41),"the inherited Base Long contributes ten more disjoint closes")
   assert.ok(traded.every(trade=>trade.executionProof!.count===trade.executionProof!.required))
+})
+
+test("signed Short 30 and Last branches remain independent in Real and Exec", () => {
+  const signs = ["positive","negative"] as const
+  const initial = checkExecWindows(settings.catalog!.strategyExecWindows)
+  const windows = checkExecWindows({...initial,
+    real:{long:["none"],short:[30],last:[1],shortOutcomes:signs,lastOutcomes:signs},
+    exec:{long:["none"],short:[30],last:[1],shortOutcomes:signs,lastOutcomes:signs},
+  })
+  const plan = new ParentBranches({strategyExecWindows:windows},true)
+  const geometry = generateStrategyCatalog("test",settings.catalog)[0]
+  const base = plan.variants(geometry,undefined,"base")[0]
+  const main = plan.variants(base,"normal","main")[0]
+  const real = plan.variants(main,"normal","real")
+  assert.equal(real.length,4)
+  assert.equal(new Set(real.map(lane=>lane.id)).size,4)
+  const negative = real.find(lane=>lane.branch!.windows!.real!.shortPolarity==="negative" &&
+    lane.branch!.windows!.real!.minimalPolarity==="positive")!
+  const exec = plan.variants(negative,"normal","exec")
+  assert.equal(exec.length,4)
+  assert.equal(new Set(exec.map(lane=>lane.id)).size,4)
+  for (const child of exec) assert.equal(plan.restore(child,geometry,()=>true),child)
+  const policy = negative.branch!.windows!.real!
+  assert.equal(evaluateBlocks(blockPrefix([10,...Array<number>(30).fill(-.1)]),policy,1.1).state,"qualified")
+  assert.equal(evaluateBlocks(blockPrefix([1,...Array<number>(30).fill(-.1)]),policy,1.1).state,"failed")
+  assert.equal(evaluateBlocks(blockPrefix([10,...Array<number>(29).fill(-.1)]),policy,1.1).state,"insufficient")
+  assert.equal(evaluateBlocks(blockPrefix([10,...Array<number>(30).fill(.1)]),policy,1.1).state,"failed")
 })
 
 test("terminal holdout reports only the settled positions that fed a child", async () => {

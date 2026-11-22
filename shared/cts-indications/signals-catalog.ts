@@ -16,9 +16,21 @@ export function signalsCoordinationId(names:readonly string[],ratio:number,minSo
   let bits=0n;for(const [i,s]of sources.entries())if(unique.has(s.name))bits|=1n<<BigInt(i)
   return `sig-coord-v2-r${Math.round(ratio*100)}-n${minSources}-i${mask}-b${bits.toString(36)}`
 }
+// These optional variants reuse the same completed-bar state but may enter
+// again on a later bar while that state remains directional. They retain a
+// distinct source/configuration identity and are not part of the defaults.
+export const SIGNAL_CONTINUATION_SOURCES = sources.filter(source=>
+  ['ema-cross','rsi-momentum','donchian'].includes(source.name)).flatMap(source=>
+  (['short','medium'] as const).map(variant=>({
+    id:`${source[variant]}-follow`,baseId:source[variant],
+    label:`${source.label} · ${variant} · continuation`,category:'Continuation',variant,
+  })))
+const signalContinuationBases=new Map(SIGNAL_CONTINUATION_SOURCES.map(({id,baseId})=>[id,baseId]))
+export const signalContinuationBase=(id:string)=>signalContinuationBases.get(id)
 export const SIGNALS_CATALOG:readonly {id:string;label:string;category:string;variant:string}[]=[
   ...sources.flatMap(s=>['short','medium'].map(variant=>({id:s[variant as 'short'|'medium'],label:`${s.label} · ${variant}`,category:s.name.startsWith('r-')?'Research':s.name.startsWith('s2-')?'Legacy':'Source',variant}))),
-  ...Object.entries(pools).flatMap(([category,names])=>SIGNAL_RATIOS.flatMap(ratio=>[2,3,5].flatMap(min=>[1,2,3].map(mask=>({id:signalsCoordinationId(names,ratio,min,mask),label:`${category} · ${Math.round(ratio*100)}% band · minimum ${min} sources · ${mask===1?'short':mask===2?'medium':'both'}`,category,variant:'coordination'})))))
+  ...Object.entries(pools).flatMap(([category,names])=>SIGNAL_RATIOS.flatMap(ratio=>[2,3,5].flatMap(min=>[1,2,3].map(mask=>({id:signalsCoordinationId(names,ratio,min,mask),label:`${category} · ${Math.round(ratio*100)}% band · minimum ${min} sources · ${mask===1?'short':mask===2?'medium':'both'}`,category,variant:'coordination'}))))),
+  ...SIGNAL_CONTINUATION_SOURCES,
 ]
 export const SIGNALS_BY_ID=new Map(SIGNALS_CATALOG.map(s=>[s.id,s]))
 export const DEFAULT_SIGNALS_SOURCES=['sig-ema-cross-s','sig-rsi-reversal-s','sig-donchian-s','sig-macd-cross-m','sig-vwap-s',signalsCoordinationId(pools.Mixed,.8,3,3)]
