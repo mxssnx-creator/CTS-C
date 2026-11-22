@@ -17,7 +17,7 @@ test("all exact protection distances and both trailing types have their own cata
   assert.equal(new Set(rows.map(row => row.id)).size, rows.length)
   assert.deepEqual([...new Set(rows.map(row => +(row.stoploss * 100).toFixed(1)))], STOP_DISTANCE_PCTS)
   assert.deepEqual([...new Set(rows.filter(row => row.trailing).map(row => row.trailDistancePct))], TRAIL_DISTANCE_PCTS)
-  assert.ok(rows.every(row => (row.autoPfFloor ?? 0) > 1 && row.stageLastN?.base))
+  assert.ok(rows.every(row => (row.autoPfPolicy?.fallback ?? 0) > 1 && row.stageLastN?.base))
   assert.deepEqual(hydrate(Object.fromEntries(Object.entries(settings).map(([key, value]) =>
     [key, typeof value === "object" ? JSON.stringify(value) : String(value)]))), settings)
   assert.throws(() => generateStrategyCatalog("offline", { ...settings, strategyStopDistancePcts: [.21] }), /0.1 percentage-point/)

@@ -1,7 +1,7 @@
 import { generateStrategyCatalog, STRATEGY_RANGES } from "./catalog"
 import { replayStrategy,strategySignalTrace } from "./replay"
 import { aggregateCostNormalizedResults, describeProfitFactor } from "./metrics"
-import { STAGES, TradingEngine } from "./engine"
+import { STAGES, TradingEngine, windowMetrics } from "./engine"
 import type { MarketCandle } from "./market"
 import type { StrategyConfig, PseudoPosition, EngineSettings } from "./types"
 
@@ -35,8 +35,19 @@ function* replaySteps(symbol: string, candles: MarketCandle[], settings: Record<
     if(!value){value=strategySignalTrace(holdout?test:train,config,holdout?train:[]);cache.set(key,value)}return value
   }
   for(const config of configs){
-    const score = metrics(replayStrategy(symbol, train, config,train.length*2,[],trace(config)))
-    evaluated.push({ config, score, enough: score.trades >= minSamples, passed: score.trades >= minSamples && (score.pf ?? 0) >= Math.max(minPf,config.autoPfFloor??0) })
+    const positions = replayStrategy(symbol, train, config,train.length*2,[],trace(config))
+    const score = metrics(positions)
+    let enough = score.trades >= minSamples, passed = enough && (score.pf ?? 0) >= Math.max(minPf,config.autoPfFloor??0)
+    if (config.autoPfPolicy) {
+      const sets = (["long","short"] as const).map(direction=>{
+        const closed = positions.filter(position=>position.direction===direction&&position.status==="closed").reverse()
+        const samples = closed.map(position=>position.result!)
+        return windowMetrics({config,samples,closedCount:samples.length,timedSampleCount:samples.length},minSamples,minPf)
+      })
+      enough = sets.some(set=>set.enoughSamples)
+      passed = sets.some(set=>set.qualified)
+    }
+    evaluated.push({config,score,enough,passed})
     yield
   }
   const selected: typeof evaluated = []

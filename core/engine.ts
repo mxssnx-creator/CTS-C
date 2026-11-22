@@ -15,6 +15,7 @@ import { describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { isFixedTrailing, observedExit } from "./exits"
 import { ConfigStageWindows, type WindowEvidence } from "./config-stage-windows"
 import { compactLaneV4 } from "./lane-checkpoint-codec"
+import { AUTO_PF_DEFAULTS, autoPfEvidence, autoPfMinimum, validAutoPfEvidence } from "./auto-pf"
 import type { Candle, ClosedTrade, Coordination, Direction, EngineEvent, EngineSettings, EngineSnapshot, EngineState, ExecutionIntent, LaneState, PaperPosition, Stage, StageWindowScope, StrategyConfig,GateProof } from "./types"
 
 export const STAGES: readonly Stage[] = [...EXEC_EVALUATION_STAGES, "live"]
@@ -35,7 +36,7 @@ export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   stageWindowScope:"context", microStageWindowScope:"inherit",
   liveEntryMode:'independent',
   stageMinPF: { base: 1.1, main: 1.1, real: 1.1 }, maxSamples: 250,
-  catalog: { strategyTpSteps: [3, 5, 8, 12, 18, 24, 30], strategySlRatios: [.6, 1, 1.4] },
+  catalog: { ...AUTO_PF_DEFAULTS, strategyTpSteps: [3, 5, 8, 12, 18, 24, 30], strategySlRatios: [.6, 1, 1.4] },
   coordinations: { axis: { enabled: true, previous: 8, last: 3, outcome: "any",reference:'same-stage' },
     block: { enabled: true, steps: 3, ratio: .2, mode: "shared" },
     dca: { enabled: true, steps: 2, distancePct: 1, multiplier: 2 }, relate: DEFAULT_RELATE },
@@ -121,7 +122,7 @@ function laneKey(connectionId: string, symbol: string, config: StrategyConfig, d
   // JSON identities cannot collide when a user changes delimiters in a label.
   return JSON.stringify([connectionId, symbol, config.id, direction, coordination, stage, identity])
 }
-type WindowResult={pfSampleCount?:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number;count:number;required:number;minPF:number;profit:number|null;loss:number|null;enoughSamples:boolean;profitFactor:number|null;pfState:import('./types').ProfitFactorState;qualified:boolean}
+type WindowResult={pfSampleCount?:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number;count:number;required:number;minPF:number;profit:number|null;loss:number|null;enoughSamples:boolean;profitFactor:number|null;pfState:import('./types').ProfitFactorState;qualified:boolean;autoPf?:GateProof["autoPf"]}
 type StageWindowResult=WindowResult&Pick<GateProof,"windowScope"|"configWindow">&{windowKey?:string}
 const windowCache=new WeakMap<WindowEvidence,{closed:number;samples:number[];length:number;head:number|undefined;value:WindowResult}>()
 const blockWindowCache=new WeakMap<WindowEvidence,{closed:number;samples:number[];head:number|undefined;length:number;key:string;value:WindowResult}>()
@@ -129,22 +130,32 @@ const sharedBlockPrefixes = new WeakMap<number[], BlockPrefix>()
 const emptySamples = Object.freeze([]) as unknown as number[]
 const mirrorWindow: WindowResult = { count:0,required:0,minPF:0,profit:0,loss:0,enoughSamples:false,profitFactor:null,pfState:"empty",qualified:false }
 const axisCache=new WeakMap<WindowEvidence,{closed:number;samples:number[];length:number;head:number|undefined;previous:number;last:number;outcome:string;threshold:number;allowed:boolean}>()
+function gatePrefix(samples:number[],required:number):BlockPrefix {
+  const cached = sharedBlockPrefixes.get(samples)
+  if (cached && cached.n>=Math.min(samples.length,required)) return cached
+  const prefix = blockPrefix(samples,required)
+  if (Object.isFrozen(samples)) sharedBlockPrefixes.set(samples,prefix)
+  return prefix
+}
 function knownWindow(samples:readonly unknown[],count:number):boolean {
   for(let i=0;i<count;i++)if(typeof samples[i]!=='number'||!Number.isFinite(samples[i]))return false
   return true
 }
-export function windowMetrics(lane: WindowEvidence | undefined, required: number, minPF: number, blocks?:BlockPolicy):WindowResult {
+function laneAutoPf(lane: WindowEvidence | undefined, required: number) {
+  return lane && autoPfEvidence(lane.config.autoPfPolicy,lane.samples,required,lane.timedSampleCount ?? lane.sampleTimes?.length ?? 0)
+}
+export function windowMetrics(lane: WindowEvidence | undefined, required: number, minPF: number, blocks?:BlockPolicy, owner = lane):WindowResult {
+  const autoPf = laneAutoPf(owner, blocks ? blockRequired(blocks) : required)
+  const floor = Math.max(minPF, lane?.config.autoPfFloor ?? owner?.config.autoPfFloor ?? 0, autoPfMinimum(owner?.config.autoPfPolicy,autoPf))
+  const metrics = evaluateWindow(lane,required,floor,blocks)
+  return autoPf ? { ...metrics, autoPf } : metrics
+}
+function evaluateWindow(lane: WindowEvidence | undefined, required: number, minPF: number, blocks?:BlockPolicy):WindowResult {
   const cap=lane?.config.maxWindowDrawdownPct
   if(blocks){
-    minPF=Math.max(minPF,lane?.config.autoPfFloor??0);
     const samples=lane?.samples??[],key=blockPolicyKey(blocks),cached=lane?blockWindowCache.get(lane):undefined;
     if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.key===key&&cached.value.minPF===minPF&&cached.value.maxDrawdownPct===cap)return cached.value;
-    let prefix = sharedBlockPrefixes.get(samples)
-    if (!prefix) {
-      const shared = Object.isFrozen(samples)
-      prefix = blockPrefix(samples, shared ? samples.length : blockRequired(blocks))
-      if (shared) sharedBlockPrefixes.set(samples, prefix)
-    }
+    const prefix = gatePrefix(samples,blockRequired(blocks))
     const result=evaluateBlocks(prefix,blocks,minPF);
     const unknown=result.state==='unknown';
     const profit = result.long.gp + (blocks.lastRequiresPF ? result.short.gp + result.minimal.gp : 0)
@@ -156,7 +167,6 @@ export function windowMetrics(lane: WindowEvidence | undefined, required: number
     if(lane)blockWindowCache.set(lane,{closed:lane.closedCount,samples,head:samples[0],length:samples.length,key,value});
     return value;
   }
-  minPF = Math.max(minPF,lane?.config.autoPfFloor??0)
   const samples = lane?.samples ?? [], count = Math.min(samples.length, required)
   const cached=lane?windowCache.get(lane):undefined
   if(cached&&cached.closed===lane!.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.value.required===required&&cached.value.minPF===minPF&&cached.value.maxDrawdownPct===cap)return cached.value
@@ -250,6 +260,7 @@ export class TradingEngine {
   checkpointSaved():void{this.dirtyLaneIds.clear()}
   private immutableProof(proof:GateProof):GateProof{
     if(proof.configWindow)Object.freeze(proof.configWindow)
+    if(proof.autoPf)Object.freeze(proof.autoPf)
     return Object.freeze(proof)
   }
   /** Reuse the parent's immutable prefix instead of retaining a copied proof object in every child. */
@@ -392,7 +403,7 @@ export class TradingEngine {
       } else if (!this.symbolConfigIds.get(lane.symbol)?.has(lane.configId)) continue
       if (lane.id !== laneKey(s.connectionId,lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage,this.coordinationIdentity(lane.coordination,lane.stage,lane.config,lane.symbol))) continue
       this.cacheLane(lane)
-      if (this.branches && lane.parentProof && lane.stage !== "live") this.registerChild(lane)
+      if (this.branches && !this.branches.exec && lane.parentProof && lane.stage !== "live") this.registerChild(lane)
     }
   }
   /** Rechecked after asynchronous exchange preflight, immediately before a new risk write. */
@@ -403,7 +414,8 @@ export class TradingEngine {
       const exec = this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,"exec")
       const proof = lane.open.admission?.at(-1)
       return Boolean(exec?.open?.executed && lane.open.parentPositionId === exec.open.id &&
-        proof?.stage === "exec" && proof.laneId === exec.id && proof.qualified)
+        proof?.stage === "exec" && proof.laneId === exec.id && proof.qualified && proof.count===proof.required &&
+        proof.checkedAt===lane.open.openedAt && exec.open.executionProof?.minPF===proof.minPF)
     }
     if(this.realMirror){const real=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,'real');if(!lane.open.parentPositionId||real?.open?.id!==lane.open.parentPositionId)return false}
     return this.hasParentEvidence(lane.symbol,lane.config,lane.direction,lane.coordination,"live",false,before,true)&&(lane.coordination!=="axis"||this.axisAllows(lane.symbol,lane.config,lane.direction,"live",before))
@@ -450,7 +462,7 @@ export class TradingEngine {
     if (this.branches && config?.branch && symbol) {
       const path = [...config.branch.ancestors.map(p => p.coordination), coordination]
       const parts = path.map((c,i) => [this.economicsIds[c],this.laneVolumeFactor(c,config,symbol),this.stageWindowPolicy(config,STAGES[i] as EvaluationStage)])
-      return hashId(JSON.stringify([this.branches.exec ? "exec-branches-v1" : "parent-branches-v1",parts,stage==="base"?null:this.stageScope(config),
+      return hashId(JSON.stringify([this.branches.exec ? "exec-branches-v2" : "parent-branches-v1",parts,stage==="base"?null:this.stageScope(config),
         this.calculationOnly(config,coordination,stage)]))
     }
     if (this.branches?.exec && config && symbol && stage === "base") {
@@ -474,7 +486,8 @@ export class TradingEngine {
     const axisWindow = lane.coordination === "normal" && s.coordinations.axis.enabled&&(s.coordinations.axis.reference!=='base'||lane.stage==='base')
       ? s.coordinations.axis.previous + s.coordinations.axis.last : 0
     const relateWindow = lane.coordination === "relate" && lane.stage !== "base" ? s.coordinations.relate?.lastN ?? 0 : 0
-    return Math.min(s.maxSamples, Math.max(gateWindow, axisWindow, relateWindow)) + 1
+    const adaptiveWindow = Math.max(gateWindow, axisWindow) + (lane.config.autoPfPolicy?.history ?? 0)
+    return Math.min(s.maxSamples, Math.max(adaptiveWindow, relateWindow)) + 1
   }
   private trimSamples(lane:LaneState):void {
     const retained=this.sampleRetention(lane)
@@ -526,7 +539,9 @@ export class TradingEngine {
     let start = 0
     if (times) while (start < times.length && times[start] >= before) start++
     const end = legacyThrough >= before ? times?.length ?? 0 : lane.samples.length
-    return {config: lane.config, samples: lane.samples.slice(start, end), closedCount: lane.closedCount}
+    const samples = lane.samples.slice(start, end)
+    if (Object.isFrozen(lane.samples)) Object.freeze(samples)
+    return {config: lane.config, samples, closedCount: lane.closedCount, timedSampleCount: Math.max(0, (times?.length ?? 0) - start)}
   }
   private stageWindowPolicy(config: StrategyConfig | undefined, source: EvaluationStage) {
     const settings = this.state.settings
@@ -540,10 +555,11 @@ export class TradingEngine {
   private stageWindow(lane:LaneState | undefined,source:EvaluationStage,before:number,exact=false):StageWindowResult {
     const { required, minPF, blocks } = this.stageWindowPolicy(lane?.config, source)
     const scope=lane&&!exact?this.stageScope(lane.config):"context"
-    if(!lane||scope==="context")return windowMetrics(lane&&this.contextEvidence(lane,before),required,minPF,blocks)
-    const wide=windowMetrics(this.configWindows.evidence(lane,before,blocks?blockRequired(blocks):required),required,minPF,blocks)
+    const context=lane&&this.contextEvidence(lane,before)
+    if(!lane||scope==="context")return windowMetrics(context,required,minPF,blocks)
+    const wide=windowMetrics(this.configWindows.evidence(lane,before,blocks?blockRequired(blocks):required),required,minPF,blocks,context)
     if(scope==="config")return {...wide,windowScope:scope,windowKey:this.configWindowKey(lane)}
-    const own=windowMetrics(this.contextEvidence(lane,before),required,minPF,blocks)
+    const own=windowMetrics(context,required,minPF,blocks)
     return {...own,windowScope:scope,enoughSamples:own.enoughSamples&&wide.enoughSamples,qualified:own.qualified&&wide.qualified,
       configWindow:{count:wide.count,profitFactor:wide.profitFactor,qualified:wide.qualified}}
   }
@@ -566,7 +582,8 @@ export class TradingEngine {
       const source=stages[i] as EvaluationStage
       const { required, blocks, minPF } = this.stageWindowPolicy(lane.config, source)
       const parent=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,source)
-      const floor=Math.max(minPF,lane.config.autoPfFloor??0),cap=lane.config.maxWindowDrawdownPct
+      if (!validAutoPfEvidence(lane.config.autoPfPolicy,proof.autoPf)) return false
+      const floor=Math.max(minPF,lane.config.autoPfFloor??0,autoPfMinimum(lane.config.autoPfPolicy,proof.autoPf)),cap=lane.config.maxWindowDrawdownPct
       if(!parent||proof.stage!==source||proof.laneId!==parent.id||!proof.qualified||(proof.windowScope??"context")!==scope||
         !Number.isFinite(proof.checkedAt)||proof.checkedAt<=0||typeof proof.profitFactor!=="number"||
         !Number.isFinite(proof.profitFactor)||proof.profitFactor<floor||proof.minPF!==floor||
@@ -616,7 +633,8 @@ export class TradingEngine {
     if (!reference) return false
     const source = this.contextEvidence(reference,before)
     if (source.samples.length < axis.previous + axis.last) return false
-    const threshold = Math.max(this.stageWindowPolicy(config, referenceStage === "live" ? "real" : referenceStage).minPF, config.autoPfFloor??0)
+    const autoPf = laneAutoPf(source, axis.previous + axis.last)
+    const threshold = Math.max(this.stageWindowPolicy(config, referenceStage === "live" ? "real" : referenceStage).minPF, config.autoPfFloor??0,autoPfMinimum(reference.config.autoPfPolicy,autoPf))
     const cached=axisCache.get(source),samples=source.samples
     if(cached&&cached.closed===source.closedCount&&cached.samples===samples&&cached.length===samples.length&&cached.head===samples[0]&&cached.previous===axis.previous&&cached.last===axis.last&&cached.outcome===axis.outcome&&cached.threshold===threshold)return cached.allowed
     if(!knownWindow(samples,axis.last+axis.previous)){
@@ -630,7 +648,7 @@ export class TradingEngine {
     return allowed
   }
   private gateProof(lane: LaneState | undefined, stage: EvaluationStage, checkedAt: number, proof = this.stageWindow(lane, stage, checkedAt)): GateProof {
-    return {stage,laneId:lane?.id??"",count:proof.count,required:proof.required,minPF:proof.minPF,profitFactor:proof.profitFactor,pfState:proof.pfState,qualified:proof.qualified,checkedAt,...(proof.maxDrawdownPct!==undefined?{drawdownPct:proof.drawdownPct,maxDrawdownPct:proof.maxDrawdownPct}:{}),...(proof.blockPolicyKey?{blockPolicyKey:proof.blockPolicyKey}:{}),...(proof.windowScope?{windowScope:proof.windowScope}:{}),...(proof.configWindow?{configWindow:{...proof.configWindow}}:{})}
+    return {stage,laneId:lane?.id??"",count:proof.count,required:proof.required,minPF:proof.minPF,profitFactor:proof.profitFactor,pfState:proof.pfState,qualified:proof.qualified,checkedAt,...(proof.maxDrawdownPct!==undefined?{drawdownPct:proof.drawdownPct,maxDrawdownPct:proof.maxDrawdownPct}:{}),...(proof.blockPolicyKey?{blockPolicyKey:proof.blockPolicyKey}:{}),...(proof.windowScope?{windowScope:proof.windowScope}:{}),...(proof.configWindow?{configWindow:{...proof.configWindow}}:{}),...(proof.autoPf?{autoPf:proof.autoPf}:{})}
   }
   private open(lane: LaneState, candle: Candle, mirror?:PaperPosition, entryProof?:GateProof[]): PaperPosition {
     this.dirtyLaneIds.add(lane.id)
@@ -699,7 +717,7 @@ export class TradingEngine {
     const netReturnPct = netPnl / open.notional * 100
     const trade: ClosedTrade = { id: open.id, laneId: lane.id, configId: lane.configId, symbol: lane.symbol, direction: lane.direction, stage: lane.stage, coordination: lane.coordination,
       openedAt: open.openedAt, closedAt: candle.timestamp, entryPrice: open.entryPrice, exitPrice: candle.close,
-      quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.executed?{executed:true}:{}),...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
+      quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.executed?{executed:true}:{}),...(open.executionProof?{executionProof:open.executionProof}:{}),...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
     if (lane.coordination === "block") {
       if (open.sizing?.block.behavior === "rounds" && !(this.processedSets && lane.stage === "live")) settleBlockRound(lane, netPnl, open.sizing.block)
       settleBlockSteps(lane, open, candle.close, netReturnPct)
@@ -848,11 +866,14 @@ export class TradingEngine {
       }
       const position = this.open(lane,candle,stage === "live" ? parent : undefined,entryProof)
       if (parent) position.parentPositionId = parent.id
-      if (created && lane.parentProof && stage !== "live") this.registerChild(lane)
+      if (!plan.exec && created && lane.parentProof && stage !== "live") this.registerChild(lane)
       if (!lane.calculationOnly) emit({type:"opened",laneId:lane.id,timestamp:candle.timestamp,stage})
       if (lane.calculationOnly) return
       if (stage === "live") {
-        if (plan.exec) parent!.executed = true
+        if (plan.exec) {
+          parent!.executed = true
+          parent!.executionProof = entryProof!.at(-1)!
+        }
         if (allowExecution && !lane.calculationOnly) {
           position.executionEligible = true
           if (this.isLiveIntentEligible(position.id,candle.timestamp)) this.enqueueIntent(lane,position,candle,"entry",position.quantity)
@@ -876,12 +897,10 @@ export class TradingEngine {
           // Same-stage Axis may consult the Normal child of this exact parent.
           for (const c of enabled) if (choices.includes(c) || this.axisReferenceOnly(child,c,next)) visit(child,c,next,position,nextProof)
         }
-      } else {
-        // Admission creates an independent child book. Later parent entries
-        // keep that book fed even during a parent PF dip. Only a qualified
-        // parent can create a new child, and Exec always checks its own gate.
+      } else if (!plan.exec) {
+        // Preserve the independent processing of previously admitted legacy Sets.
         for (const child of this.childrenByLane.get(lane.id) ?? []) {
-          visit(child.config,child.coordination,next,position,plan.exec ? child.parentProof : undefined)
+          visit(child.config,child.coordination,next,position)
         }
       }
     }
@@ -906,6 +925,9 @@ export class TradingEngine {
       const evidence = this.contextEvidence(observation,candle.timestamp)
       this.open(observation,candle)
       if (evidence.samples.length < plan.baseSampleCounts[0]) continue
+      // A Base observation can feed different window sizes at this exact clock.
+      // Auto PF's older history stays out of the much smaller gate prefix.
+      gatePrefix(evidence.samples,plan.baseSampleCounts.at(-1)!)
       for (const base of plan.variants(geometry,undefined,"base")) {
         const {blocks,required,minPF} = this.stageWindowPolicy(base,"base")
         if (this.cachedLane(symbol,base.id,direction,coordination,"base")) {
@@ -1123,6 +1145,15 @@ export class TradingEngine {
     let executedOpen = 0, executedClosed = 0, executedProfit = 0, executedLoss = 0, executedNet = 0
     let baseObserved = 0, baseEnough = 0
     const currentWindows=new Set<string>(), validatedWindows=new Set<string>()
+    const feedableParents = new Map<string,boolean>()
+    const freshAncestors = (lane:LaneState) => lane.parentProof?.every(proof=>{
+      const cached = feedableParents.get(proof.laneId)
+      if (cached!==undefined) return cached
+      const parent = this.state.lanes[proof.laneId]
+      const passes = Boolean(parent&&this.currentLane(parent)&&this.stageWindow(parent,proof.stage as EvaluationStage,Infinity,true).qualified)
+      feedableParents.set(proof.laneId,passes)
+      return passes
+    }) ?? false
     for (const lane of Object.values(this.state.lanes)) {
       if (lane.calculationOnly) {
         if (lane.baseObservation && this.branches?.exec && this.currentLane(lane)) {
@@ -1156,10 +1187,18 @@ export class TradingEngine {
       stats.admittedCount+=lane.admittedClosed??0;stats.admittedProfit+=lane.admittedProfit??0;stats.admittedLoss+=lane.admittedLoss??0;stats.admittedNet+=lane.admittedNetPnl??0
       if(stats.fees!==null){if(lane.closedCount&&lane.costTotal===undefined)stats.fees=null;else stats.fees+=lane.costTotal??0}
       if(lane.open)stats[lane.direction==="long"?"longOpen":"shortOpen"]++
-      const parentReady=current&&this.hasParentEvidence(lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage)
+      const parentReady=current&&this.hasParentEvidence(lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage)&&
+        (!lane.config.branch?.windows||lane.stage==="base"||directMirror||freshAncestors(lane))
       const axisReady=current&&(directMirror||lane.coordination!=="axis"||this.axisAllows(lane.symbol,lane.config,lane.direction,lane.stage))
       const validated=!directMirror&&metrics.qualified&&parentReady&&axisReady
       if(current){
+        if (metrics.autoPf) {
+          const auto = stats.autoPf ??= {historySets:0,fallbackSets:0,minThreshold:metrics.minPF,maxThreshold:metrics.minPF}
+          if (metrics.autoPf.mode==="set-history") auto.historySets++
+          else auto.fallbackSets++
+          auto.minThreshold=Math.min(auto.minThreshold,metrics.minPF)
+          auto.maxThreshold=Math.max(auto.maxThreshold,metrics.minPF)
+        }
         stats.currentLanes++;stats.currentEnoughSamples+=Number(metrics.enoughSamples)
         stats.admissionReady+=Number(parentReady&&axisReady&&(!directMirror||Boolean(lane.open)))
         stats.blockedByParent+=Number(!parentReady)

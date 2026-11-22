@@ -1,5 +1,5 @@
-import { checkExecWindows, checkLastNGrid, EXEC_EVALUATION_STAGES, execBlockPolicy, LAST_N_STAGES, type EvaluationStage, type ExecWindows, type LastNGrid, type LegacyEvaluationStage } from "./last-n-grid"
-import { blockRequired, type BlockPolicy } from "../shared/cts-lastn/blocks.ts"
+import { checkExecWindows, checkLastNGrid, EXEC_EVALUATION_STAGES, execBlockPolicy, execShortOutcomes, LAST_N_STAGES, POSITIVE_EXEC_OUTCOME, type EvaluationStage, type ExecWindows, type LastNGrid, type LegacyEvaluationStage } from "./last-n-grid"
+import { blockRequired, type BlockPolicy, type Polarity } from "../shared/cts-lastn/blocks.ts"
 import type { Coordination, StrategyConfig } from "./types"
 
 type ChildStage = Exclude<EvaluationStage, "base">
@@ -31,24 +31,25 @@ export class ParentBranches {
   constructor(catalog: Record<string, unknown>, readonly exec = false) {
     this.grid = checkLastNGrid(catalog.strategyLastNGrid)
     this.windows = exec ? checkExecWindows(catalog.strategyExecWindows) : undefined
-    this.baseSampleCounts = this.windows ? this.windows.base.long.flatMap(long =>
-      this.windows!.base.short.flatMap(short => this.windows!.base.last.map(last => long+short+last))).sort((a,b)=>a-b) : []
+    const base = this.windows?.base
+    this.baseSampleCounts = base ? base.long.flatMap(long => base.short.flatMap(short => execShortOutcomes(base,short)
+      .flatMap(()=>base.last.flatMap(last=>(base.lastOutcomes??POSITIVE_EXEC_OUTCOME).map(()=>long+short+last))))).sort((a,b)=>a-b) : []
     this.evaluationStages = exec ? EXEC_EVALUATION_STAGES : LAST_N_STAGES
     this.coordinations = checkStageCoordinations(catalog.strategyStageCoordinations)
   }
 
-  private policy(long: number, short: number, last: number): BlockPolicy {
-    const key = `${long}/${short}/${last}`
+  private policy(long: number, short: number, last: number, shortOutcome:Polarity,lastOutcome:Polarity): BlockPolicy {
+    const key = `${long}/${short}/${last}/${shortOutcome}/${lastOutcome}`
     let policy = this.policies.get(key)
     if (!policy) {
-      policy = Object.freeze(execBlockPolicy(long, short, last))
+      policy = Object.freeze(execBlockPolicy(long, short, last,shortOutcome,lastOutcome))
       this.policies.set(key, policy)
     }
     return policy
   }
 
   private make(parent: StrategyConfig, coordination: Coordination | undefined, stage: EvaluationStage, n?: number, policy?: BlockPolicy) {
-    const suffix = policy ? `${policy.long}-${policy.short}-${policy.minimal}` : n ?? 0
+    const suffix = policy ? `${policy.long}-${policy.short}-${policy.minimal}${policy.shortPolarity==="negative"?"-sn":""}${policy.minimalPolarity==="negative"?"-ln":""}` : n ?? 0
     const id = parent.id + (coordination ? "." + coordination : policy ? ".branch2" : ".branch1") + "." + stage + suffix
     let config = this.configs.get(id)
     if (!config) {
@@ -67,11 +68,13 @@ export class ParentBranches {
     let configs = this.children.get(key)
     if (!configs) {
       if (this.windows) {
-        const { short, last } = this.windows[stage]
+        const windows = this.windows[stage]
         const longs = stage === "base" ? this.windows.base.long : this.windows[stage].long.map(mode => mode === "none" ? 0 : parent.branch!.windows!.base!.long)
         configs = []
-        for (const long of longs) for (const s of short) for (const l of last) {
-          configs.push(this.make(parent, coordination, stage, undefined, this.policy(long, s, l)))
+        for (const long of longs) for (const s of windows.short) for (const l of windows.last) {
+          for (const shortOutcome of execShortOutcomes(windows,s)) for (const lastOutcome of windows.lastOutcomes??POSITIVE_EXEC_OUTCOME) {
+            configs.push(this.make(parent, coordination, stage, undefined, this.policy(long,s,l,shortOutcome,lastOutcome)))
+          }
         }
         if (stage === "base") configs.sort((a,b) => blockRequired(a.branch!.windows!.base!)-blockRequired(b.branch!.windows!.base!))
       } else {
@@ -102,13 +105,14 @@ export class ParentBranches {
       if (previous && (previous.configId !== parent.id || !enabled(previous.coordination) ||
           before && !this.choices(this.evaluationStages[index - 1] as ChildStage, before.coordination).includes(previous.coordination))) return
       if (this.windows) {
-        const policy = branch.windows?.[stage], { short, last } = this.windows[stage]
-        if (!policy || !short.includes(policy.short) || !last.includes(policy.minimal)) return
+        const policy = branch.windows?.[stage], windows = this.windows[stage]
+        if (!policy || !windows.short.includes(policy.short) || !windows.last.includes(policy.minimal) ||
+            !execShortOutcomes(windows,policy.short).includes(policy.shortPolarity) || !(windows.lastOutcomes??POSITIVE_EXEC_OUTCOME).includes(policy.minimalPolarity)) return
         const allowedLong = stage === "base" ? this.windows.base.long.includes(policy.long)
           : policy.long === 0 ? this.windows[stage].long.includes("none")
           : policy.long === parent.branch!.windows!.base!.long && this.windows[stage].long.includes("inherit")
         if (!allowedLong) return
-        parent = this.make(parent, previous?.coordination, stage, undefined, this.policy(policy.long, policy.short, policy.minimal))
+        parent = this.make(parent, previous?.coordination, stage, undefined, this.policy(policy.long,policy.short,policy.minimal,policy.shortPolarity,policy.minimalPolarity))
       } else {
         const legacy = stage as LegacyEvaluationStage, options = this.grid[legacy], n = saved.stageLastN?.[legacy]
         if (options?.length ? n === undefined || !options.includes(n) : n !== undefined) return

@@ -5,6 +5,7 @@ import { calculatePriceMovePct, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { observedExit } from "./exits"
 import { INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import {technicalSignal} from './technical-signals'
+import { SIGNAL_TIMEFRAMES } from "../shared/cts-indications/research-sources"
 
 const sourceStreams=new WeakMap<SignalState,{first:number;stream:StreamMath}>()
 export const PORTED_HISTORY_LIMIT=4320
@@ -102,7 +103,7 @@ export function createSignalEvaluator(type: string, step: number): (price: numbe
 
 /** Engine timestamps denote closes; only complete, contiguous UTC source candles form a higher bar. */
 function configuredClosedBar(state:SignalState,bar:Candle,minutes:number):Candle|undefined{
-  if(![1/6,1,5,15,30].includes(minutes))throw new Error('Unsupported signal timeframe')
+  if(!SIGNAL_TIMEFRAMES.some(tf=>tf===minutes))throw new Error('Unsupported signal timeframe')
   if(minutes<1){
     if(state.lastSourceTimestamp!==undefined&&bar.timestamp-state.lastSourceTimestamp!==10000){
       for(const key of Object.keys(state))delete (state as unknown as Record<string,unknown>)[key]
@@ -230,7 +231,7 @@ export function replayStrategy(
 ): PseudoPosition[] {
   if (!TACTICS.has(config.type)) throw new Error(`Unsupported replay tactic: ${config.type}`)
   const step = config.position_cost_step
-  if(config.signalTimeframeMinutes!==undefined&&![1/6,1,5,15,30].includes(config.signalTimeframeMinutes))throw new Error('Unsupported signal timeframe')
+  if(config.signalTimeframeMinutes!==undefined&&!SIGNAL_TIMEFRAMES.some(tf=>tf===config.signalTimeframeMinutes))throw new Error('Unsupported signal timeframe')
   if (!Number.isInteger(step) || step < 2 || step > 10_000 ||
       !Number.isFinite(config.takeprofit) || config.takeprofit <= 0 ||
       !Number.isFinite(config.stoploss) || config.stoploss <= 0 || config.stoploss >= 1 ||

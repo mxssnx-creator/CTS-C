@@ -1,7 +1,8 @@
 import {portedStates,entryOnsets,type PortedBar} from "./index.ts";
+import { SIGNAL_TIMEFRAMES } from "./research-sources.ts";
 export interface SourceRequest{name:string;id:string;tf:number}
 export function aggregateClosedBars(rows:readonly PortedBar[],tf:number){
- if(![1,5,15,30].includes(tf))throw new Error("Unsupported timeframe");
+ if(tf<1||!SIGNAL_TIMEFRAMES.some(minutes=>minutes===tf))throw new Error("Unsupported timeframe");
  const bars:PortedBar[]=[],at:number[]=[];let bucket=-1,group:PortedBar[]=[];
  const finish=(i:number)=>{if(group.length===tf&&group[0].timestamp===bucket&&group.every((b,j)=>b.timestamp===bucket+j*60000)){
    bars.push({timestamp:bucket,open:group[0].open,high:Math.max(...group.map(b=>b.high)),low:Math.min(...group.map(b=>b.low)),close:group.at(-1)!.close,volume:group.reduce((v,b)=>v+b.volume,0)});at.push(i);

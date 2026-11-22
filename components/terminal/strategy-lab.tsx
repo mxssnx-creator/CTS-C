@@ -2,6 +2,8 @@
 import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
+import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES } from "@/shared/cts-indications/research-sources"
+import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, THIN_OSCILLATOR_SOURCE_IDS } from "@/shared/cts-indications/oscillator-sources"
 import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES,SIGNAL_SOURCES} from '@/shared/cts-indications/signals-catalog'
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_CATALOG } from "@/shared/cts-indications/low-range-catalog"
 import {VolumeRatioSliders} from "../../shared/cts-volume/sliders.tsx";
@@ -10,14 +12,14 @@ import {SYSTEM_VOLUME_DIVISOR} from "../../shared/cts-volume/ratios.ts"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, Download, Layers3, RotateCcw, Save, SlidersHorizontal, Upload } from "lucide-react"
 import { ReplayStudy } from "./replay-study"
-import { CORE_INDICATIONS } from "@/core/indications"
+import { CORE_INDICATIONS, CORE_SIGNAL_PERIODS } from "@/core/indications"
 import {formatProfitFactor} from './profit-factor'
 import { DEFAULT_EXIT_MODES, type ProfitFactorState, type Stage, type Coordination, type ExitMode } from '@/core/types'
 
 import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, EXEC_PF_FIELD, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
-import { STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
+import { SELECTABLE_STOP_DISTANCE_PCTS, SELECTABLE_TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
 import { BRANCH_COORDINATIONS, type StageCoordinations } from "@/core/stage-branches"
-import { EXEC_EVALUATION_STAGES, EXEC_LONG_COUNTS, EXEC_SHORT_COUNTS, EXEC_LAST_COUNTS, EXEC_LONG_MODES, LAST_N_STAGES, execPathCount, type ExecWindows, type LastNGrid } from "@/core/last-n-grid"
+import { EXEC_EVALUATION_STAGES, EXEC_LONG_COUNTS, EXEC_SHORT_COUNTS, EXEC_LAST_COUNTS, EXEC_LONG_MODES, EXEC_OUTCOMES, POSITIVE_EXEC_OUTCOME, LAST_N_STAGES, execPathCount, type ExecWindows, type LastNGrid } from "@/core/last-n-grid"
 
 const EXIT_LABELS: Record<ExitMode, string> = {
   fixed: "Fixed TP and SL",
@@ -26,9 +28,12 @@ const EXIT_LABELS: Record<ExitMode, string> = {
   "trailing-fixed": "Fixed-distance trailing",
   "trailing-only-fixed": "Fixed-distance trailing-only",
 }
+const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES]
+const OSCILLATOR_FAMILIES = [["RSI configurations",RSI_VARIANTS],["Parabolic SAR configurations",PARABOLIC_SAR_VARIANTS]] as const
+const OSCILLATOR_IDS = new Set<string>(OSCILLATOR_FAMILIES.flatMap(([,sources])=>sources.map(source=>source.id)))
 
 function MultiChoice({ title, description, values, selected, onChange, format, optional = false }: {
-  title: string; description: string; values: (string | number)[]; selected: (string | number)[];
+  title: string; description: string; values: readonly (string | number)[]; selected: (string | number)[];
   onChange: (values: (string | number)[]) => void; format?: (value: string | number) => string; optional?: boolean
 }) {
   const toggle = (value: string | number) => {
@@ -84,9 +89,14 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
   const execEnabled = draft.stageGateMode === "exec-branches"
   const execWindows = draft.strategyExecWindows as ExecWindows
   const budget = Number(draft.baseNotional) * Number(draft.volumeFactor) / SYSTEM_VOLUME_DIVISOR
-  const updateExecBlock = (stage: keyof ExecWindows, block: "long" | "short" | "last", value: (string | number)[]) =>
+  const updateExecBlock = (stage: keyof ExecWindows, block: "long" | "short" | "last" | "shortOutcomes" | "lastOutcomes", value: (string | number)[]) =>
     change("strategyExecWindows", { ...execWindows, [stage]: { ...execWindows[stage], [block]: value } })
-  const sourceChoices=useMemo(()=>{const q=sourceFilter.trim().toLowerCase(),selected=new Set(draft.strategyIndicationSources as string[]);return PORTED_CATALOG.filter(s=>selected.has(s.id)||!q||`${s.id} ${s.label}`.toLowerCase().includes(q))},[sourceFilter,draft.strategyIndicationSources])
+  const sourceChoices=useMemo(()=>{const q=sourceFilter.trim().toLowerCase(),selected=new Set(draft.strategyIndicationSources as string[]);return STRATEGY_SOURCES.filter(s=>selected.has(s.id)||!q||`${s.id} ${s.label}`.toLowerCase().includes(q))},[sourceFilter,draft.strategyIndicationSources])
+  const updateSourceFamily = (family: readonly {id:string}[], sources: string[]) => {
+    const familyIds = new Set(family.map(source=>source.id))
+    change("strategyIndicationSources",[...(draft.strategyIndicationSources as string[]).filter(id=>!familyIds.has(id)),...sources])
+    if (sources.length && !selected("strategyIndicationTypes").includes("Tactic")) change("strategyIndicationTypes",[...selected("strategyIndicationTypes"),"Tactic"])
+  }
   const reset = () => {
     dirtyRef.current = false; setDirty(false); setDraft(hydrate(settings)); setError(null); setMessage(null)
   }
@@ -157,11 +167,31 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
     <>
     <form onSubmit={save} className="space-y-5">
       <fieldset disabled={busy || saving || importing} className="min-w-0 space-y-5">
-      <section className="terminal-panel space-y-3 p-5"><h3 className="text-sm font-semibold">Tactic & Inverse · independent indication sources</h3><p className="terminal-muted text-xs">Tactic adds DCA-style adverse-distance and recovery configurations. Inverse uses CTS-A-O calculations before entry and qualifies its own results. Select Tactic / Inverse below to process these sources. Market / pair sources require a matching reference universe; absent references cannot qualify.</p>
+      <section className="terminal-panel space-y-3 p-5"><h3 className="text-sm font-semibold">Tactic & Inverse · independent indication sources</h3><p className="terminal-muted text-xs">Tactic includes conventional indicators, RSI momentum, quarter-hour order flow and DCA recovery. Inverse qualifies its own results. Market and pair sources require observed reference symbols.</p>
         <button type="button" className="terminal-button" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic','Inverse'])]);change('strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES])}}>Prepare Tactic + Inverse</button>
+        <button type="button" className="terminal-button ml-2" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic'])]);change('strategyIndicationSources',[...new Set([...(draft.strategyIndicationSources as string[]),...RESEARCH_TACTIC_SOURCES.filter(source=>!OSCILLATOR_IDS.has(source.id)).map(source=>source.id)])])}}>Add indicator variants</button>
         <label className="block text-xs">Search source configurations<input className="terminal-input mt-2 w-full" value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} placeholder="Decline, recovery, trend, pair…" /></label>
         <label className="block text-xs">Independent source configurations<select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Tactic and Inverse source configurations" value={draft.strategyIndicationSources as string[]} onChange={e=>change('strategyIndicationSources',Array.from(e.target.selectedOptions,o=>o.value))}>{sourceChoices.map(s=><option key={s.id} value={s.id}>{s.label} · {s.id}</option>)}</select></label>
-        <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {PORTED_CATALOG.length} available. Tactic supports recorded 10s and 1/5/15/30m; Inverse supports 1/5/15m. Shared history retains up to 4,320 completed source candles per symbol and timeframe and periodically rebases its calculations.</p>
+        <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {STRATEGY_SOURCES.length} available. Conventional and RSI momentum variants also support 60m. Inverse and quarter-hour sources use 1/5/15m.</p>
+        <details className="space-y-3 border-t border-[var(--terminal-border)] pt-4">
+          <summary className="cursor-pointer text-sm font-semibold">RSI and Parabolic SAR</summary>
+          <p className="terminal-muted text-xs">RSI Reclaim enters on a return through an extreme threshold. RSI Momentum enters on the move into an extreme. Parabolic SAR signals when a direction begins, using the chosen acceleration step and maximum.</p>
+          <div className="grid gap-3 sm:grid-cols-2">{OSCILLATOR_FAMILIES.map(([label,sources])=><label key={label} className="text-xs">{label}
+            <select multiple size={6} aria-label={label} className="terminal-input mt-2 w-full"
+              value={(draft.strategyIndicationSources as string[]).filter(id=>sources.some(source=>source.id===id))}
+              onChange={event=>updateSourceFamily(sources,Array.from(event.target.selectedOptions,option=>option.value))}>
+              {sources.map(source=><option key={source.id} value={source.id}>{source.label}</option>)}
+            </select>
+          </label>)}</div>
+          <button type="button" className="terminal-button" onClick={()=>{
+            dirtyRef.current=true; setDirty(true); setError(null)
+            setDraft(current=>({...current,strategyIndicationTypes:["Tactic"],strategyIndicationSources:[...THIN_OSCILLATOR_SOURCE_IDS],
+              strategyEnabledRanges:["Micro","Low-Range","Minimal"],strategyTpSteps:[3,6,8],strategySignalTimeframes:[1],
+              strategyPriceDistancesEnabled:true,strategyStopDistancePcts:[.10,.15],strategyTrailDistancePcts:[.05,.10],
+              strategyExitModes:["fixed","trailing-fixed"],microMinSlDistancePct:.10,microMinTrailDistancePct:.05}))
+            setMessage("RSI and Parabolic SAR draft ready to replay or save.")
+          }}>Prepare RSI and SAR thin preset</button>
+        </details>
       </section>
       <section className="terminal-panel space-y-4 p-5">
         <h3 className="text-sm font-semibold">Low-Range indications</h3>
@@ -222,13 +252,14 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <MultiChoice title="Take-profit steps" description="TP distance = estimated round-trip position cost × selected step. Only steps within enabled ranges produce configurations." values={STEPS} selected={selected("strategyTpSteps")} onChange={value => change("strategyTpSteps", value)} />
             <label className="flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.strategyPriceDistancesEnabled === true} onChange={event => change("strategyPriceDistancesEnabled", event.target.checked)} />Use price percentages for stop-loss and trailing</label>
             {draft.strategyPriceDistancesEnabled === true ? <>
-              <MultiChoice title="Stop-loss price distance" description="Each selected distance creates its own Set. Micro and Low-Range enforce their configured minimum distance." values={STOP_DISTANCE_PCTS} selected={selected("strategyStopDistancePcts")} onChange={value => change("strategyStopDistancePcts", value)} format={value => Number(value).toFixed(1) + "%"} />
-              <MultiChoice title="Trailing price gap" description="Each selected gap has independent dynamic and fixed-distance Sets when those exit modes are enabled." values={TRAIL_DISTANCE_PCTS} selected={selected("strategyTrailDistancePcts")} onChange={value => change("strategyTrailDistancePcts", value)} format={value => Number(value).toFixed(1) + "%"} />
+              <MultiChoice title="Stop-loss price distance" description="Each selected distance creates its own Set. Micro and Low-Range enforce their configured minimum distance." values={SELECTABLE_STOP_DISTANCE_PCTS} selected={selected("strategyStopDistancePcts")} onChange={value => change("strategyStopDistancePcts", value)} format={value => Number(value).toFixed(2) + "%"} />
+              <MultiChoice title="Trailing price gap" description="Each selected gap has independent dynamic and fixed-distance Sets when those exit modes are enabled." values={SELECTABLE_TRAIL_DISTANCE_PCTS} selected={selected("strategyTrailDistancePcts")} onChange={value => change("strategyTrailDistancePcts", value)} format={value => Number(value).toFixed(2) + "%"} />
             </> : <MultiChoice title="Stop-loss / take-profit ratio" description="Each ratio creates an independent configuration. SL distance = TP distance × ratio. Micro and Low-Range use 0.2–1.6 in 0.1 steps." values={RATIOS} selected={selected("strategySlRatios")} onChange={value => change("strategySlRatios", value)} format={value => Number(value).toFixed(1) + "×"} />}
             <MultiChoice title="Exit modes" description="Fixed-distance trailing keeps the original entry-price offset. Dynamic trailing recalculates the gap from each new peak." values={MODES} selected={selected("strategyExitModes")} onChange={value => change("strategyExitModes", value)} format={mode => EXIT_LABELS[mode as ExitMode]} />
             <MultiChoice title="Indications" description="Each selected indication evaluates its own configuration history." values={INDICATIONS} selected={selected("strategyIndicationTypes")} onChange={value => change("strategyIndicationTypes", value)} format={value => String(value).replaceAll("_", " ")} />
-            <MultiChoice title="Trend & Break lookbacks" description="Separate indicator periods for the new Trend and Break families. Existing indications retain their original calculations." values={[10,14,20,40,60]} selected={selected('strategySignalPeriods')} onChange={value=>change('strategySignalPeriods',value)} />
-            <MultiChoice title="Signal timeframes" description="10s lanes use recorded WebSocket trades only. Minute history never supplies 10s samples. Longer frames use completed native minutes; exits also process observed trades." values={[1/6,1,5,15,30]} selected={selected('strategySignalTimeframes')} onChange={value=>change('strategySignalTimeframes',value)} format={value=>Number(value)<1?'10s':value+'m'} />
+            <MultiChoice title="Trend & Break lookbacks" description="Each lookback has an independent Set." values={[10,14,20,40,60]} selected={selected('strategySignalPeriods')} onChange={value=>change('strategySignalPeriods',value)} />
+            <MultiChoice title="Common indicator lookbacks" description="Separate settings for MA, RSI, MACD and Bollinger families. Original uses 14 for RSI Band and 20 for the others." values={CORE_SIGNAL_PERIODS} selected={selected('strategyCoreSignalPeriods')} onChange={value=>change('strategyCoreSignalPeriods',value)} format={value=>value===0?'Original':String(value)} />
+            <MultiChoice title="Signal timeframes" description="10s lanes use recorded WebSocket trades. Longer frames use completed native minutes. Exits also process observed trades." values={SIGNAL_TIMEFRAMES} selected={selected('strategySignalTimeframes')} onChange={value=>change('strategySignalTimeframes',value)} format={value=>Number(value)<1?'10s':value+'m'} />
           </section>
           <section className="terminal-panel p-5">
             <div className="mb-5 flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-[var(--terminal-accent)]" /><h3 className="text-sm font-semibold">Stage gates & completed evidence</h3></div>
@@ -261,6 +292,8 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
                   <MultiChoice title={label+" Long"} description={stage==="base"?"Completed positions in the oldest block.":"Inherit the originating Base Set’s Long count or omit the block."} values={stage==="base"?[...EXEC_LONG_COUNTS]:[...EXEC_LONG_MODES]} selected={[...windows.long]} onChange={value=>updateExecBlock(stage,"long",value)} format={value=>value==="none"?"No Long":value==="inherit"?"Base Long":String(value)}/>
                   <MultiChoice title={label+" Short"} description="Completed positions immediately before Last." values={[...EXEC_SHORT_COUNTS]} selected={[...windows.short]} onChange={value=>updateExecBlock(stage,"short",value)}/>
                   <MultiChoice title={label+" Last"} description="Most recent completed positions." values={[...EXEC_LAST_COUNTS]} selected={[...windows.last]} onChange={value=>updateExecBlock(stage,"last",value)}/>
+                  <MultiChoice title={label+" Short outcomes"} description="Negative Short is available for 4, 8 and 12 positions. The full window must still pass PF." values={EXEC_OUTCOMES} selected={[...(windows.shortOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"shortOutcomes",value)}/>
+                  <MultiChoice title={label+" Last outcomes"} description="Each outcome is an independent Set. A negative Last must sit inside a profitable full window." values={EXEC_OUTCOMES} selected={[...(windows.lastOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"lastOutcomes",value)}/>
                 </section>
               }) : LAST_N_STAGES.map(stage => {
                 const grid = (draft.strategyLastNGrid ?? {}) as LastNGrid
@@ -270,9 +303,14 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
               })}
             </details>
 
-            <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.autoPfEnabled===true} onChange={e=>change('autoPfEnabled',e.target.checked)}/>Auto PF by configuration TP distance</label>
-            <p className="terminal-muted my-3 text-xs">Required PF = max(stage floor, min(cap, 1 + TP distance rounded down to 0.1% × slope)). Computed once per configuration; samples and losses remain unchanged.</p>
-            <div className="grid gap-5 sm:grid-cols-2">{AUTO_PF_FIELDS.map(numberField)}</div>
+            <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.autoPfEnabled===true} onChange={e=>change('autoPfEnabled',e.target.checked)}/>Auto PF</label>
+            {draft.autoPfEnabled === true && <div className="mt-3 space-y-3">
+              {enumField("autoPfMode", "Auto PF method", [{value:"set-history",label:"Independent Set history"},{value:"tp-distance",label:"Legacy TP distance"}])}
+              <p className="terminal-muted text-xs">{draft.autoPfMode === "tp-distance"
+                ? "The TP-based floor depends on the configuration's target distance and slope."
+                : "Each Set uses its older completed returns to raise the PF requirement when its history is weak. The fallback applies while history is sparse. Every Last-N block still needs its full sample count."}</p>
+              <div className="grid gap-5 sm:grid-cols-2">{AUTO_PF_FIELDS.filter(field => field.key === "autoPfMax" || (field.key === "autoPfRatio") === (draft.autoPfMode === "tp-distance")).map(numberField)}</div>
+            </div>}
             <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.microTradeStream===true} onChange={e=>change('microTradeStream',e.target.checked)}/>Record trades and 10-second history</label>
           </section>
         </div>

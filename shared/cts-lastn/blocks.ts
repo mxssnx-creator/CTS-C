@@ -63,6 +63,11 @@ export function evaluateBlocks(pre:BlockPrefix,p:BlockPolicy,minPf:number) {
   const minimal=blockWindow(pre,0,p.minimal,minPf,p.minimalPolarity,!p.lastRequiresPF);
   const short=blockWindow(pre,p.minimal,p.short,minPf,p.shortPolarity);
   const long=blockWindow(pre,p.minimal+p.short,p.long,minPf);
-  const rows=[long,short,minimal];const state:BlockResult["state"]=rows.some(w=>w.state==='unknown')?'unknown':rows.some(w=>w.state==='insufficient')?'insufficient':rows.every(w=>w.state==='qualified')?'qualified':'failed';
+  const rows=[long,short,minimal];
+  // A signed Exec block describes a pullback. The full window still needs positive evidence after costs.
+  const signed = p.lastRequiresPF && (p.shortPolarity==='negative'||p.minimalPolarity==='negative');
+  const profit = long.gp + short.gp + minimal.gp, loss = long.gl + short.gl + minimal.gl;
+  const complete = !signed || profit > 0 && (loss===0 || profit/loss >= minPf);
+  const state:BlockResult["state"]=rows.some(w=>w.state==='unknown')?'unknown':rows.some(w=>w.state==='insufficient')?'insufficient':complete&&rows.every(w=>w.state==='qualified')?'qualified':'failed';
   return {key:blockPolicyKey(p),required:blockRequired(p),count:Math.min(pre.n,blockRequired(p)),state,long,short,minimal};
 }

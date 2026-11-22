@@ -1,4 +1,4 @@
-import type { BlockPolicy } from "../shared/cts-lastn/blocks.ts"
+import type { BlockPolicy, Polarity } from "../shared/cts-lastn/blocks.ts"
 import { EXPANDED_CATALOG_MAX } from "./protection-grid"
 
 export const LAST_N_STAGES = ["base", "main", "real"] as const
@@ -12,8 +12,10 @@ export const EXEC_LONG_COUNTS = [10, 20, 30, 40, 50] as const
 export const EXEC_SHORT_COUNTS = [4, 8, 12, 16] as const
 export const EXEC_LAST_COUNTS = [1, 2, 3, 4, 5] as const
 export const EXEC_LONG_MODES = ["none", "inherit"] as const
+export const EXEC_OUTCOMES = ["positive", "negative"] as const
+export const POSITIVE_EXEC_OUTCOME = ["positive"] as const
 export const DEFAULT_EXEC_MIN_PF = 1.1
-type ShortLast = { short: readonly number[]; last: readonly number[] }
+type ShortLast = { short: readonly number[]; last: readonly number[]; shortOutcomes?: readonly Polarity[]; lastOutcomes?: readonly Polarity[] }
 export type ExecWindows = { base: ShortLast & { long: readonly number[] } } &
   Record<Exclude<EvaluationStage, "base">, ShortLast & { long: readonly typeof EXEC_LONG_MODES[number][] }>
 const shortLast = { short: EXEC_SHORT_COUNTS, last: EXEC_LAST_COUNTS }
@@ -38,10 +40,15 @@ export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindo
   const result = {} as ExecWindows
   for (const stage of EXEC_EVALUATION_STAGES) {
     const fields = record(input[stage])
-    if (Object.keys(fields).some(name => name !== "long" && name !== "short" && name !== "last")) throw new Error("Invalid Exec window block")
+    if (Object.keys(fields).some(name => !["long","short","last","shortOutcomes","lastOutcomes"].includes(name))) throw new Error("Invalid Exec window block")
     const short = choices(fields.short, EXEC_SHORT_COUNTS), last = choices(fields.last, EXEC_LAST_COUNTS)
-    if (stage === "base") result.base = { short, last, long: choices(fields.long, EXEC_LONG_COUNTS) }
-    else result[stage] = { short, last, long: choices(fields.long, EXEC_LONG_MODES) }
+    const windows: ShortLast = { short,last,
+      ...(fields.shortOutcomes!==undefined&&{shortOutcomes:choices(fields.shortOutcomes,EXEC_OUTCOMES)}),
+      ...(fields.lastOutcomes!==undefined&&{lastOutcomes:choices(fields.lastOutcomes,EXEC_OUTCOMES)}),
+    }
+    if (!short.some(n=>execShortOutcomes(windows,n).length)) throw new Error(`Exec ${stage} needs a compatible Short size and outcome`)
+    if (stage === "base") result.base = { ...windows, long: choices(fields.long, EXEC_LONG_COUNTS) }
+    else result[stage] = { ...windows, long: choices(fields.long, EXEC_LONG_MODES) }
     const baseLong = stage === "base" || result[stage].long.includes("inherit") ? Math.max(...result.base.long) : 0
     if (baseLong + Math.max(...short) + Math.max(...last) > maxSamples) throw new Error(`Exec ${stage} windows exceed retained samples`)
   }
@@ -50,13 +57,18 @@ export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindo
 
 export function execPathCount(windows: ExecWindows): number {
   return EXEC_EVALUATION_STAGES.reduce((count, stage) => {
-    const { long, short, last } = windows[stage]
-    return count * long.length * short.length * last.length
+    const w = windows[stage]
+    return count * w.long.length * w.short.reduce((sum,n)=>sum+execShortOutcomes(w,n).length,0) * w.last.length * (w.lastOutcomes?.length ?? 1)
   }, 1)
 }
 
-export function execBlockPolicy(long: number, short: number, last: number): BlockPolicy {
-  return { long, short, minimal: last, shortPolarity: "positive", minimalPolarity: "positive", lastRequiresPF: true }
+export function execShortOutcomes(windows: ShortLast, short: number): readonly Polarity[] {
+  const outcomes = windows.shortOutcomes ?? POSITIVE_EXEC_OUTCOME
+  return short <= 12 ? outcomes : outcomes.filter(outcome=>outcome==="positive")
+}
+
+export function execBlockPolicy(long: number, short: number, last: number, shortPolarity:Polarity="positive",minimalPolarity:Polarity="positive"): BlockPolicy {
+  return { long, short, minimal: last, shortPolarity, minimalPolarity, lastRequiresPF: true }
 }
 
 export function checkLastNGrid(input: unknown, max = 250): LastNGrid {

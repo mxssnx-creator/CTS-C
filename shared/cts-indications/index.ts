@@ -6,6 +6,7 @@ import {MarketSource} from "./origin/indications/market.ts";
 import type {Bars} from "./origin/domain/types.ts";
 import {SIGNALS_BY_ID} from './signals-catalog.ts';
 import { LOW_RANGE_IDS, LOW_RANGE_TIMEFRAMES } from "./low-range-catalog.ts";
+import { isResearchTacticSource, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "./research-sources.ts";
 
 export type PortedBar={timestamp:number;open:number;high:number;low:number;close:number;volume:number};
 export const PORTED_INDICATIONS=INDICATIONS.filter(s=>s.kind==="inverse"||s.kind==="tactic");
@@ -14,7 +15,7 @@ const lowRangeIds = new Set(LOW_RANGE_IDS);
 export const DEFAULT_TACTIC_SOURCES=["tactic-dca-bounce-8-percent-0.5-1-0.25","tactic-dca-trend-20-atr-1-2-0.5","tactic-dca-vwap-40-atr-1-3-0.5","tactic-dca-sweep-20-percent-0.5-2-0.25"];
 export const DEFAULT_INVERSE_SOURCES=["inverse-known-ema-9-21","inverse-turn-ema-9-21","inverse-zscore-20","inverse-impulse-20","inverse-failed-break-20","inverse-rsi2-turn-20"];
 export function portedBars(symbol:string,tfMin:number,rows:readonly PortedBar[]):Bars{
- if(![1/6,1,5,15,30].includes(tfMin))throw new Error("Unsupported indication timeframe");
+ if(!SIGNAL_TIMEFRAMES.some(minutes=>minutes===tfMin))throw new Error("Unsupported indication timeframe");
  let prev=-Infinity;
  for(const r of rows){if(![r.timestamp,r.open,r.high,r.low,r.close,r.volume].every(Number.isFinite)||r.timestamp<=prev||r.timestamp<=0||r.low<=0||r.high<Math.max(r.open,r.close)||r.low>Math.min(r.open,r.close)||r.volume<0)throw new Error("Invalid closed-bar indication data");prev=r.timestamp;}
  const col=(k:keyof PortedBar)=>Float64Array.from(rows,r=>r[k]);
@@ -30,9 +31,9 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
  const states:Record<string,Int8Array>={},available:Record<string,boolean>={};
  for(const id of new Set(ids)){
    const lowRange = lowRangeIds.has(id);
-   if(!PORTED_BY_ID.has(id)&&!SIGNALS_BY_ID.has(id)&&!lowRange)throw new Error(`Unknown indication source ${id}`);
+   if(!PORTED_BY_ID.has(id)&&!SIGNALS_BY_ID.has(id)&&!lowRange&&!isResearchTacticSource(id))throw new Error(`Unknown indication source ${id}`);
    const pair=/^inverse-pair-(btc|eth)-/.exec(id);
-   available[id]=lowRange ? LOW_RANGE_TIMEFRAMES.some(tf => tf === tfMin) : ![1,5,15].includes(tfMin)&&id.startsWith("inverse-")?false:pair?symbol!==pair[1].toUpperCase()+"-USDT"&&unique.has(pair[1].toUpperCase()+"-USDT")
+   available[id]=lowRange ? LOW_RANGE_TIMEFRAMES.some(tf => tf === tfMin) : isResearchTacticSource(id)||PORTED_BY_ID.get(id)?.kind==="tactic" ? supportsTacticTimeframe(id,tfMin) : ![1,5,15].includes(tfMin)&&id.startsWith("inverse-")?false:pair?symbol!==pair[1].toUpperCase()+"-USDT"&&unique.has(pair[1].toUpperCase()+"-USDT")
      :id.includes("market-")?marketBars.length>1:true;
    states[id]=available[id]?indicationState(id,k)??new Int8Array(b.n):new Int8Array(b.n);
  }

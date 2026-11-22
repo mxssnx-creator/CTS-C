@@ -13,7 +13,7 @@ const LANE_KEYS:Record<string,string>={
 const PROOF_KEYS:Record<string,string>={
   stage:"g",laneId:"i",count:"n",required:"r",minPF:"m",profitFactor:"p",pfState:"s",
   qualified:"q",checkedAt:"t",blockPolicyKey:"b",drawdownPct:"d",maxDrawdownPct:"x",
-  windowScope:"w",
+  windowScope:"w",autoPf:"a",
 }
 const WINDOW_KEYS:Record<string,string>={count:"n",profitFactor:"p",qualified:"q"}
 const invert=(mapping:Record<string,string>)=>Object.fromEntries(Object.entries(mapping).map(([key,value])=>[value,key]))

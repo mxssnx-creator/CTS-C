@@ -5,6 +5,8 @@ import { checkExecWindows, DEFAULT_EXEC_WINDOWS, execBlockPolicy, execPathCount 
 import { StateStore } from "../core/store"
 import type { Candle, EngineSettings, ClosedTrade } from "../core/types"
 import { blockPrefix, evaluateBlocks } from "../shared/cts-lastn/blocks"
+import { ParentBranches } from "../core/stage-branches"
+import { generateStrategyCatalog } from "../core/catalog"
 
 const symbol = "BTC-USDT"
 const makeBar = (index: number): Candle => {
@@ -46,6 +48,25 @@ test("Exec policies use separate chronological blocks and reject an incomplete o
   assert.equal(evaluateBlocks(blockPrefix(samples.slice(0,5)),short,1.1).state,"insufficient")
   assert.equal(evaluateBlocks(blockPrefix([2,-1.9,1,1,1,1]),short,1.1).minimal.state,"failed")
   assert.equal(windowMetrics(undefined, 5, 1.1, short).qualified,false)
+})
+
+test("positive and negative outcomes make independent paths and preserve the full-window PF", () => {
+  const outcomes = ["positive","negative"] as const
+  const windows = checkExecWindows({base:{long:[10],short:[4,16],last:[1],shortOutcomes:outcomes,lastOutcomes:outcomes},
+    main:{long:["none","inherit"],short:[4],last:[1],shortOutcomes:outcomes,lastOutcomes:outcomes}})
+  const plan = new ParentBranches({strategyExecWindows:windows},true)
+  const config = generateStrategyCatalog("test",settings.catalog)[0]
+  const base = plan.variants(config,undefined,"base")
+  assert.equal(base.length,6)
+  assert.equal(new Set(base.map(lane=>lane.id)).size,6)
+  assert.equal(base.filter(lane=>lane.branch?.windows?.base?.shortPolarity==="negative").length,2)
+  const parent = base.find(lane=>lane.branch?.windows?.base?.minimalPolarity==="negative")!
+  const next = plan.variants(parent,"normal","main")
+  assert.equal(next.length,8)
+  for (const child of next) assert.equal(plan.restore(child,config,()=>true),child)
+  const negative = execBlockPolicy(0,4,1,"positive","negative")
+  assert.equal(evaluateBlocks(blockPrefix([-.2,.2,.2,.2,.2]),negative,1.1).state,"qualified")
+  assert.equal(evaluateBlocks(blockPrefix([-1,.2,.2,.2,.2]),negative,1.1).state,"failed")
 })
 
 test("fresh parent entries fund independent child Sets and Exec mirrors without a Live window", () => {
@@ -90,6 +111,7 @@ test("fresh parent entries fund independent child Sets and Exec mirrors without 
       assert.ok(trade.admission!.every(proof=>proof.qualified&&proof.checkedAt===trade.openedAt&&proof.count===proof.required))
       if (trade.stage==="live" && parentTrade) {
         assert.equal(parentTrade.stage,"exec")
+        assert.deepEqual(parentTrade.executionProof,trade.admission!.at(-1))
         assert.equal(trade.netReturnPct,parentTrade.netReturnPct)
         assert.equal(trade.cost,parentTrade.cost)
       }

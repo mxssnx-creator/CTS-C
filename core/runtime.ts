@@ -11,6 +11,7 @@ import type { Candle, EngineSettings, EngineEvent } from './types'
 import {flatEngineSettings,validateConfiguration} from './settings-schema'
 import { DEFAULT_STEP_AUTO } from './step-evidence'
 import { DEFAULT_RELATE } from './relate'
+import { AUTO_PF_DEFAULTS } from './auto-pf'
 
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
@@ -401,7 +402,7 @@ export class TerminalRuntime {
     input=validateConfiguration(input,{partial:true})
     validateConfiguration({...flatEngineSettings(this.engine.settings,this.control),...input})
     const current=this.engine.settings, next=structuredClone(current)
-    const catalogKeys=['strategySignalsSources','strategyLowRangeSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyPriceDistancesEnabled','strategyStopDistancePcts','strategyTrailDistancePcts','strategyLastNGrid','strategyExecWindows','strategyStageCoordinations','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
+    const catalogKeys=['strategySignalsSources','strategyLowRangeSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio',...Object.keys(AUTO_PF_DEFAULTS),'microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyPriceDistancesEnabled','strategyStopDistancePcts','strategyTrailDistancePcts','strategyLastNGrid','strategyExecWindows','strategyStageCoordinations','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategyCoreSignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
     const autoFields = {
       blockAutoEnabled: ["block", "enabled"], blockAutoLastN: ["block", "lastN"],
@@ -460,6 +461,7 @@ export class TerminalRuntime {
       }
       throw new Error(`Unknown setting ${key}`)
     }
+    if (input.autoPfEnabled === true && current.catalog.autoPfEnabled !== true && next.catalog.autoPfMode === undefined) next.catalog.autoPfMode = AUTO_PF_DEFAULTS.autoPfMode
     validateEngineSettings(next)
     // A settings change may disable entry lanes; their open positions retain immutable exits.
     this.engine.updateSettings(next)
@@ -478,7 +480,7 @@ export class TerminalRuntime {
       const candidates = stage.baseCandidates
       const eligibleForSampling = candidates?.observed ?? stage.currentLanes
       const enoughSamples = candidates?.enoughSamples ?? stage.currentEnoughSamples
-      return [stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:mirror?null:enoughSamples,sampleSetCount:eligibleForSampling,samplesPercent:!mirror&&eligibleForSampling?100*enoughSamples/eligibleForSampling:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:mirror?null:stage.currentProfitFactor,windowPfState:mirror?undefined:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,validatedWindow:mirror?undefined:stage.validatedWindow,admittedForward:stage.admittedForward,executed:stage.executed,...sampleSizes}]
+      return [stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:mirror?null:enoughSamples,sampleSetCount:eligibleForSampling,samplesPercent:!mirror&&eligibleForSampling?100*enoughSamples/eligibleForSampling:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:mirror?null:stage.currentProfitFactor,windowPfState:mirror?undefined:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,validatedWindow:mirror?undefined:stage.validatedWindow,admittedForward:stage.admittedForward,executed:stage.executed,autoPf:stage.autoPf,...sampleSizes}]
     }))
     const settings=Object.fromEntries(Object.entries(flatEngineSettings(s.settings,this.control)).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)]))
     const positions=s.positions.filter(p=>p.stage==='live')

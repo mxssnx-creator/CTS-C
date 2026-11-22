@@ -78,7 +78,8 @@ try{
  await page.getByLabel('Trading connection',{exact:true}).selectOption('bingx-x02');await page.getByLabel('Main completed samples',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelector('input[type=number]')!==null)
 
  await page.getByRole('button',{name:'Micro + Low-Range',exact:true}).click()
- assert.equal(await page.getByLabel('Auto PF by configuration TP distance',{exact:true}).isChecked(),true)
+ assert.equal(await page.getByLabel('Auto PF',{exact:true}).isChecked(),true)
+ assert.equal(await page.getByLabel('Auto PF method',{exact:true}).inputValue(),'set-history')
  assert.equal(await page.getByLabel('Record trades and 10-second history',{exact:true}).isChecked(),true)
  assert.equal(await page.getByLabel('Micro / Low-Range trail width factor',{exact:true}).inputValue(),'0.5')
  await page.getByLabel('Positions per Block round',{exact:true}).fill('4')
@@ -125,6 +126,17 @@ try{
  assert.equal(signals.signalsMaxWindowDrawdownPct,'2.5');assert.equal(signals.stageGateMode,'exec-branches');assert.equal(signals.execMinPF,'1.15');assert.deepEqual(JSON.parse(signals.strategyExecWindows).exec.long,['inherit'])
  await page.getByLabel('Filter Signals sources',{exact:true}).fill('unmatched-no-source')
  assert.equal(await page.getByLabel('Signals source configurations',{exact:true}).locator('option').count(),2)
+
+ await page.getByText('RSI and Parabolic SAR',{exact:true}).click()
+ await page.getByRole('button',{name:'Prepare RSI and SAR thin preset',exact:true}).click()
+ await page.getByLabel('RSI configurations',{exact:true}).selectOption(['rsi-reclaim-5-25','rsi-mom-14-25'])
+ await page.getByLabel('Parabolic SAR configurations',{exact:true}).selectOption(['parabolic-sar-0.005-0.1','sar-fast'])
+ await page.getByRole('button',{name:'Save configuration',exact:true}).click()
+ await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
+ const oscillator=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
+ assert.deepEqual(JSON.parse(oscillator.strategyIndicationSources),['rsi-reclaim-5-25','rsi-mom-14-25','parabolic-sar-0.005-0.1','sar-fast'])
+ assert.deepEqual(JSON.parse(oscillator.strategyStopDistancePcts),[.1,.15])
+ assert.deepEqual(JSON.parse(oscillator.strategyTrailDistancePcts),[.05,.1])
 
  await page.getByRole('button',{name:'Integrations',exact:true}).click();await page.getByLabel('Search integrations').fill('unmatched');await page.getByText('No integration matches this search.').waitFor()
  await page.getByRole('button',{name:'Command center',exact:true}).click()

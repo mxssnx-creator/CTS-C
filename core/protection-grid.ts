@@ -2,24 +2,26 @@ import type { ExitMode, StrategyRange } from "./types"
 
 export const STOP_DISTANCE_PCTS = Array.from({ length: 21 }, (_, i) => (i + 2) / 10)
 export const TRAIL_DISTANCE_PCTS = Array.from({ length: 25 }, (_, i) => (i + 2) / 10)
+export const SELECTABLE_STOP_DISTANCE_PCTS = [.1,.15,...STOP_DISTANCE_PCTS]
+export const SELECTABLE_TRAIL_DISTANCE_PCTS = [.05,.1,.15,...TRAIL_DISTANCE_PCTS]
 export const EXPANDED_CATALOG_MAX = 100_000
 
 export function priceProtection(settings: Record<string, unknown>) {
   const enabled = settings.strategyPriceDistancesEnabled
   if (enabled !== undefined && typeof enabled !== "boolean") throw new Error("Price-distance grid requires an enabled switch")
-  const readDistances = (key: string, allowed: readonly number[]) => {
+  const readDistances = (key: string, defaults: readonly number[], allowed: readonly number[]) => {
     const value = settings[key]
-    const values: unknown = value === undefined ? allowed : typeof value === "string" ? JSON.parse(value) : value
+    const values: unknown = value === undefined ? defaults : typeof value === "string" ? JSON.parse(value) : value
     if (!Array.isArray(values) || !values.length || new Set(values).size !== values.length ||
         values.some(pct => typeof pct !== "number" || !allowed.includes(pct))) {
-      throw new Error(`Choose unique 0.1 percentage-point steps for ${key}.`)
+      throw new Error(`Choose unique 0.1 percentage-point steps or listed thin distances for ${key}.`)
     }
     return values as number[]
   }
   return {
     enabled: enabled === true,
-    stops: readDistances("strategyStopDistancePcts", STOP_DISTANCE_PCTS),
-    trails: readDistances("strategyTrailDistancePcts", TRAIL_DISTANCE_PCTS),
+    stops: readDistances("strategyStopDistancePcts",STOP_DISTANCE_PCTS,SELECTABLE_STOP_DISTANCE_PCTS),
+    trails: readDistances("strategyTrailDistancePcts",TRAIL_DISTANCE_PCTS,SELECTABLE_TRAIL_DISTANCE_PCTS),
   }
 }
 
