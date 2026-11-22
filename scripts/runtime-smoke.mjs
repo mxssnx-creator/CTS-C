@@ -24,7 +24,7 @@ try{
  assert.equal((await fetch(origin+'/api/terminal')).status,401)
  const cookie=await login()
  const snapshot=await fetch(origin+'/api/terminal',{headers:{Cookie:cookie}});assert.equal(snapshot.status,200)
- const state=await snapshot.json();assert.equal(state.readiness.x02Configured,false);assert.equal(state.equity,null);assert.equal(state.openPositions.length,0);assert.equal(state.engine.catalogCount,252)
+ const state=await snapshot.json();assert.equal(state.readiness.x02Configured,false);assert.equal(state.equity,null);assert.equal(state.openPositions.length,0);assert.equal(state.engine.catalogCount,255);assert.deepEqual([state.settings.strategyTrendDcaEnabled,state.settings.strategySarDcaEnabled],['true','true'])
  assert.equal((await action(cookie,{action:'save-settings',settings:{mainEvalPosCount:7,volumeFactor:.01,symbolCount:100,stageWindowScope:'config',microStageWindowScope:'both',blockAutoEnabled:true,blockAutoLastN:12,blockAutoMinSamples:6,blockAutoMinPF:1.2}})).status,200)
  assert.equal((await action(cookie,{action:'save-settings',settings:{mainEvalPosCount:0}})).status,400)
  assert.equal((await action(cookie,{action:'save-settings',settings:{stageWindowScope:'mixed'}})).status,400)

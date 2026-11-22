@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { blockStepVerdict } from '../core/block-auto.ts'
 import { DEFAULT_ENGINE_SETTINGS, TradingEngine } from '../core/engine.ts'
 import { describeProfitFactor } from '../core/metrics.ts'
+import { SYSTEM_VOLUME_DIVISOR } from '../shared/cts-volume/ratios.ts'
 import type { Candle, ClosedTrade, EngineSettings } from '../core/types.ts'
 const symbols=['BTC-USDT','ETH-USDT','SOL-USDT','BCH-USDT','ADA-USDT','AVAX-USDT','BNB-USDT','LINK-USDT']
 const [feedPath, outputPath, ...options] = process.argv.slice(2)
@@ -91,7 +92,7 @@ for(const date of (dates.length?dates:['2026-10-09','2026-10-13','2026-10-17T09:
     }
     const settings = engine.settings
     const block = settings.coordinations.block
-    const baseBudget = settings.baseNotional * settings.volumeFactor
+    const baseBudget = settings.baseNotional * (settings.volumeFactor / SYSTEM_VOLUME_DIVISOR)
     const blockRows = trades.filter(row => row.coordination === 'block')
     const blockDetails = blockStudy ? {
       raised: blockRows.filter(row => row.notional > baseBudget * (1 + 1e-9)).length,

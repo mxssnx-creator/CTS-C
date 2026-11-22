@@ -4,13 +4,17 @@ import {relationalVolumeSettings,DEFAULT_RELATIONAL_VOLUME} from "../shared/cts-
 import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from "../shared/cts-indications/catalog.ts"
 import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES} from '../shared/cts-indications/signals-catalog'
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
-import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
+import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS, CORE_SIGNAL_PERIODS, indicationPeriods } from "./indications"
 import { DEFAULT_EXIT_MODES, EXIT_MODES, type EngineSettings, type ExitMode, type StrategyRange } from "./types"
-import { EXPANDED_CATALOG_MAX, STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS, protectionVariants } from "./protection-grid"
-import { LAST_N_STAGES, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
+import { EXPANDED_CATALOG_MAX, STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS, SELECTABLE_STOP_DISTANCE_PCTS, SELECTABLE_TRAIL_DISTANCE_PCTS, protectionVariants } from "./protection-grid"
+import { LAST_N_STAGES, DEFAULT_EXEC_MIN_PF, DEFAULT_EXEC_WINDOWS, checkExecWindows, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TIMEFRAMES } from "../shared/cts-indications/low-range-catalog.ts"
 import { DEFAULT_STEP_AUTO } from "./step-evidence"
 import { DEFAULT_RELATE } from "./relate"
+import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
+import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
+import { MAX_WARMUP_CANDLES } from "./history"
+import { EXEC_PROFILES } from "./exec-profile"
 
 export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"]
 export const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
@@ -22,16 +26,17 @@ export const MODES = [...EXIT_MODES]
 export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
-  stageGateMode: "parent-branches",
+  stageGateMode: "exec-branches",
+  ...Object.fromEntries(EXEC_PROFILES.map(profile=>[profile.setting,true])),
   stageWindowScope: "context", microStageWindowScope: "inherit",
-  stageBlocks: {}, strategyLastNGrid: {}, strategyStageCoordinations: {},
+  stageBlocks: {}, strategyLastNGrid: {}, strategyExecWindows: DEFAULT_EXEC_WINDOWS, strategyStageCoordinations: {},
   liveEntryMode: "independent",
-  baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
+  baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1, execMinPF: DEFAULT_EXEC_MIN_PF,
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
   variantBlockEnabled: true, variantDcaEnabled: true, axisPrevEnabled: true,
   axisPrevious: 8, axisLast: 3, axisOutcome: "any",axisReferenceStage:'same-stage',
   blockBehavior: "pyramid", blockSize: 3, blockPauseRounds: 1, blockMaxMultiplier: 3,
-  autoPfEnabled: false, autoPfRatio: .2, autoPfMax: 2, microTradeStream: false,
+  ...AUTO_PF_DEFAULTS, microTradeStream: false,
   strategyPriceDistancesEnabled: false, strategyStopDistancePcts: STOP_DISTANCE_PCTS, strategyTrailDistancePcts: TRAIL_DISTANCE_PCTS,
   blockSteps: 3, blockMode: "shared", dcaSteps: 2, dcaDistancePct: 1, dcaMultiplier: 2,
   blockAutoEnabled: DEFAULT_STEP_AUTO.enabled, blockAutoLastN: DEFAULT_STEP_AUTO.lastN,
@@ -49,24 +54,29 @@ export const DEFAULTS: Record<string, unknown> = {
   strategyExitModes: [...DEFAULT_EXIT_MODES], strategyIndicationTypes: [...CORE_INDICATIONS],
   strategyIndicationSources:[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES],
   strategyLowRangeSources:[...DEFAULT_LOW_RANGE_SOURCES],
-  strategySignalPeriods:[20],strategySignalTimeframes:[1],
+  strategySignalPeriods:[20],strategyCoreSignalPeriods:[0],strategySignalTimeframes:[1],
   strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],signalsMaxWindowDrawdownPct:3,
 }
 export const NUMERIC_FIELDS = [
   { key: "baseProfitFactor", label: "Base → Main minimum PF", min: 0, max: 999, step: 0.01 },
   { key: "mainProfitFactor", label: "Main → Real minimum PF", min: 0, max: 999, step: 0.01 },
-  { key: "realProfitFactor", label: "Real → Live minimum PF", min: 0, max: 999, step: 0.01 },
+  { key: "realProfitFactor", label: "Real minimum PF", min: 0, max: 999, step: 0.01 },
   { key: "prevPosWindow", label: "Base completed samples", min: 1, max: 250, step: 1 },
   { key: "mainEvalPosCount", label: "Main completed samples", min: 1, max: 250, step: 1 },
   { key: "realEvalPosCount", label: "Real completed samples", min: 1, max: 250, step: 1 },
 ]
+export const EXEC_PF_FIELD = { key: "execMinPF", label: "Exec → Live minimum PF", min: 1.01, max: 999, step: 0.01 }
 export const COST_FIELDS = [
   { key: "makerFeePct", label: "Maker fee (%)", min: 0, max: 20, step: 0.001 },
   { key: "takerFeePct", label: "Taker fee (%)", min: 0, max: 20, step: 0.001 },
   { key: "slippagePctOfFees", label: "Slippage (% of fees)", min: 0, max: 100, step: 0.1 },
 ]
 export const AUTO_PF_FIELDS = [
-  {key:"autoPfRatio",label:"Auto PF slope per 1% TP",min:0,max:2,step:.05},
+  {key:"autoPfFallback",label:"Sparse-history PF floor",min:1.01,max:10,step:.01},
+  {key:"autoPfMinSamples",label:"Minimum prior closes per Set",min:3,max:250,step:1},
+  {key:"autoPfHistory",label:"Maximum prior closes per Set",min:3,max:250,step:1},
+  {key:"autoPfAdjustment",label:"Adjustment for weak prior PF",min:0,max:4,step:.05},
+  {key:"autoPfRatio",label:"Legacy PF slope per 1% TP",min:0,max:2,step:.05},
   {key:"autoPfMax",label:"Auto PF maximum",min:1.01,max:10,step:.01},
 ]
 export const COORDINATION_FIELDS = [
@@ -95,22 +105,22 @@ export const COORDINATION_FIELDS = [
   { key: "relateMaxSlRatio", label: "Relate maximum SL-to-TP ratio", min: .01, max: .5, step: .01 },
 ]
 const WINDOW_SCOPES = ["context", "config", "both"] as const
-const ENUM_FIELDS: Record<string, readonly string[]> = { blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
+const ENUM_FIELDS: Record<string, readonly string[]> = { autoPfMode:["set-history","tp-distance"],blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches','exec-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
-  { key: "historyCandles", label: "Warm-up candles per symbol", min: 100, max: 4320, step: 1 },
+  { key: "historyCandles", label: "Warm-up candles per symbol", min: 100, max: MAX_WARMUP_CANDLES, step: 1 },
   { key: "baseNotional", label: "Base notional (USDT)", min: 0.000001, max: 1_000_000_000, step: 0.000001 },
   { key: "volumeFactor", label: "Volume factor", min: 0.000001, max: 100, step: 0.000001 },
 ]
 const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
-  strategyStopDistancePcts: STOP_DISTANCE_PCTS, strategyTrailDistancePcts: TRAIL_DISTANCE_PCTS,
+  strategyStopDistancePcts: SELECTABLE_STOP_DISTANCE_PCTS, strategyTrailDistancePcts: SELECTABLE_TRAIL_DISTANCE_PCTS,
   strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
-  strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),
+  strategyIndicationSources:[...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES].map(s=>s.id),
   strategyLowRangeSources:LOW_RANGE_IDS,
   strategySignalsSources:SIGNALS_CATALOG.map(s=>s.id),
-  strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1/6,1,5,15,30],
+  strategySignalPeriods:[10,14,20,40,60],strategyCoreSignalPeriods:CORE_SIGNAL_PERIODS,strategySignalTimeframes:SIGNAL_TIMEFRAMES,
 }
 export const FACTOR_FIELDS = [
   { key:"signalsMaxWindowDrawdownPct",label:"Signals gate return drawdown limit (pp; 0 = disabled)",min:0,max:50,step:.1 },
@@ -127,12 +137,12 @@ export const FACTOR_FIELDS = [
   { key: "strategyTrailRatio", label: "Trail / SL distance ratio", min: 0.05, max: 10, step: 0.05 },
   { key: "holdTimeFactor", label: "Maximum hold factor", min: 0.05, max: 10, step: 0.05 },
 ]
-export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
+export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, EXEC_PF_FIELD, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
 
-const sourceKinds=new Map(PORTED_CATALOG.map(s=>[s.id,s.kind]))
+const sourceKinds=new Map([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES].map(s=>[s.id,s.kind]))
 export function configurationCount(values: Record<string, unknown>) {
   const ranges = values.strategyEnabledRanges as string[]
-  const types=values.strategyIndicationTypes as string[],technical=types.filter(t=>(TECHNICAL_INDICATIONS as readonly string[]).includes(t)).length
+  const types=values.strategyIndicationTypes as string[]
   // A draft selection can be empty while the operator is editing. The saved settings schema rejects it.
   const price = { enabled: values.strategyPriceDistancesEnabled === true,
     stops: (values.strategyStopDistancePcts ?? STOP_DISTANCE_PCTS) as number[],
@@ -149,15 +159,18 @@ export function configurationCount(values: Record<string, unknown>) {
   }
   const portedTypes=types.filter(t=>t==='Tactic'||t==='Inverse')
   const sourceIds=values.strategyIndicationSources as string[]
-  const extra=portedTypes.reduce((n,t)=>n+sourceIds.filter(id=>sourceKinds.get(id)===t.toLowerCase()).length*(values.strategySignalTimeframes as number[]).filter(tf=>t!=='Inverse'||[1,5,15].includes(tf)).length,0)
-  const signals=types.includes('Signals')?1:0,signalSources=(values.strategySignalsSources??DEFAULT_SIGNALS_SOURCES) as string[]
   const timeframes = values.strategySignalTimeframes as number[]
+  const extra=portedTypes.reduce((n,t)=>n+sourceIds.filter(id=>sourceKinds.get(id)===t.toLowerCase())
+    .reduce((sum,id)=>sum+timeframes.filter(tf=>t==='Inverse'?[1,5,15].includes(tf):supportsTacticTimeframe(id,tf)).length,0),0)
+  const signals=types.includes('Signals')?1:0,signalSources=(values.strategySignalsSources??DEFAULT_SIGNALS_SOURCES) as string[]
   const hasLowRange = types.includes("Low-Range")
   const lowRangeSources = (values.strategyLowRangeSources ?? DEFAULT_LOW_RANGE_SOURCES) as string[]
   const lowRangeCount = hasLowRange
     ? lowRangeCells * lowRangeSources.length * timeframes.filter(tf => LOW_RANGE_TIMEFRAMES.some(minutes => tf === minutes)).length : 0
-  const count = lowRangeCount + cells * ((types.length-technical-portedTypes.length-signals-Number(hasLowRange)+signals*signalSources.length)*timeframes.length+extra+technical*(values.strategySignalPeriods as number[]).length*timeframes.length)
-  return count * lastNVariantCount((values.strategyLastNGrid ?? {}) as LastNGrid)
+  const native = types.filter(type=>!["Tactic","Inverse","Signals","Low-Range"].includes(type)).reduce((count,type)=>
+    count+indicationPeriods(type,values.strategySignalPeriods as number[],(values.strategyCoreSignalPeriods??[0]) as number[]).length,0)
+  const count = lowRangeCount + cells * ((native+signals*signalSources.length)*timeframes.length+extra)
+  return values.stageGateMode === "exec-branches" ? count : count * lastNVariantCount((values.strategyLastNGrid ?? {}) as LastNGrid)
 }
 
 export function validateConfiguration(input: unknown, { partial = false, formNumbers = false } = {}): Record<string, unknown> {
@@ -171,6 +184,11 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if (!Object.prototype.hasOwnProperty.call(values, key)) {
       if (partial) continue
       if (key === "strategyStageCoordinations") { output[key] = {}; continue }
+      if (key === "strategyExecWindows" || key === "execMinPF" || key === "strategyCoreSignalPeriods" || EXEC_PROFILES.some(profile=>profile.setting===key)) { output[key] = structuredClone(DEFAULTS[key]); continue }
+      if (Object.hasOwn(AUTO_PF_DEFAULTS,key)) {
+        output[key] = key === "autoPfMode" && values.autoPfEnabled === true ? "tp-distance" : DEFAULTS[key]
+        continue
+      }
       throw new Error(`Configuration is missing ${key}.`)
     }
     const value = values[key]
@@ -184,6 +202,8 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
       output[key] = checkStageCoordinations(value)
     } else if (key === "strategyLastNGrid") {
       output[key] = structuredClone(checkLastNGrid(value))
+    } else if (key === "strategyExecWindows") {
+      output[key] = structuredClone(checkExecWindows(value))
     } else if (key === "relationalVolumeRatios") {
       output[key]=relationalVolumeSettings(value,true)
     } else if (key === "strategyProcessingByRange") {
@@ -204,10 +224,15 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     }
   }
   if (!partial) {
+    autoPfPolicy(output)
     if (output.axisPrevEnabled && Number(output.axisPrevious) + Number(output.axisLast) > 250) throw new Error("Axis previous and recent windows must total 250 samples or fewer.")
     const count = configurationCount(output)
     if (count === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
     const windows = output.strategyLastNGrid as LastNGrid
+    const exec = output.stageGateMode === "exec-branches"
+    if (exec && ["baseProfitFactor","mainProfitFactor","realProfitFactor"].some(key => Number(output[key]) < 1.01)) {
+      throw new Error("Base, Main and Real minimum PF must be at least 1.01 in Exec progression.")
+    }
     if ((output.strategyPriceDistancesEnabled || LAST_N_STAGES.some(stage => windows[stage]?.length)) && (output.stageGateMode === "parent-branches" ? count / lastNVariantCount(windows) : count) > EXPANDED_CATALOG_MAX) {
       throw new Error(`Expanded catalog exceeds ${EXPANDED_CATALOG_MAX} configurations. Select fewer distances, sources, timeframes or windows.`)
     }
@@ -232,6 +257,8 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
       try { result[key] = checkStageCoordinations(JSON.parse(settings[key])) } catch { /* Keep legacy defaults. */ }
     } else if (key === "strategyLastNGrid") {
       try { result[key] = checkLastNGrid(JSON.parse(settings[key])) } catch { /* Preserve defaults on invalid legacy data. */ }
+    } else if (key === "strategyExecWindows") {
+      try { result[key] = checkExecWindows(JSON.parse(settings[key])) } catch { /* Preserve defaults on invalid data. */ }
     } else if (key === "relationalVolumeRatios") {
       try{result[key]=relationalVolumeSettings(JSON.parse(settings[key]),true)}catch{}
     } else if (key === "strategyProcessingByRange") {
@@ -242,6 +269,7 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
     else if (typeof fallback === "string") { if (ENUM_FIELDS[key]?.includes(settings[key])) result[key] = settings[key] }
     else { const number = Number(settings[key]); if (Number.isFinite(number)) result[key] = number }
   }
+  if (settings.autoPfMode === undefined && (settings.autoPfEnabled === "true" || settings.autoPfEnabled === "1")) result.autoPfMode = "tp-distance"
   return result
 }
 
@@ -252,11 +280,13 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
   const dcaAuto = s.coordinations.dca.auto ?? DEFAULT_STEP_AUTO
   const relate = s.coordinations.relate ?? DEFAULT_RELATE
   for(const [key,value] of Object.entries(s.catalog))if(Object.hasOwn(DEFAULTS,key))values[key]=value
+  values.autoPfEnabled = s.catalog.autoPfEnabled === true
+  if (values.autoPfEnabled && s.catalog.autoPfMode === undefined) values.autoPfMode = "tp-distance"
   return {...values,stageBlocks:s.stageBlocks??{},liveEntryMode:s.liveEntryMode??'independent',stageGateMode:s.stageGateMode??'continuous-ancestors',symbolCount:control.symbolCount,historyCandles:control.historyCandles,volumeFactor:s.volumeFactor,baseNotional:s.baseNotional,maxOrderNotional:s.maxOrderNotional??0,
     stageWindowScope:s.stageWindowScope??"context",microStageWindowScope:s.microStageWindowScope??"inherit",
     normalVolumeRatio:s.volumeRatios?.normal??1,axisVolumeRatio:s.volumeRatios?.axis??1,blockVolumeFactor:s.volumeRatios?.block??1,dcaVolumeRatio:s.volumeRatios?.dca??1,relateVolumeRatio:s.volumeRatios?.relate??1,
     prevPosWindow:s.stageLastN.base,mainEvalPosCount:s.stageLastN.main,realEvalPosCount:s.stageLastN.real,
-    baseProfitFactor:s.stageMinPF.base,mainProfitFactor:s.stageMinPF.main,realProfitFactor:s.stageMinPF.real,
+    baseProfitFactor:s.stageMinPF.base,mainProfitFactor:s.stageMinPF.main,realProfitFactor:s.stageMinPF.real,execMinPF:s.execMinPF??DEFAULT_EXEC_MIN_PF,
     variantBlockEnabled:s.coordinations.block.enabled,variantDcaEnabled:s.coordinations.dca.enabled,axisPrevEnabled:s.coordinations.axis.enabled,
     blockVolumeRatio:s.coordinations.block.ratio,axisPrevious:s.coordinations.axis.previous,axisLast:s.coordinations.axis.last,axisOutcome:s.coordinations.axis.outcome,axisReferenceStage:s.coordinations.axis.reference??'same-stage',
     blockBehavior:s.coordinations.block.behavior??"pyramid",blockSize:s.coordinations.block.size??3,blockPauseRounds:s.coordinations.block.pauseRounds??1,blockMaxMultiplier:s.coordinations.block.maxMultiplier??3,

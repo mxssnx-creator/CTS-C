@@ -169,6 +169,31 @@ export class DemoExecutor {
   }
   summary(lots:OwnedLot[]=this.lots()) {
     const counts = this.store.database.prepare("SELECT status,COUNT(*) AS count FROM intents GROUP BY status").all() as { status: string; count: number }[]
+    const orderCounts = this.store.database.prepare(`
+      WITH receipts AS (
+        SELECT json_extract(result,'$.outcome.order.orderId') AS id,
+          json_extract(result,'$.outcome.order.triggerOrderId') AS parent,
+          upper(json_extract(result,'$.outcome.order.status')) AS state,
+          json_extract(result,'$.outcome.order.filledQuantity') AS filled
+        FROM intents WHERE status='accepted' AND json_extract(result,'$.outcome.status')='accepted'
+      ), orders AS (
+        SELECT id, state, filled FROM receipts WHERE id IS NOT NULL
+        UNION ALL
+        SELECT parent, 'TRIGGERED', 0 FROM receipts WHERE parent IS NOT NULL AND parent<>id
+      ), distinct_orders AS (
+        SELECT id, max(filled) AS filled,
+          max(state NOT IN ('FILLED','CANCELED','CANCELLED','REJECTED','EXPIRED','TRIGGERED')) AS working,
+          max(state='PARTIALLY_FILLED') AS partial
+        FROM orders GROUP BY id
+      )
+      SELECT count(*) AS confirmed, coalesce(sum(filled>0),0) AS filled,
+        coalesce(sum(working),0) AS working, coalesce(sum(partial),0) AS partial FROM distinct_orders
+    `).get() as { confirmed:number; filled:number; working:number; partial:number }
+    const orders = {...orderCounts}
+    const openLots = lots.filter(lot=>lot.quantity>EPSILON)
+    const long = new Set<string>(), short = new Set<string>()
+    for (const lot of openLots) (lot.direction === "long" ? long : short).add(JSON.stringify([lot.connectionId,lot.symbol]))
+    const positions = { open:long.size+short.size,long:long.size,short:short.size }
     const complete = lots.every((lot) => lot.fees !== null), exchangeComplete = lots.every((lot) => lot.exchangeRealizedPnl !== null)
     const resultPF=(qualifiedOnly:boolean)=>{
       let profit=0,loss=0,monetaryProfit=0,monetaryLoss=0,closed=0,incomplete=0
@@ -191,24 +216,24 @@ export class DemoExecutor {
     return { configured: this.venue.configured, environment: this.venue.environment??'BingX VST', intents: Object.fromEntries(counts.map((row) => [row.status, Number(row.count)])),
       executionPF:resultPF(false),validatedExecutionPF:resultPF(true),leveragePolicy:'maximum-verified-per-direction',externalCloses:lots.filter(l=>l.externalClosure?.confirmedAt).length,
       cycleTiming:{cycles:this.cycles,retained:this.cycleDurations.length,lastMs:this.cycleDurations.at(-1)??null,p95Ms:this.cycleDurations.length?[...this.cycleDurations].sort((a,b)=>a-b)[Math.ceil(this.cycleDurations.length*.95)-1]:null},
-      ownedLots: lots.filter((lot) => lot.quantity > EPSILON).length, realizedGrossPnl: lots.some(l=>l.externalClosure?.confirmedAt)?null:lots.reduce((sum, lot) => sum + lot.realizedGrossPnl, 0),
+      ownedLots:openLots.length, positions, orders, realizedGrossPnl: lots.some(l=>l.externalClosure?.confirmedAt)?null:lots.reduce((sum, lot) => sum + lot.realizedGrossPnl, 0),
       fees: complete ? lots.reduce((sum, lot) => sum + (lot.fees ?? 0), 0) : null,
       realizedNetPnl: complete ? lots.reduce((sum, lot) => sum + (lot.realizedNetPnl ?? 0), 0) : null,
       exchangeRealizedPnl: exchangeComplete ? lots.reduce((sum, lot) => sum + (lot.exchangeRealizedPnl ?? 0), 0) : null,
       protectionGaps: lots.filter((lot) => lot.quantity > EPSILON && lot.protection !== "active").length,
       accounting: complete ? "Owned fills and signed exchange commissions reconciled; net excludes funding" : "Awaiting complete exchange fill/commission records; missing fees are not estimated" }
   }
-  process(intents: ExecutionIntent[]): Promise<ExecutionUpdate[]> {
+  process(intents: ExecutionIntent[], reconcileFirst = true): Promise<ExecutionUpdate[]> {
     const run = this.tail.then(async () => {
       const started=performance.now()
       this.beginCycle()
-      try { return await this.processSerial(intents) }
+      try { return await this.processSerial(intents, reconcileFirst) }
       finally { this.cycles++;this.cycleDurations.push(performance.now()-started);if(this.cycleDurations.length>128)this.cycleDurations.shift();this.cycleRows = null; this.cycleLots = null; this.cycleIndex.clear() }
     }); this.tail = run.catch(() => {}); return run
   }
-  private async processSerial(intents: ExecutionIntent[]): Promise<ExecutionUpdate[]> {
+  private async processSerial(intents: ExecutionIntent[], reconcileFirst: boolean): Promise<ExecutionUpdate[]> {
     if (!this.venue.configured) return intents.map((intent) => ({ id: intent.id, status: "unknown", error: "Dedicated x02 credentials unavailable; no order submitted" }))
-    const byId = new Map((await this.reconcile()).map((result) => [result.id, result]))
+    const byId = new Map((reconcileFirst ? await this.reconcile() : []).map((result) => [result.id, result]))
     for (const intent of intents) {
       const clientId = this.clientOrderId(intent.connectionId, intent.id), previous = this.findRow(clientId)
       if (previous) { byId.set(intent.id, this.update(previous)); continue }
@@ -229,7 +254,7 @@ export class DemoExecutor {
         else byId.set(intent.id, { id: intent.id, status: error instanceof ExecutionDeferred ? "unknown" : this.store.intent(clientId) ? "unknown" : "rejected", error: error instanceof Error ? error.message : "Execution unavailable" })
       }
     }
-    await this.reconcileFees()
+    if (reconcileFirst && intents.length) await this.reconcileFees()
     return [...byId.values()]
   }
   private async send(data: Payload): Promise<void> {
@@ -342,7 +367,8 @@ export class DemoExecutor {
   }
   private async prepare(intent: ExecutionIntent, clientId: string): Promise<OrderInput> {
     if(this.options.connectionId&&intent.connectionId!==this.options.connectionId)throw new Error('Intent belongs to another connection')
-    if (intent.source !== "real-qualified" || !intent.positionId || !intent.laneId || !intent.connectionId) throw new Error("A qualified, lane-owned execution intent is required")
+    if ((intent.source !== "real-qualified" && intent.source !== "exec-qualified") || !intent.positionId || !intent.laneId || !intent.connectionId ||
+        (intent.source === "exec-qualified" && (!intent.execPositionId || !intent.qualificationId))) throw new Error("A qualified, lane-owned execution intent is required")
     const now = this.now()
     if (intent.kind !== "close" && (now - intent.timestamp > (this.options.maxIntentAgeMs ?? 180_000) || intent.timestamp > now + 10_000)) throw new Error("Entry/add intent is stale or future-dated; no order submitted")
     if (!(intent.price > 0) || !Number.isFinite(intent.price)) throw new Error("Intent has no valid price")

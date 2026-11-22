@@ -26,6 +26,8 @@ import {
 import { relateSpecs } from "./relate.ts";
 import { breakSpecs } from "./break.ts";
 import { isLowRangeInd, LOW_RANGE_TIMEFRAMES, lowRangeSpecs } from "./low-range.ts";
+import { lowRangeExtraSpecs } from "./low-range-extra.ts";
+import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS } from "../../oscillator-sources.ts";
 
 export { SIGNAL_SOURCES, signalId };
 
@@ -1250,6 +1252,23 @@ for (const x of inverseSpecs([...BASE_INDICATIONS, ...VARIANTS])) add(x);
 for (const x of inverseMicroSpecs()) add(x);
 // Low-Range uses its own Short protection cells and explicit enablement.
 for (const x of lowRangeSpecs()) add(x);
+for (const x of lowRangeExtraSpecs()) add(x);
+
+for (const {id,label,period,lower,method,imported} of RSI_VARIANTS) {
+  if (imported) continue;
+  const upper = 100-lower;
+  add(spec("rsi",id,label,{period,lower},k=>{
+    const rsi = k.rsi(period);
+    return state(k.b.n,i=>{
+      if (method==="momentum") return rsi[i]>upper ? 1 : rsi[i]<lower ? -1 : 0;
+      if (rsi[i-1]<=lower&&rsi[i]>lower) return 1;
+      return rsi[i-1]>=upper&&rsi[i]<upper ? -1 : 0;
+    },"rsi-entry" );
+  }));
+}
+for (const {id,label,step,cap,imported} of PARABOLIC_SAR_VARIANTS) {
+  if (!imported) add(spec("sar",id,label,{step,cap},k=>k.psar(step,cap).dir));
+}
 
 // ── combined timeframes ─────────────────────────────────────
 // "<id>@x4": the indication on this timeframe, kept only where it agrees on the 4× timeframe (1h → 4h, 15m → 1h),

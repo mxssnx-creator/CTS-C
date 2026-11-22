@@ -122,7 +122,7 @@ test("shared Block distributes its fixed notional budget and additive Block incr
     for (let i = 1; i <= 2; i++) engine.processCandles("BTC-USDT", [bar(baseTime + (++index) * 60_000, position.entryPrice * (1 + sign * .025 * i))])
     const added = engine.snapshot().positions.find(p => p.id === position!.id)!
     assert.equal(added.fills.length, 3)
-    const expected = cfg.baseNotional * cfg.volumeFactor * (mode === "shared" ? 1 : 2)
+    const expected = cfg.baseNotional * (cfg.volumeFactor / 5) * (mode === "shared" ? 1 : 2)
     assert.ok(Math.abs(added.notional - expected) < 1e-10)
   }
 })
@@ -208,7 +208,7 @@ test("changing DCA terms creates an independent lane while existing fills retain
   engine.processTick("BTC-USDT", position.entryPrice * (1 - sign * .006), position.openedAt + 1000)
   const added = engine.snapshot().positions.find(p => p.id === position!.id)!
   assert.equal(added.fills.length, 2, "original .5% distance remains in force")
-  assert.ok(Math.abs(added.fills[1].price * added.fills[1].quantity - 2) < 1e-12, "original $1 budget × 2 remains in force")
+  assert.ok(Math.abs(added.fills[1].price * added.fills[1].quantity - .4) < 1e-12, "original $0.20 budget × 2 remains in force")
   let newLaneSeen = false
   for (const candle of candles(150, index + 1)) {
     const events = engine.processCandles("BTC-USDT", [candle]), state = engine.exportState()
@@ -352,6 +352,7 @@ test("window-sized retention preserves every event, qualification and cumulative
   const small = compact.exportState(), large = reference.exportState()
   let savedSamples = 0
   for (const [id, lane] of Object.entries(small.lanes)) {
+    assert.ok(lane.stage !== "exec")
     const stageLimit = cfg.stageLastN[lane.stage === "live" ? "real" : lane.stage]
     const limit = (lane.coordination === "normal" ? Math.max(stageLimit, 7) : stageLimit) + 1
     assert.equal(lane.samples.length, Math.min(lane.closedCount, limit))
@@ -374,6 +375,7 @@ test("retention expands for changed Axis windows and respects disabled Axis and 
   const engine = new TradingEngine(cfg)
   engine.processCandles("BTC-USDT", candles(900))
   for (const lane of Object.values(engine.exportState().lanes)) {
+    assert.ok(lane.stage !== "exec")
     const target = lane.coordination === "normal" ? 7 : cfg.stageLastN[lane.stage === "live" ? "real" : lane.stage]
     assert.equal(lane.samples.length, Math.min(lane.closedCount, target + 1))
   }
@@ -381,7 +383,10 @@ test("retention expands for changed Axis windows and respects disabled Axis and 
   engine.processCandles("BTC-USDT", candles(900, 900))
   assert.ok(Object.values(engine.exportState().lanes).some(l => l.coordination === "normal" && l.samples.length === 12))
   engine.updateSettings({ coordinations: { ...cfg.coordinations, axis: { ...cfg.coordinations.axis, enabled: false } } })
-  for (const lane of Object.values(engine.exportState().lanes)) assert.ok(lane.samples.length <= cfg.stageLastN[lane.stage === "live" ? "real" : lane.stage] + 1)
+  for (const lane of Object.values(engine.exportState().lanes)) {
+    assert.ok(lane.stage !== "exec")
+    assert.ok(lane.samples.length <= cfg.stageLastN[lane.stage === "live" ? "real" : lane.stage] + 1)
+  }
   assert.equal(engine.settings.maxSamples, 250)
 })
 

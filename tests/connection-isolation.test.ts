@@ -29,7 +29,7 @@ test('settings are strict and independent across account state stores and restar
  const demo=new TerminalRuntime('bingx-x02',demoStore),main=new TerminalRuntime('bingx-x01',mainStore)
  try{
   main.saveFlatSettings({stageGateMode:"processed-sets",symbolCount:35,axisVolumeRatio:2,blockVolumeFactor:.3,strategyTpFactor:1.2,strategySlFactor:.8,strategyTrailRatio:.5,holdTimeFactor:2,maxOrderNotional:10})
-  assert.equal(main.engine.settings.stageGateMode,'processed-sets');assert.equal(demo.engine.settings.stageGateMode,'parent-branches');assert.equal(demo.engine.settings.volumeRatios!.axis,1);assert.equal(main.engine.settings.volumeRatios!.axis,2)
+  assert.equal(main.engine.settings.stageGateMode,'processed-sets');assert.equal(demo.engine.settings.stageGateMode,'exec-branches');assert.equal(demo.engine.settings.volumeRatios!.axis,1);assert.equal(main.engine.settings.volumeRatios!.axis,2)
   assert.equal(demo.control.symbolCount,100);assert.equal(main.control.symbolCount,35)
   assert.equal(main.control.running,false);assert.equal(demo.control.running,false)
   const before=main.engine.serializeState()
@@ -63,8 +63,8 @@ test('a temporary commission failure retains the last verified economics and rep
  try{
   runtime.saveFlatSettings({symbolCount:1});runtime.engine.updateSettings({symbolFees:{'BTC-USDT':{makerFeePct:.02,takerFeePct:.05}},catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}})
   const bars=Array.from({length:100},(_,i)=>{const close=100+9*Math.sin(i/11);return {timestamp:1700000040000+i*60000,open:close,high:close,low:close,close,volume:1}})
-  runtime.engine.processCandles('BTC-USDT',bars);const before=runtime.engine.snapshot().stages[0].currentLanes;assert.ok(before>0)
-  await runtime.start();assert.deepEqual(runtime.engine.settings.symbolFees!['BTC-USDT'],{makerFeePct:.02,takerFeePct:.05});assert.equal(runtime.engine.snapshot().stages[0].currentLanes,before)
+  runtime.engine.processCandles('BTC-USDT',bars);const before=runtime.engine.snapshot().stages[0].baseCandidates!;assert.ok(before.observed>0)
+  await runtime.start();assert.deepEqual(runtime.engine.settings.symbolFees!['BTC-USDT'],{makerFeePct:.02,takerFeePct:.05});assert.deepEqual(runtime.engine.snapshot().stages[0].baseCandidates,before)
   assert.deepEqual(runtime.snapshot().engine.feeReadFailures,['BTC-USDT']);assert.equal(runtime.snapshot().engine.feeFallbackSymbols.length,0)
  }finally{runtime.shutdown();store.close();if(oldKey===undefined)delete process.env.BINGX_X02_KEY;else process.env.BINGX_X02_KEY=oldKey;if(oldSecret===undefined)delete process.env.BINGX_X02_SECRET;else process.env.BINGX_X02_SECRET=oldSecret}
 })

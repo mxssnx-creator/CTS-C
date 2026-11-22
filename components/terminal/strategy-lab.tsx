@@ -2,21 +2,26 @@
 import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
+import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES } from "@/shared/cts-indications/research-sources"
+import { EXEC_PROFILES } from "@/core/exec-profile"
+import execDcaTrendPreset from "@/research-data/exec-dca-trend-preset.json"
+import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, THIN_OSCILLATOR_SOURCE_IDS } from "@/shared/cts-indications/oscillator-sources"
 import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES,SIGNAL_SOURCES} from '@/shared/cts-indications/signals-catalog'
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_CATALOG } from "@/shared/cts-indications/low-range-catalog"
 import {VolumeRatioSliders} from "../../shared/cts-volume/sliders.tsx";
+import {SYSTEM_VOLUME_DIVISOR} from "../../shared/cts-volume/ratios.ts"
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, Download, Layers3, RotateCcw, Save, SlidersHorizontal, Upload } from "lucide-react"
 import { ReplayStudy } from "./replay-study"
-import { CORE_INDICATIONS } from "@/core/indications"
+import { CORE_INDICATIONS, CORE_SIGNAL_PERIODS } from "@/core/indications"
 import {formatProfitFactor} from './profit-factor'
 import { DEFAULT_EXIT_MODES, type ProfitFactorState, type Stage, type Coordination, type ExitMode } from '@/core/types'
 
-import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
-import { STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
+import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, EXEC_PF_FIELD, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
+import { SELECTABLE_STOP_DISTANCE_PCTS, SELECTABLE_TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
 import { BRANCH_COORDINATIONS, type StageCoordinations } from "@/core/stage-branches"
-import { LAST_N_STAGES, type LastNGrid } from "@/core/last-n-grid"
+import { EXEC_EVALUATION_STAGES, EXEC_LONG_COUNTS, EXEC_LAST_COUNTS, EXEC_LONG_MODES, EXEC_OUTCOMES, POSITIVE_EXEC_OUTCOME, LAST_N_STAGES, execPathCount, stageShortCounts, type ExecWindows, type LastNGrid } from "@/core/last-n-grid"
 
 const EXIT_LABELS: Record<ExitMode, string> = {
   fixed: "Fixed TP and SL",
@@ -25,9 +30,12 @@ const EXIT_LABELS: Record<ExitMode, string> = {
   "trailing-fixed": "Fixed-distance trailing",
   "trailing-only-fixed": "Fixed-distance trailing-only",
 }
+const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES]
+const OSCILLATOR_FAMILIES = [["RSI configurations",RSI_VARIANTS],["Parabolic SAR configurations",PARABOLIC_SAR_VARIANTS]] as const
+const OSCILLATOR_IDS = new Set<string>(OSCILLATOR_FAMILIES.flatMap(([,sources])=>sources.map(source=>source.id)))
 
 function MultiChoice({ title, description, values, selected, onChange, format, optional = false }: {
-  title: string; description: string; values: (string | number)[]; selected: (string | number)[];
+  title: string; description: string; values: readonly (string | number)[]; selected: (string | number)[];
   onChange: (values: (string | number)[]) => void; format?: (value: string | number) => string; optional?: boolean
 }) {
   const toggle = (value: string | number) => {
@@ -53,10 +61,10 @@ function MultiChoice({ title, description, values, selected, onChange, format, o
   )
 }
 
-export interface CoordinationRow {stage:Stage;coordination:Coordination;lanes:number;closed:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;samplesPercent:number|null;normalPF:number;normalPfState:ProfitFactorState;normalCloses:number;pfRatio:number|null;notionalFactor:number}
+export interface CoordinationRow {stage:Stage;coordination:Coordination;lanes:number;closed:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;samplesPercent:number|null;normalPF:number;normalPfState:ProfitFactorState;normalCloses:number;pfRatio:number|null;notionalFactor:number;executed?:{closed:number;profitFactor:number;pfState:ProfitFactorState}}
 function CoordinationComparison({rows}:{rows:CoordinationRow[]}){
   const [stage,setStage]=useState<Stage>('base')
-  return <section className="terminal-panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold">Coordination versus Normal</h3><select className="terminal-input" aria-label="Coordination comparison stage" value={stage} onChange={e=>setStage(e.target.value as Stage)}>{['base','main','real','live'].map(s=><option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div><p className="terminal-muted my-4 text-xs leading-relaxed">Current configuration cohorts, net of modeled costs. These lanes have independent entries and gates. Ratios compare cohorts; the research report uses matched entries and equal reserved budgets. Live here is paper execution.</p><div className="overflow-x-auto"><table className="w-full whitespace-nowrap text-left text-xs"><thead className="terminal-muted"><tr>{['Lane','Closes','PF','Normal PF / closes','PF ratio','Enough samples','Budget ratio'].map(c=><th key={c} className="px-3 py-3">{c}</th>)}</tr></thead><tbody>{rows.filter(r=>r.stage===stage).map(r=><tr key={r.coordination} className="border-t border-[var(--terminal-border)]"><th className="px-3 py-3 capitalize">{r.coordination}</th><td className="px-3 py-3">{r.closed}</td><td className="px-3 py-3">{formatProfitFactor(r.profitFactor,r.pfState)}</td><td className="px-3 py-3">{formatProfitFactor(r.normalPF,r.normalPfState)} / {r.normalCloses}</td><td className="px-3 py-3">{r.pfRatio===null?'—':r.pfRatio.toFixed(2)+'×'}</td><td className="px-3 py-3">{r.samplesPercent===null?'—':r.samplesPercent.toFixed(1)+'%'}</td><td className="px-3 py-3">{r.notionalFactor}×</td></tr>)}</tbody></table></div>{!rows.length&&<p className="terminal-muted py-4 text-xs">No coordination evidence has been recorded.</p>}</section>
+  return <section className="terminal-panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold">Coordination versus Normal</h3><select className="terminal-input" aria-label="Coordination comparison stage" value={stage} onChange={e=>setStage(e.target.value as Stage)}>{['base','main','real','exec','live'].map(s=><option key={s} value={s}>{s.toUpperCase()}</option>)}</select></div><p className="terminal-muted my-4 text-xs leading-relaxed">Current configuration cohorts, net of modeled costs. These lanes have independent entries and gates. Ratios compare cohorts; the research report uses matched entries and equal reserved budgets. Live here is paper execution.</p><div className="overflow-x-auto"><table className="w-full whitespace-nowrap text-left text-xs"><thead className="terminal-muted"><tr>{['Lane','Closes','PF',...(stage==='exec'?['Executed PF / closes']:[]),'Normal PF / closes','PF ratio','Enough samples','Budget ratio'].map(c=><th key={c} className="px-3 py-3">{c}</th>)}</tr></thead><tbody>{rows.filter(r=>r.stage===stage).map(r=><tr key={r.coordination} className="border-t border-[var(--terminal-border)]"><th className="px-3 py-3 capitalize">{r.coordination}</th><td className="px-3 py-3">{r.closed}</td><td className="px-3 py-3">{formatProfitFactor(r.profitFactor,r.pfState)}</td>{stage==='exec'&&<td className="px-3 py-3">{formatProfitFactor(r.executed?.profitFactor,r.executed?.pfState)} / {r.executed?.closed??0}</td>}<td className="px-3 py-3">{formatProfitFactor(r.normalPF,r.normalPfState)} / {r.normalCloses}</td><td className="px-3 py-3">{r.pfRatio===null?'—':r.pfRatio.toFixed(2)+'×'}</td><td className="px-3 py-3">{r.samplesPercent===null?'—':r.samplesPercent.toFixed(1)+'%'}</td><td className="px-3 py-3">{r.notionalFactor}×</td></tr>)}</tbody></table></div>{!rows.length&&<p className="terminal-muted py-4 text-xs">No coordination evidence has been recorded.</p>}</section>
 }
 
 export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordinationStats=[],symbolFees={},feeReadFailures=[],feeCheckedAt=null }: { settings: Record<string, string>; onSave: (settings: Record<string, unknown>) => Promise<void>; busy: boolean;connectionName?:string;coordinationStats?:CoordinationRow[];symbolFees?:Record<string,{makerFeePct:number;takerFeePct:number}>;feeReadFailures?:string[];feeCheckedAt?:number|null }) {
@@ -80,7 +88,17 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
   }
   const selected = (key: string) => draft[key] as (string | number)[]
   const coreCount = useMemo(() => configurationCount(draft), [draft])
-  const sourceChoices=useMemo(()=>{const q=sourceFilter.trim().toLowerCase(),selected=new Set(draft.strategyIndicationSources as string[]);return PORTED_CATALOG.filter(s=>selected.has(s.id)||!q||`${s.id} ${s.label}`.toLowerCase().includes(q))},[sourceFilter,draft.strategyIndicationSources])
+  const execEnabled = draft.stageGateMode === "exec-branches"
+  const execWindows = draft.strategyExecWindows as ExecWindows
+  const budget = Number(draft.baseNotional) * Number(draft.volumeFactor) / SYSTEM_VOLUME_DIVISOR
+  const updateExecBlock = (stage: keyof ExecWindows, block: "long" | "short" | "last" | "shortOutcomes" | "lastOutcomes", value: (string | number)[]) =>
+    change("strategyExecWindows", { ...execWindows, [stage]: { ...execWindows[stage], [block]: value } })
+  const sourceChoices=useMemo(()=>{const q=sourceFilter.trim().toLowerCase(),selected=new Set(draft.strategyIndicationSources as string[]);return STRATEGY_SOURCES.filter(s=>selected.has(s.id)||!q||`${s.id} ${s.label}`.toLowerCase().includes(q))},[sourceFilter,draft.strategyIndicationSources])
+  const updateSourceFamily = (family: readonly {id:string}[], sources: string[]) => {
+    const familyIds = new Set(family.map(source=>source.id))
+    change("strategyIndicationSources",[...(draft.strategyIndicationSources as string[]).filter(id=>!familyIds.has(id)),...sources])
+    if (sources.length && !selected("strategyIndicationTypes").includes("Tactic")) change("strategyIndicationTypes",[...selected("strategyIndicationTypes"),"Tactic"])
+  }
   const reset = () => {
     dirtyRef.current = false; setDirty(false); setDraft(hydrate(settings)); setError(null); setMessage(null)
   }
@@ -91,7 +109,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
       strategyPriceDistancesEnabled: false, strategyLastNGrid: {}, strategyTpSteps: kind === "micro" ? [2, 3, 4, 5] : kind === "balanced" ? [...BALANCED_STEPS] : [...STEPS],
       strategySlRatios: kind === "balanced" ? [...BALANCED_RATIOS] : kind === "micro" ? RATIOS.filter(r=>r<=1.6) : [...RATIOS], strategyExitModes: kind === "full" ? [...MODES] : [...DEFAULT_EXIT_MODES], strategyIndicationTypes: kind==="full"?[...INDICATIONS]:[...CORE_INDICATIONS],
       baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
-      mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20, ...(kind==="micro"?{stageGateMode:"processed-sets",autoPfEnabled:true,blockBehavior:"rounds",microTradeStream:true,strategySignalTimeframes:[1/6,1],microTrailRatio:.5}:{} ) }))
+      mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20, ...(kind==="micro"?{autoPfEnabled:true,blockBehavior:"rounds",microTradeStream:true,strategySignalTimeframes:[1/6,1],microTrailRatio:.5}:{} ) }))
   }
   const save = async (event: React.FormEvent) => {
     event.preventDefault(); setError(null); setMessage(null)
@@ -151,11 +169,31 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
     <>
     <form onSubmit={save} className="space-y-5">
       <fieldset disabled={busy || saving || importing} className="min-w-0 space-y-5">
-      <section className="terminal-panel space-y-3 p-5"><h3 className="text-sm font-semibold">Tactic & Inverse · independent indication sources</h3><p className="terminal-muted text-xs">Tactic adds DCA-style adverse-distance and recovery configurations. Inverse uses CTS-A-O calculations before entry and qualifies its own results. Select Tactic / Inverse below to process these sources. Market / pair sources require a matching reference universe; absent references cannot qualify.</p>
+      <section className="terminal-panel space-y-3 p-5"><h3 className="text-sm font-semibold">Tactic & Inverse · independent indication sources</h3><p className="terminal-muted text-xs">Tactic includes conventional indicators, RSI momentum, quarter-hour order flow and DCA recovery. Inverse qualifies its own results. Market and pair sources require observed reference symbols.</p>
         <button type="button" className="terminal-button" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic','Inverse'])]);change('strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES])}}>Prepare Tactic + Inverse</button>
+        <button type="button" className="terminal-button ml-2" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic'])]);change('strategyIndicationSources',[...new Set([...(draft.strategyIndicationSources as string[]),...RESEARCH_TACTIC_SOURCES.filter(source=>!OSCILLATOR_IDS.has(source.id)).map(source=>source.id)])])}}>Add indicator variants</button>
         <label className="block text-xs">Search source configurations<input className="terminal-input mt-2 w-full" value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} placeholder="Decline, recovery, trend, pair…" /></label>
         <label className="block text-xs">Independent source configurations<select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Tactic and Inverse source configurations" value={draft.strategyIndicationSources as string[]} onChange={e=>change('strategyIndicationSources',Array.from(e.target.selectedOptions,o=>o.value))}>{sourceChoices.map(s=><option key={s.id} value={s.id}>{s.label} · {s.id}</option>)}</select></label>
-        <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {PORTED_CATALOG.length} available. Tactic supports recorded 10s and 1/5/15/30m; Inverse supports 1/5/15m. Shared history retains up to 4,320 completed source candles per symbol and timeframe and periodically rebases its calculations.</p>
+        <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {STRATEGY_SOURCES.length} available. Conventional and RSI momentum variants also support 60m. Inverse and quarter-hour sources use 1/5/15m.</p>
+        <details className="space-y-3 border-t border-[var(--terminal-border)] pt-4">
+          <summary className="cursor-pointer text-sm font-semibold">RSI and Parabolic SAR</summary>
+          <p className="terminal-muted text-xs">RSI Reclaim enters on a return through an extreme threshold. RSI Momentum enters on the move into an extreme. Parabolic SAR signals when a direction begins, using the chosen acceleration step and maximum.</p>
+          <div className="grid gap-3 sm:grid-cols-2">{OSCILLATOR_FAMILIES.map(([label,sources])=><label key={label} className="text-xs">{label}
+            <select multiple size={6} aria-label={label} className="terminal-input mt-2 w-full"
+              value={(draft.strategyIndicationSources as string[]).filter(id=>sources.some(source=>source.id===id))}
+              onChange={event=>updateSourceFamily(sources,Array.from(event.target.selectedOptions,option=>option.value))}>
+              {sources.map(source=><option key={source.id} value={source.id}>{source.label}</option>)}
+            </select>
+          </label>)}</div>
+          <button type="button" className="terminal-button" onClick={()=>{
+            dirtyRef.current=true; setDirty(true); setError(null)
+            setDraft(current=>({...current,strategyIndicationTypes:["Tactic"],strategyIndicationSources:[...THIN_OSCILLATOR_SOURCE_IDS],
+              strategyEnabledRanges:["Micro","Low-Range","Minimal"],strategyTpSteps:[3,6,8],strategySignalTimeframes:[1],
+              strategyPriceDistancesEnabled:true,strategyStopDistancePcts:[.10,.15],strategyTrailDistancePcts:[.05,.10],
+              strategyExitModes:["fixed","trailing-fixed"],microMinSlDistancePct:.10,microMinTrailDistancePct:.05}))
+            setMessage("RSI and Parabolic SAR draft ready to replay or save.")
+          }}>Prepare RSI and SAR thin preset</button>
+        </details>
       </section>
       <section className="terminal-panel space-y-4 p-5">
         <h3 className="text-sm font-semibold">Low-Range indications</h3>
@@ -180,7 +218,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
       <section className="terminal-panel space-y-4 p-5" aria-label="Signals settings">
         <h3 className="text-sm font-semibold">Signals · sources &amp; independent voting bands</h3>
         <p className="terminal-muted text-xs">{SIGNAL_SOURCES.length} computed source families, short/medium variants and independent category coordinators. Each source votes once; conflicting variants abstain. These use observed exchange candles, not third-party trade recommendations.</p>
-        <button type="button" className="terminal-button" onClick={()=>{dirtyRef.current=true;setDirty(true);setDraft(current=>({...current,strategyIndicationTypes:['Signals'],strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],strategyEnabledRanges:['Micro','Low-Range','Minimal','Short'],strategyTpSteps:[2,3,5,8,12],strategySlRatios:[.6,1],strategyExitModes:[...DEFAULT_EXIT_MODES],strategySignalTimeframes:[1],stageGateMode:'processed-sets',liveEntryMode:'real-mirror',signalsMaxWindowDrawdownPct:3}));setMessage('Signals draft prepared. Save to apply it. Research results do not guarantee profitable execution.')}}>Prepare Signals preset</button>
+        <button type="button" className="terminal-button" onClick={()=>{dirtyRef.current=true;setDirty(true);setDraft(current=>({...current,strategyIndicationTypes:['Signals'],strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],strategyEnabledRanges:['Micro','Low-Range','Minimal','Short'],strategyTpSteps:[2,3,5,8,12],strategySlRatios:[.6,1],strategyExitModes:[...DEFAULT_EXIT_MODES],strategySignalTimeframes:[1],signalsMaxWindowDrawdownPct:3}));setMessage('Signals draft prepared. Save to apply it. Research results do not guarantee profitable execution.')}}>Prepare Signals preset</button>
         <label className="block text-xs">Filter Signals sources<input className="terminal-input mt-2 w-full" aria-label="Filter Signals sources" value={signalsFilter} onChange={e=>setSignalsFilter(e.target.value)} placeholder="Trend, breakout, volume, research, minimum 3..."/></label>
         <label className="block text-xs">Signals source configurations<select multiple size={8} className="terminal-input mt-2 w-full" aria-label="Signals source configurations" value={draft.strategySignalsSources as string[]} onChange={e=>change('strategySignalsSources',Array.from(e.target.selectedOptions,o=>o.value))}>{SIGNALS_CATALOG.filter(s=>(draft.strategySignalsSources as string[]).includes(s.id)||`${s.category} ${s.label}`.toLowerCase().includes(signalsFilter.toLowerCase())).map(s=><option key={s.id} value={s.id}>{s.category} · {s.label}</option>)}</select></label>
         <p className="terminal-muted text-xs">{(draft.strategySignalsSources as string[]).length} selected / {SIGNALS_CATALOG.length} available. Gate return-drawdown limit below uses cumulative net-return percentage points in each own Last-N window. It is a qualification filter, not a future account-drawdown guarantee.</p>
@@ -198,6 +236,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
       <div className="terminal-panel flex flex-wrap items-center justify-between gap-4 p-5">
         <div><p className="terminal-muted text-[10px] uppercase tracking-[.2em]">{connectionName.toUpperCase()} / Configuration studio</p><h2 className="mt-1 text-xl font-semibold">Independent strategy combinations</h2><p className="terminal-muted mt-2 max-w-2xl text-xs leading-relaxed">Ranges, distances, exit modes, and indications generate separate core configurations. Axis, Block, and DCA coordinate their progression.</p></div>
         <div className="flex flex-wrap gap-2">
+          <button type="button" className="terminal-button" disabled={busy || saving} onClick={()=>{
+            dirtyRef.current=true; setDirty(true); setError(null)
+            setDraft(current=>({...current,...structuredClone(execDcaTrendPreset)}))
+            setMessage("Trend + DCA replay draft prepared with 10 days of warm-up. Review the settings before saving.")
+          }}>Prepare Trend + DCA replay preset</button>
           <button type="button" onClick={() => preset("balanced")} className="terminal-button" disabled={busy || saving}>Balanced · 252</button>
           <button type="button" onClick={() => preset("micro")} className="terminal-button" disabled={busy || saving}><Layers3 className="mr-2 inline h-4 w-4" />Micro + Low-Range</button>
           <button type="button" onClick={() => preset("full")} className="terminal-button" disabled={busy || saving}>Full catalog</button>
@@ -216,38 +259,50 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <MultiChoice title="Take-profit steps" description="TP distance = estimated round-trip position cost × selected step. Only steps within enabled ranges produce configurations." values={STEPS} selected={selected("strategyTpSteps")} onChange={value => change("strategyTpSteps", value)} />
             <label className="flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.strategyPriceDistancesEnabled === true} onChange={event => change("strategyPriceDistancesEnabled", event.target.checked)} />Use price percentages for stop-loss and trailing</label>
             {draft.strategyPriceDistancesEnabled === true ? <>
-              <MultiChoice title="Stop-loss price distance" description="Each selected distance creates its own Set. Micro and Low-Range enforce their configured minimum distance." values={STOP_DISTANCE_PCTS} selected={selected("strategyStopDistancePcts")} onChange={value => change("strategyStopDistancePcts", value)} format={value => Number(value).toFixed(1) + "%"} />
-              <MultiChoice title="Trailing price gap" description="Each selected gap has independent dynamic and fixed-distance Sets when those exit modes are enabled." values={TRAIL_DISTANCE_PCTS} selected={selected("strategyTrailDistancePcts")} onChange={value => change("strategyTrailDistancePcts", value)} format={value => Number(value).toFixed(1) + "%"} />
+              <MultiChoice title="Stop-loss price distance" description="Each selected distance creates its own Set. Micro and Low-Range enforce their configured minimum distance." values={SELECTABLE_STOP_DISTANCE_PCTS} selected={selected("strategyStopDistancePcts")} onChange={value => change("strategyStopDistancePcts", value)} format={value => Number(value).toFixed(2) + "%"} />
+              <MultiChoice title="Trailing price gap" description="Each selected gap has independent dynamic and fixed-distance Sets when those exit modes are enabled." values={SELECTABLE_TRAIL_DISTANCE_PCTS} selected={selected("strategyTrailDistancePcts")} onChange={value => change("strategyTrailDistancePcts", value)} format={value => Number(value).toFixed(2) + "%"} />
             </> : <MultiChoice title="Stop-loss / take-profit ratio" description="Each ratio creates an independent configuration. SL distance = TP distance × ratio. Micro and Low-Range use 0.2–1.6 in 0.1 steps." values={RATIOS} selected={selected("strategySlRatios")} onChange={value => change("strategySlRatios", value)} format={value => Number(value).toFixed(1) + "×"} />}
             <MultiChoice title="Exit modes" description="Fixed-distance trailing keeps the original entry-price offset. Dynamic trailing recalculates the gap from each new peak." values={MODES} selected={selected("strategyExitModes")} onChange={value => change("strategyExitModes", value)} format={mode => EXIT_LABELS[mode as ExitMode]} />
             <MultiChoice title="Indications" description="Each selected indication evaluates its own configuration history." values={INDICATIONS} selected={selected("strategyIndicationTypes")} onChange={value => change("strategyIndicationTypes", value)} format={value => String(value).replaceAll("_", " ")} />
-            <MultiChoice title="Trend & Break lookbacks" description="Separate indicator periods for the new Trend and Break families. Existing indications retain their original calculations." values={[10,14,20,40,60]} selected={selected('strategySignalPeriods')} onChange={value=>change('strategySignalPeriods',value)} />
-            <MultiChoice title="Signal timeframes" description="10s lanes use recorded WebSocket trades only. Minute history never supplies 10s samples. Longer frames use completed native minutes; exits also process observed trades." values={[1/6,1,5,15,30]} selected={selected('strategySignalTimeframes')} onChange={value=>change('strategySignalTimeframes',value)} format={value=>Number(value)<1?'10s':value+'m'} />
+            <MultiChoice title="Trend & Break lookbacks" description="Each lookback has an independent Set." values={[10,14,20,40,60]} selected={selected('strategySignalPeriods')} onChange={value=>change('strategySignalPeriods',value)} />
+            <MultiChoice title="Common indicator lookbacks" description="Separate settings for MA, RSI, MACD and Bollinger families. Original uses 14 for RSI Band and 20 for the others." values={CORE_SIGNAL_PERIODS} selected={selected('strategyCoreSignalPeriods')} onChange={value=>change('strategyCoreSignalPeriods',value)} format={value=>value===0?'Original':String(value)} />
+            <MultiChoice title="Signal timeframes" description="10s lanes use recorded WebSocket trades. Longer frames use completed native minutes. Exits also process observed trades." values={SIGNAL_TIMEFRAMES} selected={selected('strategySignalTimeframes')} onChange={value=>change('strategySignalTimeframes',value)} format={value=>Number(value)<1?'10s':value+'m'} />
           </section>
           <section className="terminal-panel p-5">
             <div className="mb-5 flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-[var(--terminal-accent)]" /><h3 className="text-sm font-semibold">Stage gates & completed evidence</h3></div>
-            <p className="terminal-muted mb-5 text-xs">PF 1.0 is neutral. Each stage uses its own most recent completed samples. The Real gate controls progression into Live; exchange execution also requires a verified connection.</p>
-            <div className="mb-5">{enumField("stageGateMode", "Stage progression", [{ value: "parent-branches", label: "Branch from each parent entry" }, { value: "processed-sets", label: "Independent processed sets" }, { value: "continuous-ancestors", label: "Recheck all ancestor windows" }])}</div>
-            <div className="mb-3 grid gap-5 sm:grid-cols-2">
+            <p className="terminal-muted mb-5 text-xs">PF 1.0 is neutral. Each stage uses its own most recent completed samples. Exec accepts a fresh entry after its own blocks qualify. Live mirrors that entry using the same allocation and exit policy.</p>
+            <div className="mb-5">{enumField("stageGateMode", "Stage progression", [{ value: "exec-branches", label: "Exec with independent Last N blocks" }, { value: "parent-branches", label: "Parent branches through Real" }, { value: "processed-sets", label: "Independent processed sets" }, { value: "continuous-ancestors", label: "Recheck all ancestor windows" }])}</div>
+            {!execEnabled&&<><div className="mb-3 grid gap-5 sm:grid-cols-2">
               {enumField("stageWindowScope", "Stage evidence scope", windowOptions)}
               {enumField("microStageWindowScope", "Micro and Low-Range evidence scope", [{ value: "inherit", label: "Use stage evidence scope" }, ...windowOptions])}
             </div>
             <p className="terminal-muted mb-5 text-xs">Pooled windows use completed samples from the same configuration, strategy coordination and stage. Exchange entries still require the exact symbol and side to pass.</p>
             <div className="mb-5">{enumField("liveEntryMode", "Live entries", [{ value: "independent", label: "Independent signal entries · legacy baseline" }, { value: "real-mirror", label: "Mirror fresh qualified Real entries" }])}</div>
-            <p className="terminal-muted mb-5 text-xs">Real remains the final current PF gate. Mirroring links each new Live position to its fresh Real entry and uses Real evidence for Axis, without another Live evidence gate. Independent processed sets always mirror Real. Mode changes preserve prior outcomes.</p>
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{NUMERIC_FIELDS.map(numberField)}</div>
-            {(["base","main","real"] as const).map(stage=><BlockPolicyFields key={stage} label={stage+" Last-N blocks"} value={(draft.stageBlocks as Partial<Record<string,BlockPolicy>>|undefined)?.[stage]} onChange={policy=>{const next={...(draft.stageBlocks as Partial<Record<string,BlockPolicy>>??{})};if(policy)next[stage]=policy;else delete next[stage];change("stageBlocks",next)}}/>)}
+            <p className="terminal-muted mb-5 text-xs">Real remains the final current PF gate. Mirroring links each new Live position to its fresh Real entry and uses Real evidence for Axis, without another Live evidence gate. Independent processed sets always mirror Real. These progression modes use Real as their final gate.</p></>}
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{(execEnabled ? [...NUMERIC_FIELDS.slice(0,3),EXEC_PF_FIELD] : NUMERIC_FIELDS).map(numberField)}</div>
+            {!execEnabled&&(["base","main","real"] as const).map(stage=><BlockPolicyFields key={stage} label={stage+" Last-N blocks"} value={(draft.stageBlocks as Partial<Record<string,BlockPolicy>>|undefined)?.[stage]} onChange={policy=>{const next={...(draft.stageBlocks as Partial<Record<string,BlockPolicy>>??{})};if(policy)next[stage]=policy;else delete next[stage];change("stageBlocks",next)}}/>)}
             <details className="mt-5 space-y-4">
               <summary className="cursor-pointer text-sm font-semibold">Independent Last-N Sets</summary>
-              <p className="terminal-muted text-xs">Each combination of selected stage sizes runs in its own Set. An empty stage selection uses that stage’s existing window policy.</p>
-              {draft.stageGateMode === "parent-branches" && (["main","real"] as const).map(stage => {
+              <p className="terminal-muted text-xs">{execEnabled ? "Every combination gets its own Set under each qualifying parent. Long uses the oldest block, Short follows it, and Last uses the newest completed positions." : "Each combination of selected stage sizes runs in its own Set. An empty stage selection uses that stage’s existing window policy."}</p>
+              {(execEnabled || draft.stageGateMode === "parent-branches") && (execEnabled ? (["main","real","exec"] as const) : (["main","real"] as const)).map(stage => {
                 const map = (draft.strategyStageCoordinations ?? {}) as StageCoordinations
-                return <MultiChoice key={stage} title={stage === "main" ? "Main child coordinations" : "Real child coordinations"}
-                  description="Each eligible parent creates the selected enabled coordinations. An empty selection inherits its coordination."
+                return <MultiChoice key={stage} title={stage[0].toUpperCase()+stage.slice(1)+" child coordinations"}
+                  description={execEnabled?"Each eligible parent creates the selected enabled coordinations. An empty selection runs all enabled coordinations.":"Each eligible parent creates the selected enabled coordinations. An empty selection inherits its coordination."}
                   values={[...BRANCH_COORDINATIONS]} selected={[...(map[stage] ?? [])]} optional
                   onChange={value => change("strategyStageCoordinations", { ...map, [stage]: value })} />
               })}
-              {LAST_N_STAGES.map(stage => {
+              {execEnabled ? EXEC_EVALUATION_STAGES.map(stage => {
+                const label = stage[0].toUpperCase()+stage.slice(1)
+                const windows = execWindows[stage]
+                return <section key={stage} className="grid gap-4 border-t border-[var(--terminal-border)] pt-4 sm:grid-cols-2">
+                  <h4 className="text-sm font-semibold sm:col-span-2">{label}</h4>
+                  <MultiChoice title={label+" Long"} description={stage==="base"?"Completed positions in the oldest block.":"Inherit the originating Base Set’s Long count or omit the block."} values={stage==="base"?[...EXEC_LONG_COUNTS]:[...EXEC_LONG_MODES]} selected={[...windows.long]} onChange={value=>updateExecBlock(stage,"long",value)} format={value=>value==="none"?"No Long":value==="inherit"?"Base Long":String(value)}/>
+                  <MultiChoice title={label+" Short"} description="Completed positions immediately before Last." values={[...stageShortCounts(stage)]} selected={[...windows.short]} onChange={value=>updateExecBlock(stage,"short",value)}/>
+                  <MultiChoice title={label+" Last"} description="Most recent completed positions." values={[...EXEC_LAST_COUNTS]} selected={[...windows.last]} onChange={value=>updateExecBlock(stage,"last",value)}/>
+                  <MultiChoice title={label+" Short outcomes"} description="Negative Short is available for 4, 8 and 12 positions. The full window must still pass PF." values={EXEC_OUTCOMES} selected={[...(windows.shortOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"shortOutcomes",value)}/>
+                  <MultiChoice title={label+" Last outcomes"} description="Each outcome is an independent Set. A negative Last must sit inside a profitable full window." values={EXEC_OUTCOMES} selected={[...(windows.lastOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"lastOutcomes",value)}/>
+                </section>
+              }) : LAST_N_STAGES.map(stage => {
                 const grid = (draft.strategyLastNGrid ?? {}) as LastNGrid
                 const sizes = [...(grid[stage] ?? [])]
                 const options = [...new Set([1, 3, 5, 8, 10, 12, 15, 20, 25, 30, 35, 40, 50, 60, 75, 100, 150, 250, ...sizes])].sort((a, b) => a - b)
@@ -255,15 +310,24 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
               })}
             </details>
 
-            <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.autoPfEnabled===true} onChange={e=>change('autoPfEnabled',e.target.checked)}/>Auto PF by configuration TP distance</label>
-            <p className="terminal-muted my-3 text-xs">Required PF = max(stage floor, min(cap, 1 + TP distance rounded down to 0.1% × slope)). Computed once per configuration; samples and losses remain unchanged.</p>
-            <div className="grid gap-5 sm:grid-cols-2">{AUTO_PF_FIELDS.map(numberField)}</div>
+            {execEnabled&&<div className="mt-5 space-y-2">
+              {EXEC_PROFILES.map(profile=><label key={profile.id} className="flex items-center gap-3 text-xs"><input type="checkbox" checked={draft[profile.setting]===true} onChange={e=>change(profile.setting,e.target.checked)}/>{profile.label} execution profile</label>)}
+              <p className="terminal-muted text-xs">Each enabled profile adds independent 1m configurations with fixed exits, their own Auto PF and Exec Short 4, 8 and 12. Active when the DCA coordination is enabled.</p>
+            </div>}
+            <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.autoPfEnabled===true} onChange={e=>change('autoPfEnabled',e.target.checked)}/>Auto PF</label>
+            {draft.autoPfEnabled === true && <div className="mt-3 space-y-3">
+              {enumField("autoPfMode", "Auto PF method", [{value:"set-history",label:"Independent Set history"},{value:"tp-distance",label:"Legacy TP distance"}])}
+              <p className="terminal-muted text-xs">{draft.autoPfMode === "tp-distance"
+                ? "The TP-based floor depends on the configuration's target distance and slope."
+                : "Each Set uses its older completed returns to raise the PF requirement when its history is weak. The fallback applies while history is sparse. Every Last-N block still needs its full sample count."}</p>
+              <div className="grid gap-5 sm:grid-cols-2">{AUTO_PF_FIELDS.filter(field => field.key === "autoPfMax" || (field.key === "autoPfRatio") === (draft.autoPfMode === "tp-distance")).map(numberField)}</div>
+            </div>}
             <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.microTradeStream===true} onChange={e=>change('microTradeStream',e.target.checked)}/>Record trades and 10-second history</label>
           </section>
         </div>
         <div className="space-y-5">
           <section className="terminal-panel p-5">
-            <p className="terminal-muted text-[10px] uppercase tracking-[.18em]">Configuration preview</p><p className="mt-3 font-mono text-4xl font-semibold text-[var(--terminal-blue)]">{coreCount.toLocaleString()}</p><p className="terminal-muted mt-2 text-xs">Core configurations per symbol, before direction and coordination lanes.</p>
+            <p className="terminal-muted text-[10px] uppercase tracking-[.18em]">Configuration preview</p><p className="mt-3 font-mono text-4xl font-semibold text-[var(--terminal-blue)]">{coreCount.toLocaleString()}</p><p className="terminal-muted mt-2 text-xs">Core configurations per symbol, before direction and coordination lanes.</p>{execEnabled&&<p className="terminal-muted mt-2 text-xs">Up to {execPathCount(execWindows).toLocaleString()} Exec paths per geometry and coordination path. Descendants start as their parents qualify.</p>}
             <div className="mt-5 space-y-2 border-t border-[var(--terminal-border)] pt-4 text-xs"><p>{(draft.strategyEnabledRanges as string[]).join(" / ")}</p><p className="terminal-muted">{draft.strategyPriceDistancesEnabled === true ? `${selected("strategyStopDistancePcts").length} stop distances · ${selected("strategyTrailDistancePcts").length} trailing gaps` : `${selected("strategySlRatios").length} stop ratios`} · {selected("strategyExitModes").length} exits · {selected("strategyIndicationTypes").length} indications</p><p className={dirty ? "text-[var(--terminal-amber)]" : "terminal-muted"}>{dirty ? "Unsaved configuration" : "Saved values or labeled defaults"}</p></div>
           </section>
           <section className="terminal-panel space-y-5 p-5">
@@ -309,9 +373,9 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <p className="terminal-muted text-xs">Each post-Base Set sizes from its own recent returns, consecutive wins and stop-to-target ratio.</p>
             <div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("relate")).map(numberField)}</div>
           </section>}
-          <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Market universe & position sizing</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Scan up to this many available contracts. Base notional × volume factor sets the initial sizing budget before coordination adjustments and exchange rules.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{EXECUTION_FIELDS.map(numberField)}</div><p className="terminal-muted mt-5 border-t border-[var(--terminal-border)] pt-4 text-xs">Initial sizing budget: <span className="font-mono text-[var(--terminal-fg)]">{Number.isFinite(Number(draft.baseNotional) * Number(draft.volumeFactor)) ? (Number(draft.baseNotional) * Number(draft.volumeFactor)).toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—"} USDT</span></p></section>
+          <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Market universe & position sizing</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Scan up to this many available contracts. The model divides the configured volume factor by five before applying coordination adjustments. Exchange minimums and quantity precision still apply.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{EXECUTION_FIELDS.map(numberField)}</div><p className="terminal-muted mt-5 border-t border-[var(--terminal-border)] pt-4 text-xs">Initial sizing budget: <span className="font-mono text-[var(--terminal-fg)]">{Number.isFinite(budget) ? budget.toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—"} USDT</span></p></section>
           <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Fee & slippage estimate</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Default taker 0.05% per side gives 0.10% round-trip fees; 10% fee-relative slippage gives 0.11% total modeled cost. The account’s exchange commission pair applies to the selected perpetual symbols. A failed refresh retains the last verified pair. Fee fields below apply when no verified pair is available. Slippage applies to the fee sum. Open positions retain their entry cost model.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{COST_FIELDS.map(numberField)}</div><details className="mt-5 text-xs"><summary className="cursor-pointer">Exchange fee coverage · {Object.keys(symbolFees).length} symbols</summary><p className="terminal-muted my-3">{!feeCheckedAt?"No startup commission check has been recorded.":feeReadFailures.length?`${feeReadFailures.length} symbol reads failed at the latest refresh. Cached pairs are labeled below; symbols without a known pair use configured fallbacks.`:"Latest startup commission reads completed without errors."}</p><div className="mt-3 max-h-60 overflow-auto"><table className="w-full text-left"><thead><tr><th>Symbol</th><th>Maker %</th><th>Taker %</th><th>Source</th></tr></thead><tbody>{Object.entries(symbolFees).map(([symbol,fee])=><tr key={symbol}><th className="py-1 font-normal">{symbol}</th><td>{fee.makerFeePct}</td><td>{fee.takerFeePct}</td><td>{feeReadFailures.includes(symbol)?"Last verified":feeCheckedAt?"Latest refresh":"Recorded"}</td></tr>)}</tbody></table></div></details></section>
-          <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Ratios & distance factors</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Each lane budget = base notional × volume factor × lane ratio. TP = cost × step × TP factor. SL = TP × selected SL ratio × SL factor; trail = SL × trail ratio. Existing positions retain their captured settings. The order cap rejects exchange-rounded entries and adds above its value.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{FACTOR_FIELDS.map(numberField)}</div></section>
+          <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Ratios & distance factors</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Lane budget = base notional × (volume factor ÷ 5) × lane ratio. TP = cost × step × TP factor. SL = TP × selected SL ratio × SL factor; trail = SL × trail ratio. Existing positions retain their captured settings. The order cap rejects exchange-rounded entries and adds above its value.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{FACTOR_FIELDS.map(numberField)}</div></section>
         </div>
       </div>
       </fieldset>

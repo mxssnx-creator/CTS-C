@@ -1,10 +1,37 @@
 "use client"
 
 import { formatProfitFactor, type ProfitFactorState } from "./profit-factor"
-export interface StageTelemetry {validatedWindow?:{samples:number;sets:number;profitFactor:number;pfState:ProfitFactorState};admittedForward?:{closes:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;unprovenCloses:number}; sets:number;allSets?:number;retiredSets?:number;eligible:number;enoughSamples:number|null;samplesPercent:number|null;pf:number|null;pfState?:ProfitFactorState;windowPF?:number|null;windowPfState?:ProfitFactorState;open?:number;closed?:number;blockedByParent?:number;admissionReady?:number;required?:number }
+import type { StageMetrics } from "@/core/types"
+import { EXEC_PROFILES } from "@/core/exec-profile"
+export interface StageTelemetry {autoPf?:StageMetrics["autoPf"];validatedWindow?:StageMetrics["validatedWindow"];admittedForward?:StageMetrics["admittedForward"];postStage?:StageMetrics["postStage"];executed?:StageMetrics["executed"];execProfiles?:StageMetrics["execProfiles"];directMirror?:boolean;sampleSetCount?:number;sets:number;allSets?:number;retiredSets?:number;eligible:number;enoughSamples:number|null;samplesPercent:number|null;pf:number|null;pfState?:ProfitFactorState;windowPF?:number|null;windowPfState?:ProfitFactorState;open?:number;closed?:number;blockedByParent?:number;admissionReady?:number;required?:number }
+export const STAGE_NAMES = ["base","main","real","exec","live"] as const
 
 export function ProgressionDetails({stages}:{stages:Record<string,StageTelemetry>}){
-  return <section className="terminal-panel"><header className="terminal-panel-heading"><div><p className="terminal-kicker">CURRENT CONFIGURATION / LIFETIME EVIDENCE</p><h2>Stage diagnostics</h2></div></header><div className="terminal-table-wrap"><table className="terminal-table"><thead><tr><th scope="col">Stage</th><th scope="col">Current / retired sets</th><th scope="col">Enough samples</th><th scope="col">Validated window PF</th><th scope="col">Admitted forward PF</th><th scope="col">All current windows PF</th><th scope="col">Lifetime PF</th><th scope="col">Parent gate holds</th><th scope="col">Paper open / closed</th></tr></thead><tbody>{["base","main","real","live"].map(name=>{const s=stages[name];return s?<tr key={name}><th scope="row" className="uppercase">{name}</th><td>{s.sets.toLocaleString()} / {(s.retiredSets??0).toLocaleString()}</td><td>{s.enoughSamples??"—"} / {s.sets}<small>{s.samplesPercent==null?"No current lanes":`${s.samplesPercent.toFixed(1)}% · N=${s.required??"—"}`}</small></td><td>{formatProfitFactor(s.validatedWindow?.profitFactor,s.validatedWindow?.pfState)}<small>{s.validatedWindow?.sets??0} validated sets · {s.validatedWindow?.samples??0} samples</small></td><td>{name==='base'?'—':formatProfitFactor(s.admittedForward?.profitFactor,s.admittedForward?.pfState)}<small>{name==='base'?'Entry qualification starts at Main':`${s.admittedForward?.closes??0} closes · ${s.admittedForward?.unprovenCloses??0} older unproven`}</small></td><td>{formatProfitFactor(s.windowPF,s.windowPfState)}</td><td>{formatProfitFactor(s.pf,s.pfState)}</td><td>{s.blockedByParent??0}</td><td>{s.open??0} / {(s.closed??0).toLocaleString()}</td></tr>:null})}</tbody></table></div><p className="terminal-ledger-note">Validated window PF selects currently qualified sets and is a selection statistic. Admitted forward PF retains every subsequent closed win and loss with immutable parent-gate proof at entry, even after dequalification. Older closes without proof remain in lifetime PF. Lifetime PF includes retired cohorts. Main, Real and Live require their preceding stage gates to remain qualified; Live entry readiness uses Real evidence.</p></section>
+  return <section className="terminal-panel">
+    <header className="terminal-panel-heading"><h2>Stage diagnostics</h2></header>
+    <div className="terminal-table-wrap"><table className="terminal-table">
+      <thead><tr>{["Stage","Current / retired Sets","Enough samples","Auto PF","Validated window PF","Admitted forward PF","Post-stage PF","Executed PF","Lifetime PF","Parent gate holds","Paper open / closed"].map(label=><th scope="col" key={label}>{label}</th>)}</tr></thead>
+      <tbody>{STAGE_NAMES.map(name=>{
+        const s = stages[name]
+        if (!s) return null
+        return <tr key={name}>
+          <th scope="row" className="uppercase">{name}</th>
+          <td>{s.sets.toLocaleString()} / {(s.retiredSets??0).toLocaleString()}</td>
+          <td>{s.directMirror ? "Direct mirror" : `${(s.enoughSamples??0).toLocaleString()} / ${(s.sampleSetCount??s.sets).toLocaleString()}`}{s.samplesPercent!=null&&<small>{s.samplesPercent.toFixed(1)}%{s.required!=null&&` · N=${s.required}`}</small>}</td>
+          <td>{s.autoPf ? <>{s.autoPf.minThreshold.toFixed(2)}–{s.autoPf.maxThreshold.toFixed(2)}<small>{s.autoPf.historySets.toLocaleString()} history · {s.autoPf.fallbackSets.toLocaleString()} fallback</small></> : "—"}</td>
+          <td>{formatProfitFactor(s.validatedWindow?.profitFactor,s.validatedWindow?.pfState)}{s.validatedWindow&&<small>{s.validatedWindow.sets.toLocaleString()} Sets · {s.validatedWindow.samples.toLocaleString()} samples</small>}</td>
+          <td>{name==="base"?"—":formatProfitFactor(s.admittedForward?.profitFactor,s.admittedForward?.pfState)}{name!=="base"&&s.admittedForward&&<small>{s.admittedForward.closes.toLocaleString()} closes · {s.admittedForward.unprovenCloses.toLocaleString()} unproven</small>}</td>
+          <td>{formatProfitFactor(s.postStage?.profitFactor,s.postStage?.pfState)}{s.postStage&&<small>{s.postStage.closed.toLocaleString()} settled · {s.postStage.open.toLocaleString()} active</small>}</td>
+          <td>{formatProfitFactor(s.executed?.profitFactor,s.executed?.pfState)}{s.executed&&<small>{s.executed.open.toLocaleString()} active · {s.executed.closed.toLocaleString()} settled</small>}
+            {EXEC_PROFILES.map(profile=>{const row=s.execProfiles?.[profile.id];return row&&<small key={profile.id}>{profile.label} {formatProfitFactor(row.profitFactor,row.pfState)} · {row.closed.toLocaleString()} settled</small>})}</td>
+          <td>{formatProfitFactor(s.pf,s.pfState)}</td>
+          <td>{s.directMirror?"—":(s.blockedByParent??0).toLocaleString()}</td>
+          <td>{(s.open??0).toLocaleString()} / {(s.closed??0).toLocaleString()}</td>
+        </tr>
+      })}</tbody>
+    </table></div>
+    <p className="terminal-ledger-note">Validated window PF uses qualified Sets. Admitted forward PF measures positions received from the preceding stage. Post-stage PF measures positions that opened a child at the next stage, once per position. Executed PF measures entries accepted at Exec after they settle.</p>
+  </section>
 }
 
 export function PaperEquity({history}:{history:{equity:number}[]}){

@@ -1,6 +1,6 @@
 import type { LaneState } from "./types"
 
-export type WindowEvidence = Pick<LaneState, "config" | "samples" | "closedCount">
+export type WindowEvidence = Pick<LaneState, "config" | "samples" | "closedCount" | "sampleTimes"> & { timedSampleCount?: number }
 interface Row { at: number; laneId: string; value: number }
 interface Group {
   lanes: LaneState[]

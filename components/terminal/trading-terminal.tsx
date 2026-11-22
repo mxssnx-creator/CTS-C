@@ -10,7 +10,7 @@ import { formatProfitFactor, type ProfitFactorState } from "./profit-factor"
 import {CONNECTIONS,connectionInfo,type ConnectionId} from "@/core/connections"
 import type {CoordinationRow} from "./strategy-lab"
 import type { ExecutionSnapshot } from "./execution-ledger"
-import { ProgressionDetails, PaperEquity, type StageTelemetry } from "./progression-panel"
+import { ProgressionDetails, PaperEquity, STAGE_NAMES, type StageTelemetry } from "./progression-panel"
 const ExecutionLedger = dynamic(() => import("./execution-ledger").then(module => module.ExecutionLedger))
 const MarketTerminal = dynamic(() => import("./market-terminal").then(module => module.MarketTerminal), { loading: () => <div className="terminal-empty">Loading candle chart…</div> })
 const StrategyLab = dynamic(() => import("./strategy-lab").then(module => module.StrategyLab), { loading: () => <div className="terminal-empty">Loading strategy controls…</div> })
@@ -20,7 +20,7 @@ type Stage = StageTelemetry
 interface Connection { id: string; name: string; exchange: string; demo: boolean; configured: boolean; enabled: boolean; liveEnabled: boolean }
 interface Position { id: string; connectionId: string; symbol: string; direction: string; entryPrice: number; quantity: number; status: string; unrealizedPnl: number | null; realizedPnl: number; fee: number; createdAt: string | number | null; closedAt: string | number | null; source?: string }
 interface EventItem { timestamp: string; level: string; phase: string; message: string; connectionId: string }
-interface Snapshot { connectionId?:ConnectionId;coordinationStats?:CoordinationRow[];updatedAt: number; connections: Connection[]; equity: number | null; paperEquity?: number; positionCount?: number; positionDisplayLimit?: number; realizedPnl: number; fees: number|null;paperTotals?:{closed:number;wins:number;winRate:number|null;longOpen:number;shortOpen:number};engine?:{symbolFees?:Record<string,{makerFeePct:number;takerFeePct:number}>;feeReadFailures?:string[];feeCheckedAt?:number|null;equityHistory:{equity:number}[]}; openPositions: Position[]; closedPositions: Position[]; stages: Record<string, Stage>; events: EventItem[]; settings: Record<string, string>; readiness: { configured?:boolean;environment?:string;x02Configured: boolean; status: string; engineStatus: string }; metricScope?: string; execution?: ExecutionSnapshot }
+interface Snapshot { connectionId?:ConnectionId;coordinationStats?:CoordinationRow[];updatedAt: number; connections: Connection[]; equity: number | null; paperEquity?: number; positionCount?: number; positionDisplayLimit?: number; realizedPnl: number; fees: number|null;paperTotals?:{closed:number;wins:number;winRate:number|null;longOpen:number;shortOpen:number};engine?:{symbolCount?:number;symbolFees?:Record<string,{makerFeePct:number;takerFeePct:number}>;feeReadFailures?:string[];feeCheckedAt?:number|null;equityHistory:{equity:number}[]}; openPositions: Position[]; closedPositions: Position[]; stages: Record<string, Stage>; events: EventItem[]; settings: Record<string, string>; readiness: { currentMinuteSymbols?:number;configured?:boolean;environment?:string;x02Configured: boolean; status: string; engineStatus: string }; metricScope?: string; execution?: ExecutionSnapshot }
 type View = "terminal" | "strategies" | "positions" | "activity" | "connections" | "integrations"
 const NAV = [
   { id: "terminal", label: "Command center", icon: LayoutDashboard }, { id: "strategies", label: "Strategy lab", icon: SlidersHorizontal },
@@ -37,7 +37,7 @@ function Empty({ children }: { children: ReactNode }) {
 }
 function SampleGauge({ value }: { value: number | null }) {
   const pct = value === null ? 0 : Math.max(0, Math.min(100, value))
-  return <div className="terminal-gauge" role="img" aria-label={value === null ? "Sample sufficiency not yet reported" : `${pct.toFixed(1)} percent of Base sets have enough samples`}>
+  return <div className="terminal-gauge" role="img" aria-label={value === null ? "Sample sufficiency not yet reported" : `${pct.toFixed(1)} percent of Base candidates have enough samples`}>
     <svg viewBox="0 0 140 140" aria-hidden="true"><circle className="terminal-gauge-track" cx="70" cy="70" r="58" /><circle className="terminal-gauge-fill" cx="70" cy="70" r="58" strokeDasharray={`${pct * 3.644} 364.4`} /></svg>
     <div><strong>{value === null ? "—" : `${pct.toFixed(0)}%`}</strong><span>sample readiness</span></div>
   </div>
@@ -149,12 +149,15 @@ export function TradingTerminal() {
   const liveEnabled = activeConnection?.liveEnabled === true
   const ready = snapshot?.readiness.configured === true
   const settings = snapshot?.settings ?? {}
+  const stageNames = STAGE_NAMES.filter(stage => stage !== "exec" || !snapshot || Boolean(snapshot.stages.exec))
+  const directMirror = snapshot?.stages.live?.directMirror === true
+  const venue = snapshot?.execution?.summary
   const winCount = closed.filter(p => p.realizedPnl > 0).length
   const modules = [
     { title: "SCOUT", sub: "Market discovery", icon: ScanLine, color: "cyan", metric: snapshot ? `${count(base.sets)} Base sets` : "Awaiting snapshot", view: "terminal" as View },
     { title: "FILTER", sub: "Independent stage gates", icon: Filter, color: "rose", metric: snapshot ? `${count(base.eligible)} Base eligible` : "Awaiting snapshot", view: "strategies" as View },
     { title: "ANALYST", sub: "Sample & PF validation", icon: BarChart3, color: "violet", metric: `Cumulative PF ${formatProfitFactor(base.pf, base.pfState)}`, view: "strategies" as View },
-    { title: "EXECUTOR", sub: "Exchange order lifecycle", icon: Zap, color: "green", metric: snapshot?.execution ? `${snapshot.execution.summary.ownedLots} owned exchange lots` : "Awaiting exchange ledger", view: "positions" as View },
+    { title: "EXECUTOR", sub: "Exchange order lifecycle", icon: Zap, color: "green", metric: venue?.positions ? `${venue.positions.open} positions · ${venue.orders?.working ?? 0} working orders` : "Awaiting exchange ledger", view: "positions" as View },
     { title: "RISK", sub: "Stops, costs & ownership", icon: ShieldCheck, color: "amber", metric: `${selectedConnection.name} entries ${liveEnabled?"enabled":"paused"}`, view: "connections" as View },
     { title: "LOGGER", sub: "Persistent activity trail", icon: ClipboardList, color: "blue", metric: `${events.length} recorded events`, view: "activity" as View },
   ]
@@ -162,8 +165,11 @@ export function TradingTerminal() {
     ["Selected connection configured", ready ? "Ready" : "Missing credentials", ready],
     ["Execution environment", `${selectedConnection.name} / ${selectedConnection.environment}`, true],
     ["Base PF threshold", settings.baseProfitFactor || "1.1 default", null],
-    ["Main validation samples", settings.mainEvalPosCount || "8 default", null],
-    ["Real validation samples", settings.realEvalPosCount || "8 default", null],
+    ...(running && snapshot?.readiness.currentMinuteSymbols!==undefined && snapshot.engine?.symbolCount!==undefined
+      ? [["Current minute coverage", `${snapshot.readiness.currentMinuteSymbols} / ${snapshot.engine.symbolCount}`, null] as const] : []),
+    ...(directMirror ? [["Exec PF threshold", settings.execMinPF || "1.1", null] as const]
+      : [["Main validation samples", settings.mainEvalPosCount || "8 default", null] as const,
+        ["Real validation samples", settings.realEvalPosCount || "8 default", null] as const]),
     ["Live entries", liveEnabled ? "Enabled" : "Paused", liveEnabled],
   ] as const
   const selectedNav = NAV.find(n => n.id === view)!
@@ -182,11 +188,25 @@ export function TradingTerminal() {
 
       {view === "terminal" && <div className="terminal-command-grid"><aside className="terminal-module-rail" aria-label="Processing modules"><div className="terminal-rail-label">PROCESSING MODULES <span>06</span></div>{modules.map(module => <button key={module.title} className={`terminal-module ${module.color}`} onClick={() => setView(module.view)}><div><module.icon size={17} /><strong>{module.title}</strong><ChevronRight size={13} /></div><p>{module.sub}</p><small>{module.metric}</small></button>)}<div className="terminal-operator"><ShieldCheck size={18} /><p>Connection isolation<span>Actions and settings target {selectedConnection.name} {selectedConnection.demo?"demo":"mainnet"}.</span></p></div></aside>
         <div className="terminal-command-content">
-          <Panel title="Strategy progression" kicker="PAPER VALIDATION / INDEPENDENT SETS" action={<span className="terminal-tag"><Workflow size={12} /> Base → Live</span>}><div className="terminal-stage-row">{["base", "main", "real", "live"].map((stage, index) => { const data = snapshot?.stages[stage] ?? EMPTY_STAGE; return <div className={`terminal-stage stage-${index}`} key={stage}><div className="terminal-stage-node"><span>{String(index + 1).padStart(2, "0")}</span>{index === 3 ? <Zap size={20} /> : <Layers size={20} />}</div><h3>{stage}</h3><strong>{snapshot ? count(data.sets) : "—"}<small>sets</small></strong><p>{count(data.eligible)} eligible</p><div className="terminal-stage-foot">Validated PF {formatProfitFactor(data.validatedWindow?.profitFactor, data.validatedWindow?.pfState)}<br />Forward PF {formatProfitFactor(data.admittedForward?.profitFactor, data.admittedForward?.pfState)}<br />Lifetime {formatProfitFactor(data.pf, data.pfState)}</div></div> })}</div><p className="terminal-ledger-note">Active set counts exclude retired configurations. Window PF uses current last-N evidence; lifetime PF retains all recorded losses.</p></Panel>
-          {snapshot && <ProgressionDetails stages={snapshot.stages} />}{snapshot?.engine?.equityHistory && <PaperEquity history={snapshot.engine.equityHistory} />}<div className="terminal-analysis-grid"><Panel title="Validation rules" kicker="FILTER / CURRENT CONFIGURATION" action={<button className="terminal-link" onClick={() => setView("strategies")}>Configure <ArrowUpRight size={13} /></button>}><div className="terminal-rule-list">{rules.map(([label, value, okay]) => <div key={label}><span className={`terminal-rule-dot ${okay === true ? "pass" : okay === false ? "hold" : ""}`} /> <span>{label}</span><strong>{value}</strong></div>)}</div></Panel><Panel title="Sample readiness" kicker="ANALYST / BASE LAST-N"><div className="terminal-readiness"><SampleGauge value={base.samplesPercent} /><div><strong>{base.enoughSamples == null ? "Not reported" : `${count(base.enoughSamples)} / ${count(base.sets)} sets`}</strong><p>Enough closed samples for independent validation.</p><span className="terminal-tag">PF neutral = 1.0</span></div></div></Panel></div>
+          <Panel title="Strategy progression" action={<span className="terminal-tag"><Workflow size={12} /> {stageNames.includes("exec") ? "Base → Exec → Live" : "Base → Live"}</span>}>
+            <div className={`terminal-stage-row${stageNames.includes("exec")?" with-exec":""}`}>{stageNames.map((stage, index) => {
+              const data = snapshot?.stages[stage] ?? EMPTY_STAGE
+              return <div className={`terminal-stage stage-${index}`} key={stage}>
+                <div className="terminal-stage-node">{stage === "exec" || stage === "live" ? <Zap size={20} /> : <Layers size={20} />}</div>
+                <h3>{stage}</h3><strong>{snapshot ? count(data.sets) : "—"}<small>Sets</small></strong>
+                <p>{data.directMirror ? `${count(data.eligible)} active mirrors` : `${count(data.eligible)} qualified`}</p>
+                <div className="terminal-stage-foot">
+                  {data.executed ? <>Executed PF {formatProfitFactor(data.executed.profitFactor,data.executed.pfState)}<br/>{data.executed.closed.toLocaleString()} closed</>
+                    : data.directMirror ? <>Paper PF {formatProfitFactor(data.pf,data.pfState)}</>
+                    : <>Validated PF {formatProfitFactor(data.validatedWindow?.profitFactor,data.validatedWindow?.pfState)}<br/>Post-stage PF {formatProfitFactor(data.postStage?.profitFactor,data.postStage?.pfState)}</>}
+                </div>
+              </div>
+            })}</div>
+          </Panel>
+          {snapshot && <ProgressionDetails stages={snapshot.stages} />}{snapshot?.engine?.equityHistory && <PaperEquity history={snapshot.engine.equityHistory} />}<div className="terminal-analysis-grid"><Panel title="Validation rules" kicker="FILTER / CURRENT CONFIGURATION" action={<button className="terminal-link" onClick={() => setView("strategies")}>Configure <ArrowUpRight size={13} /></button>}><div className="terminal-rule-list">{rules.map(([label, value, okay]) => <div key={label}><span className={`terminal-rule-dot ${okay === true ? "pass" : okay === false ? "hold" : ""}`} /> <span>{label}</span><strong>{value}</strong></div>)}</div></Panel><Panel title="Sample readiness" kicker="ANALYST / BASE LAST-N"><div className="terminal-readiness"><SampleGauge value={base.samplesPercent} /><div><strong>{base.enoughSamples == null ? "Not reported" : `${count(base.enoughSamples)} / ${count(base.sampleSetCount??base.sets)} candidates`}</strong><p>Enough closed samples for independent validation.</p><span className="terminal-tag">PF neutral = 1.0</span></div></div></Panel></div>
           <Panel title="Execution comparison" kicker="EXACT OWNED POSITION PAIRS" action={<button className="terminal-link" onClick={()=>setView("positions")}>Trade history <ArrowUpRight size={13}/></button>}><p className="terminal-ledger-note">Matched {snapshot?.execution?.comparison?.matched??0} · coverage {snapshot?.execution?.comparison?.coveragePct==null?"—":snapshot.execution.comparison.coveragePct.toFixed(1)+"%"} · simulated PF {formatProfitFactor(snapshot?.execution?.comparison?.simulatedPF.profitFactor,snapshot?.execution?.comparison?.simulatedPF.pfState)} · exchange PF {formatProfitFactor(snapshot?.execution?.comparison?.exchangePF.profitFactor,snapshot?.execution?.comparison?.exchangePF.pfState)}. Open and incomplete pairs remain separate.</p></Panel>
           <MarketTerminal key={`chart:${connectionId}`} demo={selectedConnection.demo} />
-          <div className="terminal-analysis-grid"><Panel title="Qualification funnel" kicker="EVALUATION / CURRENT SNAPSHOT"><div className="terminal-funnel">{["base", "main", "real", "live"].map(stage => { const data = snapshot?.stages[stage] ?? EMPTY_STAGE; const fraction = data.sets ? Math.min(100, data.eligible / data.sets * 100) : 0; return <div key={stage}><div><span>{stage}</span><strong>{data.eligible} / {data.sets}</strong></div><div className="terminal-bar"><span style={{ width: `${fraction}%` }} /></div><small>{data.samplesPercent == null ? "Sample sufficiency not reported" : `${data.samplesPercent.toFixed(1)}% have enough samples`}</small></div> })}</div></Panel><EventLog events={events} /></div>
+          <div className="terminal-analysis-grid"><Panel title="Qualification funnel" kicker="EVALUATION / CURRENT SNAPSHOT"><div className="terminal-funnel">{stageNames.filter(stage=>stage!=="live"||!directMirror).map(stage => { const data = snapshot?.stages[stage] ?? EMPTY_STAGE; const fraction = data.sets ? Math.min(100, data.eligible / data.sets * 100) : 0; return <div key={stage}><div><span>{stage}</span><strong>{data.eligible} / {data.sets}</strong></div><div className="terminal-bar"><span style={{ width: `${fraction}%` }} /></div><small>{data.samplesPercent == null ? "Sample sufficiency not reported" : `${data.samplesPercent.toFixed(1)}% have enough samples`}</small></div> })}</div></Panel><EventLog events={events} /></div>
           <Positions open={open} closed={closed} openTotal={snapshot?.positionCount} compact />
         </div>
       </div>}

@@ -1,4 +1,8 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {portedStates,entryOnsets} from '../shared/cts-indications/index.ts';import {waveBars} from '../shared/cts-indications/fixtures.ts';import {advanceConfiguredSignal,newSignalState} from '../core/replay.ts';import {generateStrategyCatalog} from '../core/catalog.ts';import {DEFAULTS,configurationCount,validateConfiguration,hydrate} from '../core/settings-schema.ts';
+import { RESEARCH_TACTIC_SOURCES } from '../shared/cts-indications/research-sources';
+import { EXTRA_LOW_RANGE_SOURCES } from '../shared/cts-indications/low-range-catalog';
+import { aggregateClosedBars } from '../shared/cts-indications/aligned';
+import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, THIN_OSCILLATOR_SOURCE_IDS } from '../shared/cts-indications/oscillator-sources';
 test('ported entry events equal original AO Follow onsets on every closed candle and survive restart',()=>{
  for(const id of ['inverse-known-ema-9-21','inverse-zscore-20','tactic-dca-bounce-8-percent-0.5-1-0.25']){
   const rows=waveBars(320),expected=entryOnsets(portedStates('ASSET-USDT',1,rows,[id]).states[id]),s=newSignalState();let restored:ReturnType<typeof newSignalState>|undefined;
@@ -40,4 +44,55 @@ test("Low-Range ports each source and supported timeframe into its own Low-Range
   assert.deepEqual(bars.map(bar => advanceConfiguredSignal(state, {...bar, timestamp: bar.timestamp + 60000}, config)),
    Array.from(onsets, side => side > 0 ? "long" : side < 0 ? "short" : undefined))
  }
+})
+
+test("standard lookbacks and research ports produce distinct Sets with exact timeframe coverage", () => {
+  const sources = RESEARCH_TACTIC_SOURCES.map(source=>source.id)
+  const lowRange = EXTRA_LOW_RANGE_SOURCES.map(source=>source.id)
+  assert.equal(lowRange.length,54)
+  const settings = validateConfiguration({...DEFAULTS,strategyEnabledRanges:["Micro","Low-Range"],
+    strategyIndicationTypes:["RSI_Band","MA_Cross","Tactic","Low-Range"],strategySignalTimeframes:[1,60],
+    strategyCoreSignalPeriods:[0,5,8,14,20],strategyIndicationSources:sources,strategyLowRangeSources:lowRange,
+    strategyTpSteps:[2],strategySlRatios:[.2],strategyExitModes:["fixed","trailing-fixed"]})
+  const configs = generateStrategyCatalog("test",settings)
+  assert.equal(configs.length,configurationCount(settings))
+  assert.equal(new Set(configs.map(config=>config.id)).size,configs.length)
+  const lookbacks = (type:string) => new Set(configs.filter(config=>config.type===type).map(config=>config.position_cost_step))
+  assert.deepEqual(lookbacks("MA_Cross"),new Set([20,5,8,14]))
+  assert.deepEqual(lookbacks("RSI_Band"),new Set([14,5,8,20]))
+  assert.ok(configs.every(config=>config.signalTimeframeMinutes!==60||config.type!=="Low-Range"&&!config.indicationSourceId?.startsWith("r-qh-")))
+  const bars = waveBars(480)
+  const input = [...sources,...lowRange]
+  const full = portedStates("SOL-USDT",1,bars,input)
+  const prefix = portedStates("SOL-USDT",1,bars.slice(0,240),input)
+  for (const id of input) { assert.ok(full.available[id]); assert.deepEqual(prefix.states[id],full.states[id].slice(0,240),id) }
+  const rows = bars.map((bar,index)=>({...bar,timestamp:Math.floor(bars[0].timestamp/3_600_000)*3_600_000+index*60_000}))
+  const hourly = portedStates("SOL-USDT",60,aggregateClosedBars(rows,60).bars,["rsi-mom-14-25","r-qh-flow"])
+  assert.equal(hourly.states["rsi-mom-14-25"].length,8)
+  assert.equal(hourly.available["r-qh-flow"],false)
+})
+
+test("Wilder RSI reclaim and momentum trigger differently and SAR acceleration keeps its own state", () => {
+  assert.equal(RSI_VARIANTS.length,50)
+  assert.equal(PARABOLIC_SAR_VARIANTS.length,20)
+  const start = 1790000040000
+  const prices = [100,99,98,97,96,95,98,101,104,107,106,105,101,97,94,90,93,98]
+  const candles = prices.map((close,index)=>({timestamp:start+index*60_000,open:close,high:close+.2,low:close-.2,close,volume:1}))
+  const ids = ["rsi-reclaim-5-25","rsi-mom-5-25","parabolic-sar-0.005-0.1","sar-fast"]
+  const output = portedStates("ETH-USDT",1,candles,ids).states
+  assert.equal(entryOnsets(output[ids[0]])[6],1,"RSI escapes 25 before it crosses 75")
+  assert.equal(entryOnsets(output[ids[1]])[6],0)
+  assert.equal(entryOnsets(output[ids[1]])[9],1)
+  assert.notDeepEqual(output[ids[2]],output[ids[3]])
+  assert.ok(output[ids[3]].includes(1)&&output[ids[3]].includes(-1))
+  const settings = validateConfiguration({...DEFAULTS,strategyEnabledRanges:["Micro"],strategyTpSteps:[3],
+    strategyIndicationTypes:["Tactic"],strategyIndicationSources:THIN_OSCILLATOR_SOURCE_IDS,
+    strategyPriceDistancesEnabled:true,strategyStopDistancePcts:[.1,.15],strategyTrailDistancePcts:[.05,.1,.15],
+    strategyExitModes:["fixed","trailing-fixed"]})
+  const configs = generateStrategyCatalog("oscillator-test",settings)
+  assert.equal(configs.length,64)
+  assert.equal(configurationCount(settings),configs.length)
+  assert.equal(new Set(configs.map(config=>config.id)).size,configs.length)
+  assert.deepEqual(new Set(configs.map(config=>config.stoploss)),new Set([.001,.0015]))
+  assert.deepEqual(new Set(configs.filter(config=>config.trailing).map(config=>config.trailDistancePct)),new Set([.05,.1,.15]))
 })

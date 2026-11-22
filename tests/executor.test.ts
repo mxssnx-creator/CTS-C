@@ -254,6 +254,8 @@ test("actual fills create owned lots and native brackets exactly once", async (t
   assert.equal(venue.conditionals().length, 2)
   assert.equal(executor.lots()[0].protection, "active")
   assert.equal(executor.summary().fees, 0.2)
+  assert.deepEqual(executor.summary().positions,{open:1,long:1,short:0})
+  assert.deepEqual(executor.summary().orders,{confirmed:3,filled:1,working:2,partial:0})
 })
 
 test("partial fills use cumulative actual size and reconcile fees without duplicates", async (t) => {

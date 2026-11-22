@@ -3,16 +3,17 @@ import type { GateProof, LaneState, StrategyConfig } from "./types"
 type JsonRecord=Record<string,unknown>
 
 const LANE_KEYS:Record<string,string>={
-  calculationOnly:"z",blockRound:"b",dcaStepReturns:"j",blockStepReturns:"v",
+  calculationOnly:"z",baseObservation:"bc",blockRound:"b",dcaStepReturns:"j",blockStepReturns:"v",
   symbol:"s",direction:"d",stage:"g",coordination:"o",samples:"a",closedCount:"n",wins:"w",
   netPnl:"p",grossProfit:"f",grossLoss:"l",sampleTimes:"m",untimedSamplesThrough:"u",
   open:"x",admittedAt:"h",lastTimestamp:"t",admissionCount:"q",costTotal:"k",
   admittedClosed:"ec",admittedProfit:"ep",admittedLoss:"el",admittedNetPnl:"en",
+  executed:"ex",postStage:"ps",
 }
 const PROOF_KEYS:Record<string,string>={
   stage:"g",laneId:"i",count:"n",required:"r",minPF:"m",profitFactor:"p",pfState:"s",
   qualified:"q",checkedAt:"t",blockPolicyKey:"b",drawdownPct:"d",maxDrawdownPct:"x",
-  windowScope:"w",
+  windowScope:"w",autoPf:"a",
 }
 const WINDOW_KEYS:Record<string,string>={count:"n",profitFactor:"p",qualified:"q"}
 const invert=(mapping:Record<string,string>)=>Object.fromEntries(Object.entries(mapping).map(([key,value])=>[value,key]))

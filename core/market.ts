@@ -1,6 +1,7 @@
 export type MarketVenue = "bingx" | "bybit"
 export interface MarketCandle { time: number; open: number; high: number; low: number; close: number; volume: number }
 export interface MarketQuote { symbol: string; price: number; last: number; timestamp: number; source: string }
+export const MAX_RESEARCH_CANDLES = 20_000
 const intervals = new Set(["1m", "5m", "15m", "30m", "1h", "4h", "1d"])
 const cache = new Map<string, { expires: number; value: unknown }>()
 const pending = new Map<string, Promise<unknown>>()
@@ -85,11 +86,12 @@ export async function getMarketCandles(venue: MarketVenue, symbol: string, inter
   })
 }
 /** Completed chronological history for research; the live chart may include its forming bar. */
-export async function getResearchCandles(venue:MarketVenue,symbol:string,interval:string,demo:boolean,count=1000,cutoff=Date.now()):Promise<MarketCandle[]>{
-  if(!Number.isInteger(count)||count<100||count>5000)throw new Error("Research candles must be 100..5000")
+export async function getResearchCandles(venue:MarketVenue,symbol:string,interval:string,demo:boolean,count=1000,cutoff=Date.now(),signal?:AbortSignal):Promise<MarketCandle[]>{
+  if(!Number.isInteger(count)||count<100||count>MAX_RESEARCH_CANDLES)throw new Error(`Research candles must be 100..${MAX_RESEARCH_CANDLES}`)
   const duration=intervalSeconds(interval), rows=new Map<number,MarketCandle>()
   let endTime=Math.floor(cutoff/(duration*1000))*duration*1000-1
   for(let page=0;page<Math.ceil(count/1000)+1&&rows.size<count;page++){
+    signal?.throwIfAborted()
     const batch=await getMarketCandles(venue,symbol,interval,demo,{limit:Math.min(1000,count-rows.size+1),endTime})
     const closed=batch.filter(c=>c.time*1000<=endTime&&(c.time+duration)*1000<=cutoff)
     if(!closed.length)break

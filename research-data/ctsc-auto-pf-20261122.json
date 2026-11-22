@@ -1,0 +1,3915 @@
+{
+  "previous_calibration": {
+    "scenario": {
+      "warmupMinutes": 2880,
+      "fitMinutes": 2880,
+      "settings": {
+        "catalog": {
+          "strategyTpSteps": [
+            2,
+            3,
+            5,
+            6,
+            8,
+            12,
+            18,
+            24,
+            30
+          ],
+          "strategyIndicationTypes": [
+            "Trend",
+            "Break",
+            "Trend_Fade",
+            "Break_Reversal",
+            "MA_Cross",
+            "RSI_Band",
+            "MACD_Signal",
+            "Bollinger_Bounce"
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing",
+            "trailing-only"
+          ],
+          "autoPfEnabled": false
+        }
+      }
+    },
+    "dataset": "calibration",
+    "scoredCohort": "fit",
+    "workers": 2,
+    "elapsedMs": 235374,
+    "stages": {
+      "base": {
+        "closed": 307670,
+        "profitFactor": 0.4919456102812377,
+        "pfState": "finite",
+        "profit": 37595.202427562974,
+        "loss": 76421.46131982026,
+        "fees": 65.36873749999876
+      },
+      "main": {
+        "closed": 305114,
+        "profitFactor": 0.49042701543779493,
+        "pfState": "finite",
+        "profit": 37144.796228013816,
+        "loss": 75739.70246083479,
+        "fees": 64.80641749999936
+      },
+      "real": {
+        "closed": 251698,
+        "profitFactor": 0.46881543369090456,
+        "pfState": "finite",
+        "profit": 28991.68285946703,
+        "loss": 61840.29103142023,
+        "fees": 53.309712500006434
+      },
+      "exec": {
+        "closed": 192686,
+        "profitFactor": 0.4411051129474332,
+        "pfState": "finite",
+        "profit": 20983.511704942175,
+        "loss": 47570.32074448612,
+        "fees": 40.89857750000999
+      },
+      "live": {
+        "closed": 13244,
+        "profitFactor": 0.45998283839948023,
+        "pfState": "finite",
+        "profit": 1715.4170016723938,
+        "loss": 3729.3065272635445,
+        "fees": 2.8637674999999865
+      },
+      "executed": {
+        "closed": 13244,
+        "profitFactor": 0.45998283839948023,
+        "pfState": "finite",
+        "profit": 1715.4170016723938,
+        "loss": 3729.3065272635445,
+        "fees": 2.8637674999999865
+      }
+    },
+    "distinctExecutedPricePaths": 2917,
+    "sets": {
+      "base": 6554,
+      "main": 6273,
+      "real": 4960,
+      "exec": 3860,
+      "live": 2835
+    },
+    "setsWithFullWindow": {
+      "base": 6554,
+      "main": 5762,
+      "real": 4566,
+      "exec": 3480
+    },
+    "tapes": {
+      "AAVE-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "b74328df9f3105765553146ea8d3e667897383d6e170e1ce8f21039b6bb96ad8"
+      },
+      "ADA-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "474d6b3ce46f6b91bf350a63c48b08c4a98c22eada99c7486df21a31f6d1572a"
+      },
+      "ATOM-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "668ef387e0e721677afbbbae7aaf722db0503abeaef77a6611de8cf880ad9353"
+      },
+      "AVAX-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "8b43adeaa4a9d93a718bc24f87c36bff3e13c07957b0a1d4ff213dfcfd32b66c"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "fc8b7af215a64dcda93de9e169461a7e4ad06cd0bb830b881d0f167e8b5ec808"
+      },
+      "DOGE-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "88a1d425d568fe08428cd2eeea4cf4987e616571b3baf41b34873b8079f9c1e5"
+      },
+      "DOT-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "b47db7a2bc06dbe7b597adebbaa015ee3c198df34463c687a7bef644ac66bfc8"
+      },
+      "ETH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "c4ffabeb477951238a68d977994c649c3e6bdfe8be60763d5af2ac00ef33eb0e"
+      },
+      "LINK-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "901e7a5d539bbe1d5e3413472f7d1b04334c5fe6e0c2e749aa5b83e9db14862b"
+      },
+      "LTC-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "530423032fb7bfb1152f9cd1826bfbe7888aeb769de3cbe3a4928010b634bb5b"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "3c19487518aef02c9e8983fa4f3e7790234967c2fbc4d8b8e2e64a124642774f"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "a38425d68cd07b10e60d7999bd163a19cca644ff10bf1a82e9ea6449c6a96e3e"
+      },
+      "TRX-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "a8d113a13e896489e5755cc3482bb513477b6d9499e6a158ef904d8ca588cd0a"
+      },
+      "UNI-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "f00ea40e364f6298fe4d2dc333055a796391c5fc7810a3719244c51f27cd43bd"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "041ead3f9ca3bbd8642d894e2b1817c6cedbd56b812481babe497589b44cae35"
+      }
+    }
+  },
+  "signed_calibration": {
+    "scenario": {
+      "warmupMinutes": 2880,
+      "fitMinutes": 2880,
+      "settings": {
+        "catalog": {
+          "strategyTpSteps": [
+            2,
+            3,
+            5,
+            6,
+            8,
+            12,
+            18,
+            24,
+            30
+          ],
+          "strategyEnabledRanges": [
+            "Micro",
+            "Low-Range",
+            "Minimal",
+            "Short",
+            "Normal",
+            "Long",
+            "Wide"
+          ],
+          "strategySlRatios": [
+            0.2,
+            0.5,
+            1
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing"
+          ],
+          "strategyIndicationTypes": [
+            "Bollinger_Bounce",
+            "RSI_Band"
+          ],
+          "strategyCoreSignalPeriods": [
+            5,
+            8,
+            14,
+            20
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "dataset": "calibration",
+    "scoredCohort": "fit",
+    "workers": 2,
+    "elapsedMs": 608918,
+    "stages": {
+      "base": {
+        "closed": 2426162,
+        "profitFactor": 0.5825934541363589,
+        "pfState": "finite",
+        "profit": 310060.52250956924,
+        "loss": 532207.3571341535,
+        "fees": 503.3066499990464
+      },
+      "main": {
+        "closed": 68602,
+        "profitFactor": 0.9544544073359551,
+        "pfState": "finite",
+        "profit": 18827.16995876803,
+        "loss": 19725.583342757953,
+        "fees": 16.16554500000145
+      },
+      "real": {
+        "closed": 4240,
+        "profitFactor": 0.9056132804763761,
+        "pfState": "finite",
+        "profit": 1090.9783903763741,
+        "loss": 1204.6846196894232,
+        "fees": 1.0863049999999947
+      },
+      "exec": {
+        "closed": 50,
+        "profitFactor": 1.6976837195388184,
+        "pfState": "finite",
+        "profit": 22.398507692150957,
+        "loss": 13.193569234577799,
+        "fees": 0.013640000000000003
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 41133,
+      "main": 75034,
+      "real": 13536,
+      "exec": 420,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 41133,
+      "main": 19728,
+      "real": 644,
+      "exec": 0
+    },
+    "tapes": {
+      "AAVE-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "b74328df9f3105765553146ea8d3e667897383d6e170e1ce8f21039b6bb96ad8"
+      },
+      "ADA-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "474d6b3ce46f6b91bf350a63c48b08c4a98c22eada99c7486df21a31f6d1572a"
+      },
+      "ATOM-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "668ef387e0e721677afbbbae7aaf722db0503abeaef77a6611de8cf880ad9353"
+      },
+      "AVAX-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "8b43adeaa4a9d93a718bc24f87c36bff3e13c07957b0a1d4ff213dfcfd32b66c"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "fc8b7af215a64dcda93de9e169461a7e4ad06cd0bb830b881d0f167e8b5ec808"
+      },
+      "DOGE-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "88a1d425d568fe08428cd2eeea4cf4987e616571b3baf41b34873b8079f9c1e5"
+      },
+      "DOT-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "b47db7a2bc06dbe7b597adebbaa015ee3c198df34463c687a7bef644ac66bfc8"
+      },
+      "ETH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "c4ffabeb477951238a68d977994c649c3e6bdfe8be60763d5af2ac00ef33eb0e"
+      },
+      "LINK-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "901e7a5d539bbe1d5e3413472f7d1b04334c5fe6e0c2e749aa5b83e9db14862b"
+      },
+      "LTC-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "530423032fb7bfb1152f9cd1826bfbe7888aeb769de3cbe3a4928010b634bb5b"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "3c19487518aef02c9e8983fa4f3e7790234967c2fbc4d8b8e2e64a124642774f"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "a38425d68cd07b10e60d7999bd163a19cca644ff10bf1a82e9ea6449c6a96e3e"
+      },
+      "TRX-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "a8d113a13e896489e5755cc3482bb513477b6d9499e6a158ef904d8ca588cd0a"
+      },
+      "UNI-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "f00ea40e364f6298fe4d2dc333055a796391c5fc7810a3719244c51f27cd43bd"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "041ead3f9ca3bbd8642d894e2b1817c6cedbd56b812481babe497589b44cae35"
+      }
+    }
+  },
+  "mixed_validation": {
+    "scenario": {
+      "warmupMinutes": 2880,
+      "fitMinutes": 0,
+      "settings": {
+        "catalog": {
+          "strategyEnabledRanges": [
+            "Micro",
+            "Low-Range",
+            "Minimal",
+            "Short",
+            "Normal",
+            "Long",
+            "Wide"
+          ],
+          "strategyTpSteps": [
+            3,
+            6,
+            12,
+            18,
+            24,
+            30
+          ],
+          "strategySlRatios": [
+            0.3
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing-fixed"
+          ],
+          "strategyIndicationTypes": [
+            "Bollinger_Bounce",
+            "RSI_Band",
+            "Trend",
+            "Tactic",
+            "Inverse",
+            "Low-Range",
+            "Signals"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5
+          ],
+          "strategySignalPeriods": [
+            10
+          ],
+          "strategySignalTimeframes": [
+            1
+          ],
+          "strategyIndicationSources": [
+            "rsi-mom-10-25",
+            "rsi-mom-14-25",
+            "r-qh-flow",
+            "r-qh-rev",
+            "macd-cross-8-21-5",
+            "inverse-zscore-20"
+          ],
+          "strategyLowRangeSources": [
+            "low-range-research-6-band-reclaim-standalone",
+            "low-range-research-6-rsi2-reclaim-standalone",
+            "low-range-research-12-squeeze-break-activity"
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "autoPfFallback": 1.1,
+          "autoPfMinSamples": 16,
+          "autoPfHistory": 40,
+          "autoPfAdjustment": 0.75,
+          "autoPfMax": 2,
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none",
+                "inherit"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none",
+                "inherit"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none",
+                "inherit"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "dataset": "validation",
+    "scoredCohort": "holdout",
+    "workers": 1,
+    "elapsedMs": 523866,
+    "stages": {
+      "base": {
+        "closed": 393681,
+        "profitFactor": 0.559887212877354,
+        "pfState": "finite",
+        "profit": 65303.91724967018,
+        "loss": 116637.62941479307,
+        "fees": 83.24415000000762
+      },
+      "main": {
+        "closed": 83524,
+        "profitFactor": 0.6876534627649847,
+        "pfState": "finite",
+        "profit": 26476.644523788982,
+        "loss": 38502.88838411296,
+        "fees": 17.773690000002297
+      },
+      "real": {
+        "closed": 5108,
+        "profitFactor": 0.5605021198119106,
+        "pfState": "finite",
+        "profit": 1509.00294471046,
+        "loss": 2692.2341439437214,
+        "fees": 1.113309999999995
+      },
+      "exec": {
+        "closed": 8,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 5.958213557016635,
+        "fees": 0.0017600000000000007
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 9750,
+      "main": 36252,
+      "real": 3380,
+      "exec": 8,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 9750,
+      "main": 3276,
+      "real": 8,
+      "exec": 0
+    },
+    "tapes": {
+      "AAVE-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "3200b65a15cce83fe719cd707b2c294bb00d0eec72e514831d8536f35a806b59"
+      },
+      "ADA-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "4eb2445ea6b423214473a84d9673af898b89687a691476233f2b0e5924fa57e8"
+      },
+      "ATOM-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "3dadaa80694d0f95f5e0ce65690f5b51492e56ff6f1b5ea5b7f2382d3fa2c4e8"
+      },
+      "AVAX-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "a95a183a867d5b9a816d86577c3e12805934e733bfbb6fe97a1455012bfd599a"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "601143e223e93f464f6b72f7733813f15c5319d515347693e8a1bd9b732c050a"
+      },
+      "DOGE-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "6500da3cb494bc55de9632caa72d4d19d91ca321c7f7e6fb4104143622161df8"
+      },
+      "DOT-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "34f966662f5525cb4eabe9840338a8b9c1650e57e37e021eb767e6a19f5be27f"
+      },
+      "ETH-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "20a7accd77af2246270cdc9e88fc24f4348e5da21fb2fe2b48870189d7312179"
+      },
+      "LINK-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "495b5d29e841d594827c62b18a13a96550ab5211ba303073f0ffecc1e8f9da7f"
+      },
+      "LTC-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "044c756cf57b690d0cdf3b2954c50e3d6256626e7dec66e8b1f03f7855bbf2ac"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "273e9d880f3c371f42ce8b5c07a6d4ee9acaa3b9af1e2ca35139dff66ce1f8e1"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "fc785e97473bd9698b3dcc407e4c01e108637f2302bbfe09bd1a8d727f9f9341"
+      },
+      "TRX-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "dcf4bc3c224d0fa6b4f346f211646b054df13f64920906c851ce68ef94b4f2ad"
+      },
+      "UNI-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "93a99b2cd0859406804da3b3ce59eebc80c8d438b892fc763756dfc41c4fbf07"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "9114ab8ccace56967f4a071f5400227712dd4ccf1a0c5afb5aff0787438eb9eb"
+      }
+    }
+  },
+  "longer_calibration_context": {
+    "scenario": {
+      "warmupMinutes": 8640,
+      "fitMinutes": 0,
+      "settings": {
+        "catalog": {
+          "strategyTpSteps": [
+            3,
+            6,
+            8
+          ],
+          "strategyEnabledRanges": [
+            "Micro",
+            "Minimal",
+            "Low-Range"
+          ],
+          "strategySlRatios": [
+            0.3,
+            1
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing"
+          ],
+          "strategyIndicationTypes": [
+            "Bollinger_Bounce",
+            "RSI_Band"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5,
+            8
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          }
+        }
+      },
+      "tapeMinutes": 11520
+    },
+    "dataset": "extended",
+    "scoredCohort": "holdout",
+    "workers": 1,
+    "elapsedMs": 371775,
+    "stages": {
+      "base": {
+        "closed": 485308,
+        "profitFactor": 0.5502142358617321,
+        "pfState": "finite",
+        "profit": 67426.81747105677,
+        "loss": 122546.47930992648,
+        "fees": 100.29280249997512
+      },
+      "main": {
+        "closed": 18702,
+        "profitFactor": 0.6430764600531349,
+        "pfState": "finite",
+        "profit": 3550.442976297575,
+        "loss": 5521.027742182036,
+        "fees": 3.9900850000001964
+      },
+      "real": {
+        "closed": 3886,
+        "profitFactor": 0.7489216925516329,
+        "pfState": "finite",
+        "profit": 844.0677855863514,
+        "loss": 1127.0441141991075,
+        "fees": 0.8403449999999957
+      },
+      "exec": {
+        "closed": 214,
+        "profitFactor": 1.0526187598285448,
+        "pfState": "finite",
+        "profit": 59.49032011598557,
+        "loss": 56.516492377236005,
+        "fees": 0.04691500000000001
+      },
+      "live": {
+        "closed": 2,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 1.9999928800284734,
+        "fees": 0.0004400000000000001
+      },
+      "executed": {
+        "closed": 2,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 1.9999928800284734,
+        "fees": 0.0004400000000000001
+      }
+    },
+    "distinctExecutedPricePaths": 1,
+    "sets": {
+      "base": 7241,
+      "main": 12300,
+      "real": 5722,
+      "exec": 392,
+      "live": 6
+    },
+    "setsWithFullWindow": {
+      "base": 7241,
+      "main": 6700,
+      "real": 562,
+      "exec": 12
+    },
+    "tapes": {
+      "AVAX-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1795305600000,
+        "sha256": "fe6d71256c27d6dee1a15cb4e4d39dc9819669c78ffefdc9e6e3b633a76fceda"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1795305600000,
+        "sha256": "f3c7f4493a30f118ecec027aba8996139db69a6a2ff7ab311a72eba9399c2b2c"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1795305600000,
+        "sha256": "9a6e10f58dee6d89e2d085a138d3eabf66bf9acd4c9dd97a3a9f6b3c37f5dcb6"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1795305600000,
+        "sha256": "34ed10b125832b7c7cb78cd37ea60b21af8c82dc0c5f4c587aba58a776297829"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1795305600000,
+        "sha256": "8859d8a7effca5cb8679f30083e4420a18d41e1ce24163901f658b221bba1065"
+      }
+    }
+  },
+  "archive_50_validation": {
+    "scenario": {
+      "warmupMinutes": 2880,
+      "fitMinutes": 0,
+      "settings": {
+        "catalog": {
+          "strategyTpSteps": [
+            3,
+            6,
+            8
+          ],
+          "strategyEnabledRanges": [
+            "Micro",
+            "Minimal",
+            "Low-Range"
+          ],
+          "strategySlRatios": [
+            0.4
+          ],
+          "strategyExitModes": [
+            "fixed"
+          ],
+          "strategyIndicationTypes": [
+            "Trend",
+            "Break",
+            "Bollinger_Bounce",
+            "RSI_Band"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          },
+          "autoPfFallback": 1.1,
+          "autoPfMinSamples": 16,
+          "autoPfHistory": 40,
+          "autoPfAdjustment": 0.75,
+          "autoPfMax": 2,
+          "strategySignalPeriods": [
+            10
+          ]
+        },
+        "coordinations": {
+          "axis": {
+            "enabled": false
+          },
+          "block": {
+            "enabled": false
+          },
+          "dca": {
+            "enabled": false
+          }
+        },
+        "stageMinPF": {
+          "base": 1.1,
+          "main": 1.1,
+          "real": 1.1
+        },
+        "execMinPF": 1.1
+      }
+    },
+    "dataset": "archived-candle-tapes",
+    "scoredCohort": "holdout",
+    "workers": 2,
+    "elapsedMs": 61783,
+    "stages": {
+      "base": {
+        "closed": 84893,
+        "profitFactor": 0.5536738762860774,
+        "pfState": "finite",
+        "profit": 11120.593551448783,
+        "loss": 20085.097072022392,
+        "fees": 18.676460000000592
+      },
+      "main": {
+        "closed": 3566,
+        "profitFactor": 0.5483761829525762,
+        "pfState": "finite",
+        "profit": 507.56846575624274,
+        "loss": 925.5844464713696,
+        "fees": 0.7845199999999984
+      },
+      "real": {
+        "closed": 126,
+        "profitFactor": 0.5677954133581282,
+        "pfState": "finite",
+        "profit": 25.766144716480504,
+        "loss": 45.37927589814626,
+        "fees": 0.027719999999999998
+      },
+      "exec": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 1350,
+      "main": 2700,
+      "real": 124,
+      "exec": 0,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 1350,
+      "main": 296,
+      "real": 0,
+      "exec": 0
+    },
+    "tapes": {
+      "1INCH-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "69d1247397f778b3b1cfbb4ad3b6310b705c915828ddd305e2b2962f75747fae"
+      },
+      "AAVE-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "70f43c4121a70fbc8434900f67b08b841a18e154a50cac859c8f262e656f8f58"
+      },
+      "ADA-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "0f5137d6598c405b55dc18acc9055309bfed8113e225e1cf432016fcdd0a7579"
+      },
+      "ALGO-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "42e1cd5bf564b1ecc4e1e2118772ec07b2aff975f6315ddc7877e24bad8c0523"
+      },
+      "AR-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "f560501570ce3688a4a9d82caef7dbabc174c3791c7d9061819c803867c26da1"
+      },
+      "ATOM-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "104eedf47c6b1155e5ae0e8969c4e910e57aac82060f628c10b3cb7cc9e67d85"
+      },
+      "AVAX-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "c4aa0590782c0e60a807837c81fb1ab1cdbaba03191927f183113ca6f87d6548"
+      },
+      "AXS-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "1efb3d0def76132b859ef2b6e2a2bb7fa161e96d861fe2a86388b32d9a81f691"
+      },
+      "BAT-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "392748bbbd713e31ba09ae9ef9b9153efc43b9b4c7407427451cb0dcd65a7ce5"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "434e9c0250accbdbe1bcd8e252982ed51467e1db130a6ea9559d87438e9e5ded"
+      },
+      "BSV-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "46428c4656f48da8f20ef300197b1c7edebf42f26ce328a1b72025bd99b6f059"
+      },
+      "BTC-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "95ecea4603d7d4ff914bf22f01b9c01fb1d56b64824211c245d527360d456ec2"
+      },
+      "CELR-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "e94933ddd3306e8fd07cec27e2abfd40fa869462e57d984ca62b61cdb047d66a"
+      },
+      "CHZ-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "cc4e1b852c127ca91db984f2fb377be18b3ab429179c4db43d944eb2a8da7971"
+      },
+      "COMP-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "11dea2dbf0176d562f54d41158d0bd695a81126d8651280ba19c040e77fe5079"
+      },
+      "CRV-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "e72cafc1dc3b6e88803478cb1d83048327b97cb3b350bd1b23532b1afecd54f6"
+      },
+      "CTSI-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "e813ff29e63edb5c9c6f7b23e582268f4bb1cd0f8e0c1d900745659868cc3b93"
+      },
+      "CVC-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "c67a4573d3d3e972c4018836806091542ae8ff03d13ac1b09a6a261c42074d48"
+      },
+      "DASH-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "38f645efeaa9897e0c3c82a1e8307a74ea3fb719eb3d50ac3b4fc08485c82ba5"
+      },
+      "DOGE-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "1739df17fd59c5f42de71adbbae5afd23a935b98aebc2b935ea92eb63c53d563"
+      },
+      "DOT-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "ded57dcaf40e49965372420f8409b2c957762f2a7cf63d8a4ea4ced9de96fb3a"
+      },
+      "DYDX-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "db9c61f5f52b772a2a960d2bb220ff01205c6e0f5f1c03eb9dc5565b103a6811"
+      },
+      "ENJ-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "aeb56e7e8cca7a457218c2ba20fa4c4a46a6c9512a038c37f779cbc458c96176"
+      },
+      "ENS-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "a6fdb12f27a246175f970fa5475576a9b5e1161d53b7ce1040ac4a32fe6b0f1d"
+      },
+      "ETH-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "4d62f6a1fc5f04420cdc450e14faeb1ba39e2f89fba2f69689cdb98ee724d8a7"
+      },
+      "FIL-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "650a81ca67403814e3ad478245678765ac51d3533c0292135a8f4de8eee145fd"
+      },
+      "GRT-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "cfe79c604d21b777b03616ab9da6fb4230201cfe733ffc3c1d85b59cf4a3d5f3"
+      },
+      "IMX-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "25aa931de6ab0b3e01171d79941bea6104789a4f29282112d40cc6f00985e1dd"
+      },
+      "IOTX-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "1e873ecf5459b7ae5cba2e88514a411c05af0906819dc9f87fd3104028808ee0"
+      },
+      "KSM-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "5453b89979ff295a4b7a877b2bd65622bd466a7eb3523e01289478a281fa99df"
+      },
+      "LINK-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "c17dce703402c4b0594bb1f922ba43dd7da59fbc771ed4d044a5e036c939c04e"
+      },
+      "LTC-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "1a4ae54c1f2e64cb338aa36139b9fcbc18495099cdb1fa66a69600f77c66c57f"
+      },
+      "MANA-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "1644a1fedaa14d2d6b31f73b637408bc7d4accc414d76261cc3bb6434485931b"
+      },
+      "MASK-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "fb4819d807be54597c4f851bf5bf7b26eaa7340aa4a906200717619960de007b"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "45c7006a9af22288663df5149e942db1791545f59cf552413a1dd15603855f36"
+      },
+      "SAND-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "ecf12760235c9793c3e655f35f236ae0760e8aa3e639a03428a8fd35950935fb"
+      },
+      "SKL-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "8746c3cbf6f0c9888f509b2339e1f2b97775c1cfede2e77e4965501164ea4428"
+      },
+      "SNX-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "627ed99ac7f6230b49ce219adb8b402eebe51a77d0e15231dc8bcb9fa2b0dc84"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "4d12225673d0fe70fe4f17d414ea8a492ed4e838e06e8714090dd532e2a689da"
+      },
+      "SUSHI-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "e3b0dfe108a13a65ab5c9cfc7d965807b09af3b5f0d43e02802867bc46602dfb"
+      },
+      "THETA-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "b59e1d47ea1087e7ea3e98eee73fae11ea6d753680f5bb65e6be2271d348f484"
+      },
+      "TRX-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "44e9a649d3203239b6179e91f47324c7006894c9e66cb35d2451c127b67dc497"
+      },
+      "UNI-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "41946582a659d7637afc955944fc2b98b86177c4d04aa3538a7d378d44281fc9"
+      },
+      "VET-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "9ba0ceb5b2b2825703a415c0bee0ef6878b3bf51a644f9c4e2c7f0048d6252b7"
+      },
+      "XLM-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "b832bdbf4dfce77a4a4a15e6e01df500b0b829cee181dcd11d04157e17de46bd"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "85d5f11cf942863271adc3f9192108192cdbc56b384a6bc16e2507b34a99f221"
+      },
+      "XTZ-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "7a5ddf8cb8bdc5d6fdbd9b7566ef122792074fa5b6058ee6a7e369b122cc970f"
+      },
+      "YFI-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "cd2281d68364ac60bd578254b12eb83f61942bfbb7016f172e57df0eb0828b7d"
+      },
+      "ZEC-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "92801020e4845c600492f5cb7713136b69796f5da8f5e1eafcbaa8ed2452d080"
+      },
+      "ZRX-USDT": {
+        "firstClose": 1794070860000,
+        "lastClose": 1794416400000,
+        "sha256": "a599514196167face18d5f85bc2285429956fb6884283ecef0bc31bb2ea0f965"
+      }
+    }
+  },
+  "oscillators_calibration": {
+    "scenario": {
+      "warmupMinutes": 2880,
+      "fitMinutes": 2880,
+      "settings": {
+        "catalog": {
+          "strategyEnabledRanges": [
+            "Micro",
+            "Minimal"
+          ],
+          "strategyTpSteps": [
+            3,
+            6,
+            8
+          ],
+          "strategySlRatios": [
+            0.3
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing-fixed"
+          ],
+          "strategyIndicationTypes": [
+            "Tactic"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5
+          ],
+          "strategySignalPeriods": [
+            10
+          ],
+          "strategySignalTimeframes": [
+            1
+          ],
+          "strategyIndicationSources": [
+            "rsi-reclaim-5-25",
+            "rsi-reclaim-8-30",
+            "rsi-reclaim-14-30",
+            "rsi-mom-14-25",
+            "parabolic-sar-0.005-0.1",
+            "parabolic-sar-0.01-0.15",
+            "sar-std",
+            "sar-fast"
+          ],
+          "strategyLowRangeSources": [
+            "low-range-research-6-band-reclaim-standalone",
+            "low-range-research-6-rsi2-reclaim-standalone",
+            "low-range-research-12-squeeze-break-activity"
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "autoPfFallback": 1.1,
+          "autoPfMinSamples": 16,
+          "autoPfHistory": 40,
+          "autoPfAdjustment": 0.75,
+          "autoPfMax": 2,
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          },
+          "strategyPriceDistancesEnabled": true,
+          "strategyStopDistancePcts": [
+            0.1,
+            0.15
+          ],
+          "strategyTrailDistancePcts": [
+            0.05,
+            0.1
+          ]
+        },
+        "coordinations": {
+          "axis": {
+            "enabled": false
+          },
+          "block": {
+            "enabled": false
+          },
+          "dca": {
+            "enabled": false
+          }
+        }
+      },
+      "groupSources": true
+    },
+    "dataset": "oscillators-calibration",
+    "scoredCohort": "fit",
+    "workers": 2,
+    "elapsedMs": 15380,
+    "stages": {
+      "base": {
+        "closed": 116853,
+        "profitFactor": 0.5647582890697089,
+        "pfState": "finite",
+        "profit": 14475.634461599882,
+        "loss": 25631.55732595743,
+        "fees": 25.70766000000736
+      },
+      "main": {
+        "closed": 3264,
+        "profitFactor": 0.6253041125776307,
+        "pfState": "finite",
+        "profit": 457.7977650190926,
+        "loss": 732.120188898098,
+        "fees": 0.7180799999999962
+      },
+      "real": {
+        "closed": 142,
+        "profitFactor": 1.0780417345642064,
+        "pfState": "finite",
+        "profit": 28.34646273403858,
+        "loss": 26.29440199316357,
+        "fees": 0.031240000000000007
+      },
+      "exec": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 1616,
+      "main": 3232,
+      "real": 482,
+      "exec": 0,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 1616,
+      "main": 842,
+      "real": 2,
+      "exec": 0
+    },
+    "tapes": {
+      "AVAX-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "8b43adeaa4a9d93a718bc24f87c36bff3e13c07957b0a1d4ff213dfcfd32b66c"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "fc8b7af215a64dcda93de9e169461a7e4ad06cd0bb830b881d0f167e8b5ec808"
+      },
+      "DOGE-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "88a1d425d568fe08428cd2eeea4cf4987e616571b3baf41b34873b8079f9c1e5"
+      },
+      "ETH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "c4ffabeb477951238a68d977994c649c3e6bdfe8be60763d5af2ac00ef33eb0e"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "3c19487518aef02c9e8983fa4f3e7790234967c2fbc4d8b8e2e64a124642774f"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "a38425d68cd07b10e60d7999bd163a19cca644ff10bf1a82e9ea6449c6a96e3e"
+      },
+      "UNI-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "f00ea40e364f6298fe4d2dc333055a796391c5fc7810a3719244c51f27cd43bd"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "041ead3f9ca3bbd8642d894e2b1817c6cedbd56b812481babe497589b44cae35"
+      }
+    },
+    "bySource": {
+      "sar-fast/base": {
+        "closed": 32359,
+        "profitFactor": 0.4943461995608157,
+        "pfState": "finite",
+        "profit": 3546.7718586385513,
+        "loss": 7174.672045197383,
+        "fees": 7.118980000000057
+      },
+      "Parabolic SAR/base": {
+        "closed": 54803,
+        "profitFactor": 0.46872517982462175,
+        "pfState": "finite",
+        "profit": 5941.427245402479,
+        "loss": 12675.715965644353,
+        "fees": 12.05666000000194
+      },
+      "rsi-reclaim-5-25/base": {
+        "closed": 35405,
+        "profitFactor": 0.6153895467302516,
+        "pfState": "finite",
+        "profit": 4556.905733104082,
+        "loss": 7404.912477497031,
+        "fees": 7.789100000000278
+      },
+      "RSI/base": {
+        "closed": 62050,
+        "profitFactor": 0.6587150134718225,
+        "pfState": "finite",
+        "profit": 8534.207216197405,
+        "loss": 12955.841360313048,
+        "fees": 13.651000000002728
+      },
+      "rsi-reclaim-14-30/base": {
+        "closed": 3141,
+        "profitFactor": 1.1029102336117713,
+        "pfState": "finite",
+        "profit": 682.7812930749388,
+        "loss": 619.0724070434916,
+        "fees": 0.6910199999999959
+      },
+      "rsi-reclaim-14-30/main": {
+        "closed": 500,
+        "profitFactor": 1.1918501140571274,
+        "pfState": "finite",
+        "profit": 109.85592415830557,
+        "loss": 92.17260028138068,
+        "fees": 0.10999999999999985
+      },
+      "RSI/main": {
+        "closed": 2332,
+        "profitFactor": 0.7957784203661876,
+        "pfState": "finite",
+        "profit": 372.60052947306554,
+        "loss": 468.2214545370665,
+        "fees": 0.5130399999999978
+      },
+      "rsi-reclaim-8-30/base": {
+        "closed": 23467,
+        "profitFactor": 0.6693756857609122,
+        "pfState": "finite",
+        "profit": 3293.5989357807207,
+        "loss": 4920.40420027615,
+        "fees": 5.162739999999956
+      },
+      "rsi-reclaim-8-30/main": {
+        "closed": 968,
+        "profitFactor": 0.84140383086802,
+        "pfState": "finite",
+        "profit": 158.26963252534537,
+        "loss": 188.1018682337935,
+        "fees": 0.21295999999999965
+      },
+      "rsi-reclaim-5-25/main": {
+        "closed": 812,
+        "profitFactor": 0.6107739869182234,
+        "pfState": "finite",
+        "profit": 104.47497278941512,
+        "loss": 171.05340932504922,
+        "fees": 0.1786399999999994
+      },
+      "sar-std/base": {
+        "closed": 9091,
+        "profitFactor": 0.44461733563982747,
+        "pfState": "finite",
+        "profit": 962.7366751498291,
+        "loss": 2165.315200237078,
+        "fees": 2.000019999999984
+      },
+      "sar-std/main": {
+        "closed": 160,
+        "profitFactor": 0.10353627762140734,
+        "pfState": "finite",
+        "profit": 4.288274427755852,
+        "loss": 41.41808577894248,
+        "fees": 0.03520000000000008
+      },
+      "Parabolic SAR/main": {
+        "closed": 932,
+        "profitFactor": 0.32284063715695516,
+        "pfState": "finite",
+        "profit": 85.1972355460279,
+        "loss": 263.89873436102664,
+        "fees": 0.20503999999999917
+      },
+      "sar-fast/main": {
+        "closed": 458,
+        "profitFactor": 0.22245586365369802,
+        "pfState": "finite",
+        "profit": 29.02760306261604,
+        "loss": 130.48702149656057,
+        "fees": 0.10075999999999993
+      },
+      "parabolic-sar-0.01-0.15/base": {
+        "closed": 8015,
+        "profitFactor": 0.40485622222897977,
+        "pfState": "finite",
+        "profit": 797.7760340381128,
+        "loss": 1970.5169149824856,
+        "fees": 1.7632999999999859
+      },
+      "parabolic-sar-0.005-0.1/base": {
+        "closed": 5338,
+        "profitFactor": 0.4645013141169048,
+        "pfState": "finite",
+        "profit": 634.1426775759805,
+        "loss": 1365.2118052272738,
+        "fees": 1.1743599999999916
+      },
+      "parabolic-sar-0.005-0.1/main": {
+        "closed": 124,
+        "profitFactor": 1.168531397765554,
+        "pfState": "finite",
+        "profit": 43.74141669993904,
+        "loss": 37.43281248889044,
+        "fees": 0.027279999999999995
+      },
+      "rsi-reclaim-8-30/real": {
+        "closed": 80,
+        "profitFactor": 0.768332458947484,
+        "pfState": "finite",
+        "profit": 12.399036746051799,
+        "loss": 16.137593305685503,
+        "fees": 0.01759999999999999
+      },
+      "RSI/real": {
+        "closed": 142,
+        "profitFactor": 1.0780417345642064,
+        "pfState": "finite",
+        "profit": 28.34646273403858,
+        "loss": 26.29440199316357,
+        "fees": 0.031240000000000007
+      },
+      "rsi-reclaim-5-25/real": {
+        "closed": 60,
+        "profitFactor": 1.518065912960107,
+        "pfState": "finite",
+        "profit": 15.418705052917538,
+        "loss": 10.156808687478067,
+        "fees": 0.013199999999999996
+      },
+      "rsi-mom-14-25/base": {
+        "closed": 37,
+        "profitFactor": 0.08044289870383817,
+        "pfState": "finite",
+        "profit": 0.9212542376834261,
+        "loss": 11.452275496376044,
+        "fees": 0.00814
+      },
+      "rsi-mom-14-25/main": {
+        "closed": 52,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 16.89357669684362,
+        "fees": 0.011439999999999992
+      },
+      "parabolic-sar-0.01-0.15/main": {
+        "closed": 190,
+        "profitFactor": 0.14919024607486947,
+        "pfState": "finite",
+        "profit": 8.139941355716916,
+        "loss": 54.56081459663238,
+        "fees": 0.04179999999999997
+      },
+      "rsi-reclaim-14-30/real": {
+        "closed": 2,
+        "profitFactor": 999,
+        "pfState": "no-losses",
+        "profit": 0.5287209350692457,
+        "loss": 0,
+        "fees": 0.0004400000000000001
+      }
+    }
+  },
+  "oscillators_validation": {
+    "scenario": {
+      "warmupMinutes": 2880,
+      "fitMinutes": 0,
+      "settings": {
+        "catalog": {
+          "strategyEnabledRanges": [
+            "Micro",
+            "Minimal"
+          ],
+          "strategyTpSteps": [
+            3,
+            6,
+            8
+          ],
+          "strategySlRatios": [
+            0.3
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing-fixed"
+          ],
+          "strategyIndicationTypes": [
+            "Tactic"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5
+          ],
+          "strategySignalPeriods": [
+            10
+          ],
+          "strategySignalTimeframes": [
+            1
+          ],
+          "strategyIndicationSources": [
+            "rsi-reclaim-5-25",
+            "rsi-reclaim-8-30",
+            "rsi-reclaim-14-30",
+            "rsi-mom-14-25",
+            "parabolic-sar-0.005-0.1",
+            "parabolic-sar-0.01-0.15",
+            "sar-std",
+            "sar-fast"
+          ],
+          "strategyLowRangeSources": [
+            "low-range-research-6-band-reclaim-standalone",
+            "low-range-research-6-rsi2-reclaim-standalone",
+            "low-range-research-12-squeeze-break-activity"
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "autoPfFallback": 1.1,
+          "autoPfMinSamples": 16,
+          "autoPfHistory": 40,
+          "autoPfAdjustment": 0.75,
+          "autoPfMax": 2,
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          },
+          "strategyPriceDistancesEnabled": true,
+          "strategyStopDistancePcts": [
+            0.1,
+            0.15
+          ],
+          "strategyTrailDistancePcts": [
+            0.05,
+            0.1
+          ]
+        },
+        "coordinations": {
+          "axis": {
+            "enabled": false
+          },
+          "block": {
+            "enabled": false
+          },
+          "dca": {
+            "enabled": false
+          }
+        }
+      },
+      "groupSources": true
+    },
+    "dataset": "oscillators-validation",
+    "scoredCohort": "holdout",
+    "workers": 2,
+    "elapsedMs": 14682,
+    "stages": {
+      "base": {
+        "closed": 84589,
+        "profitFactor": 0.4910231688528804,
+        "pfState": "finite",
+        "profit": 9609.731717334183,
+        "loss": 19570.83153486274,
+        "fees": 18.609580000003938
+      },
+      "main": {
+        "closed": 5052,
+        "profitFactor": 0.5268150773353766,
+        "pfState": "finite",
+        "profit": 671.9037095617439,
+        "loss": 1275.4071370930073,
+        "fees": 1.111439999999993
+      },
+      "real": {
+        "closed": 318,
+        "profitFactor": 1.132120454181702,
+        "pfState": "finite",
+        "profit": 66.02586616893377,
+        "loss": 58.32053111049685,
+        "fees": 0.06995999999999993
+      },
+      "exec": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 1506,
+      "main": 3012,
+      "real": 220,
+      "exec": 0,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 1506,
+      "main": 462,
+      "real": 0,
+      "exec": 0
+    },
+    "tapes": {
+      "AVAX-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "a95a183a867d5b9a816d86577c3e12805934e733bfbb6fe97a1455012bfd599a"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "601143e223e93f464f6b72f7733813f15c5319d515347693e8a1bd9b732c050a"
+      },
+      "DOGE-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "6500da3cb494bc55de9632caa72d4d19d91ca321c7f7e6fb4104143622161df8"
+      },
+      "ETH-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "20a7accd77af2246270cdc9e88fc24f4348e5da21fb2fe2b48870189d7312179"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "273e9d880f3c371f42ce8b5c07a6d4ee9acaa3b9af1e2ca35139dff66ce1f8e1"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "fc785e97473bd9698b3dcc407e4c01e108637f2302bbfe09bd1a8d727f9f9341"
+      },
+      "UNI-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "93a99b2cd0859406804da3b3ce59eebc80c8d438b892fc763756dfc41c4fbf07"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794960060000,
+        "lastClose": 1795305600000,
+        "sha256": "9114ab8ccace56967f4a071f5400227712dd4ccf1a0c5afb5aff0787438eb9eb"
+      }
+    },
+    "bySource": {
+      "parabolic-sar-0.01-0.15/base": {
+        "closed": 9900,
+        "profitFactor": 0.5746906157103789,
+        "pfState": "finite",
+        "profit": 1328.882610169558,
+        "loss": 2312.3443707653328,
+        "fees": 2.177999999999983
+      },
+      "Parabolic SAR/base": {
+        "closed": 54365,
+        "profitFactor": 0.4867760251304352,
+        "pfState": "finite",
+        "profit": 6201.830623049854,
+        "loss": 12740.624646392615,
+        "fees": 11.960300000002109
+      },
+      "parabolic-sar-0.005-0.1/base": {
+        "closed": 8669,
+        "profitFactor": 0.51695989336418,
+        "pfState": "finite",
+        "profit": 1071.9295840766258,
+        "loss": 2073.525621302868,
+        "fees": 1.9071799999999857
+      },
+      "rsi-reclaim-14-30/base": {
+        "closed": 6053,
+        "profitFactor": 0.4985974726544508,
+        "pfState": "finite",
+        "profit": 745.5930295819236,
+        "loss": 1495.3806837658224,
+        "fees": 1.3316599999999903
+      },
+      "RSI/base": {
+        "closed": 30224,
+        "profitFactor": 0.49894551511130086,
+        "pfState": "finite",
+        "profit": 3407.901094284408,
+        "loss": 6830.206888469977,
+        "fees": 6.649280000000567
+      },
+      "sar-std/base": {
+        "closed": 13776,
+        "profitFactor": 0.4530676461726643,
+        "pfState": "finite",
+        "profit": 1511.3623678557487,
+        "loss": 3335.8426288505443,
+        "fees": 3.030719999999975
+      },
+      "rsi-reclaim-5-25/base": {
+        "closed": 14335,
+        "profitFactor": 0.5240005436637035,
+        "pfState": "finite",
+        "profit": 1666.9628791987427,
+        "loss": 3181.2235680972444,
+        "fees": 3.1536999999999953
+      },
+      "rsi-reclaim-5-25/main": {
+        "closed": 720,
+        "profitFactor": 0.44379221492011767,
+        "pfState": "finite",
+        "profit": 88.27923192147726,
+        "loss": 198.92019047104617,
+        "fees": 0.15839999999999996
+      },
+      "RSI/main": {
+        "closed": 1710,
+        "profitFactor": 0.6198643411446765,
+        "pfState": "finite",
+        "profit": 256.70418574717814,
+        "loss": 414.1296227383135,
+        "fees": 0.37619999999999865
+      },
+      "parabolic-sar-0.005-0.1/main": {
+        "closed": 632,
+        "profitFactor": 0.4621005727017887,
+        "pfState": "finite",
+        "profit": 70.52539116547891,
+        "loss": 152.61913819568377,
+        "fees": 0.1390400000000002
+      },
+      "Parabolic SAR/main": {
+        "closed": 3342,
+        "profitFactor": 0.4820740317662314,
+        "pfState": "finite",
+        "profit": 415.1995238145652,
+        "loss": 861.2775143546933,
+        "fees": 0.7352399999999962
+      },
+      "rsi-reclaim-8-30/base": {
+        "closed": 9742,
+        "profitFactor": 0.4580139406306782,
+        "pfState": "finite",
+        "profit": 973.7026444757263,
+        "loss": 2125.9235977292583,
+        "fees": 2.1432399999999836
+      },
+      "rsi-reclaim-8-30/main": {
+        "closed": 466,
+        "profitFactor": 0.5925378335962592,
+        "pfState": "finite",
+        "profit": 58.880033651383776,
+        "loss": 99.3692390813701,
+        "fees": 0.10251999999999989
+      },
+      "sar-fast/base": {
+        "closed": 22020,
+        "profitFactor": 0.4562056575860574,
+        "pfState": "finite",
+        "profit": 2289.6560609479207,
+        "loss": 5018.912025473963,
+        "fees": 4.844400000000258
+      },
+      "sar-fast/main": {
+        "closed": 1356,
+        "profitFactor": 0.6534795374819015,
+        "pfState": "finite",
+        "profit": 208.74165212509348,
+        "loss": 319.4310458892903,
+        "fees": 0.2983199999999992
+      },
+      "sar-std/main": {
+        "closed": 778,
+        "profitFactor": 0.30593661620212415,
+        "pfState": "finite",
+        "profit": 65.57748444360188,
+        "loss": 214.34990442685876,
+        "fees": 0.17116000000000023
+      },
+      "parabolic-sar-0.01-0.15/main": {
+        "closed": 576,
+        "profitFactor": 0.402310336747577,
+        "pfState": "finite",
+        "profit": 70.35499608039083,
+        "loss": 174.87742584286102,
+        "fees": 0.12671999999999994
+      },
+      "sar-fast/real": {
+        "closed": 62,
+        "profitFactor": 0.6067908688790824,
+        "pfState": "finite",
+        "profit": 8.248482477006927,
+        "loss": 13.593616680890818,
+        "fees": 0.013639999999999996
+      },
+      "Parabolic SAR/real": {
+        "closed": 92,
+        "profitFactor": 0.45853020921664356,
+        "pfState": "finite",
+        "profit": 10.633165900898272,
+        "loss": 23.18967362927745,
+        "fees": 0.02023999999999999
+      },
+      "rsi-mom-14-25/base": {
+        "closed": 94,
+        "profitFactor": 0.7819108576599418,
+        "pfState": "finite",
+        "profit": 21.642541028007948,
+        "loss": 27.679038877626674,
+        "fees": 0.020679999999999997
+      },
+      "rsi-mom-14-25/main": {
+        "closed": 108,
+        "profitFactor": 1.0564506506058404,
+        "pfState": "finite",
+        "profit": 34.65063412091946,
+        "loss": 32.799103394984364,
+        "fees": 0.02375999999999999
+      },
+      "sar-std/real": {
+        "closed": 4,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 1.3686086275735923,
+        "fees": 0.0008800000000000002
+      },
+      "parabolic-sar-0.005-0.1/real": {
+        "closed": 10,
+        "profitFactor": 2.1219801765665443,
+        "pfState": "finite",
+        "profit": 2.384683423891345,
+        "loss": 1.1238009903324668,
+        "fees": 0.002200000000000001
+      },
+      "rsi-reclaim-14-30/main": {
+        "closed": 416,
+        "profitFactor": 0.9018943060835555,
+        "pfState": "finite",
+        "profit": 74.8942860533976,
+        "loss": 83.04108979091288,
+        "fees": 0.09152000000000003
+      },
+      "parabolic-sar-0.01-0.15/real": {
+        "closed": 16,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 7.103647330480574,
+        "fees": 0.003520000000000002
+      },
+      "rsi-reclaim-5-25/real": {
+        "closed": 102,
+        "profitFactor": 1.7866721674400248,
+        "pfState": "finite",
+        "profit": 28.161355150420082,
+        "loss": 15.761903981954433,
+        "fees": 0.02244000000000003
+      },
+      "RSI/real": {
+        "closed": 226,
+        "profitFactor": 1.5767534367086784,
+        "pfState": "finite",
+        "profit": 55.3927002680355,
+        "loss": 35.130857481219415,
+        "fees": 0.04971999999999996
+      },
+      "rsi-reclaim-8-30/real": {
+        "closed": 88,
+        "profitFactor": 1.662905264731286,
+        "pfState": "finite",
+        "profit": 22.058473369378085,
+        "loss": 13.265021067175814,
+        "fees": 0.01936000000000001
+      },
+      "rsi-reclaim-14-30/real": {
+        "closed": 36,
+        "profitFactor": 0.84746543409343,
+        "pfState": "finite",
+        "profit": 5.172871748237401,
+        "loss": 6.103932432089154,
+        "fees": 0.007920000000000002
+      }
+    }
+  },
+  "oscillators_twelve_day_thin": {
+    "scenario": {
+      "warmupMinutes": 17280,
+      "fitMinutes": 0,
+      "settings": {
+        "catalog": {
+          "strategyEnabledRanges": [
+            "Micro",
+            "Minimal"
+          ],
+          "strategyTpSteps": [
+            3,
+            6,
+            8
+          ],
+          "strategySlRatios": [
+            0.3
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing-fixed"
+          ],
+          "strategyIndicationTypes": [
+            "Tactic"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5
+          ],
+          "strategySignalPeriods": [
+            10
+          ],
+          "strategySignalTimeframes": [
+            1
+          ],
+          "strategyIndicationSources": [
+            "rsi-reclaim-5-25",
+            "rsi-reclaim-8-30",
+            "rsi-reclaim-14-30",
+            "rsi-mom-14-25",
+            "parabolic-sar-0.005-0.1",
+            "parabolic-sar-0.01-0.15",
+            "sar-std",
+            "sar-fast"
+          ],
+          "strategyLowRangeSources": [
+            "low-range-research-6-band-reclaim-standalone",
+            "low-range-research-6-rsi2-reclaim-standalone",
+            "low-range-research-12-squeeze-break-activity"
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "autoPfFallback": 1.1,
+          "autoPfMinSamples": 16,
+          "autoPfHistory": 40,
+          "autoPfAdjustment": 0.75,
+          "autoPfMax": 2,
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          },
+          "strategyPriceDistancesEnabled": true,
+          "strategyStopDistancePcts": [
+            0.1,
+            0.15
+          ],
+          "strategyTrailDistancePcts": [
+            0.05,
+            0.1
+          ]
+        },
+        "coordinations": {
+          "axis": {
+            "enabled": false
+          },
+          "block": {
+            "enabled": false
+          },
+          "dca": {
+            "enabled": false
+          }
+        }
+      },
+      "groupSources": true,
+      "tapeMinutes": 20160
+    },
+    "dataset": "oscillators-12d",
+    "scoredCohort": "holdout",
+    "workers": 2,
+    "elapsedMs": 89776,
+    "stages": {
+      "base": {
+        "closed": 171466,
+        "profitFactor": 0.491950039207457,
+        "pfState": "finite",
+        "profit": 19452.05364954089,
+        "loss": 39540.70962343778,
+        "fees": 37.72251999999033
+      },
+      "main": {
+        "closed": 3394,
+        "profitFactor": 0.5912854860857457,
+        "pfState": "finite",
+        "profit": 478.78788246872256,
+        "loss": 809.7406307708536,
+        "fees": 0.7466799999999955
+      },
+      "real": {
+        "closed": 424,
+        "profitFactor": 0.8411661466079157,
+        "pfState": "finite",
+        "profit": 72.76857557533089,
+        "loss": 86.50915858748863,
+        "fees": 0.09327999999999988
+      },
+      "exec": {
+        "closed": 24,
+        "profitFactor": 12.126371888061065,
+        "pfState": "finite",
+        "profit": 12.74876958470246,
+        "loss": 1.051325961498358,
+        "fees": 0.00528
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 2138,
+      "main": 4276,
+      "real": 970,
+      "exec": 18,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 2138,
+      "main": 1598,
+      "real": 38,
+      "exec": 0
+    },
+    "tapes": {
+      "AAVE-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "a049e0bb98c616316260cca623ee6f0bb7e6554ea1b1621b2ba4c868287ad898"
+      },
+      "AVAX-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "ed83d3d3e756b03ff4f5f12f1c1620bbf1ec015f4d47e4b6bef7416a24f9c292"
+      },
+      "ETH-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "044c5c5298daa0f679ef6e4d9a97d5ba4ecae77a940f2b334b7aac017cbd13f2"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "75468bc564950bad4b45c431b8d7eaddd1c0c6ae67bee207829310797910c367"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "0bb2e54cb87774b807b10fa442e5b19298f96ba813f6694832855912dbfdabba"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "1403d833db1c16108319e9d7b91db958a4f057e2ab61289574f186ed0c5b38fe"
+      }
+    },
+    "bySource": {
+      "parabolic-sar-0.005-0.1/base": {
+        "closed": 11131,
+        "profitFactor": 0.44264946332404,
+        "pfState": "finite",
+        "profit": 1226.5206683420781,
+        "loss": 2770.862205799644,
+        "fees": 2.44881999999998
+      },
+      "Parabolic SAR/base": {
+        "closed": 98101,
+        "profitFactor": 0.48229989877512136,
+        "pfState": "finite",
+        "profit": 11145.40024682768,
+        "loss": 23108.858772587817,
+        "fees": 21.582220000003055
+      },
+      "sar-fast/base": {
+        "closed": 44792,
+        "profitFactor": 0.5128009394205353,
+        "pfState": "finite",
+        "profit": 5241.395661069153,
+        "loss": 10221.111659802977,
+        "fees": 9.854240000002022
+      },
+      "rsi-reclaim-5-25/base": {
+        "closed": 35237,
+        "profitFactor": 0.5248628000904139,
+        "pfState": "finite",
+        "profit": 4044.5133250569643,
+        "loss": 7705.848698669917,
+        "fees": 7.752140000000889
+      },
+      "RSI/base": {
+        "closed": 73365,
+        "profitFactor": 0.5055214703511516,
+        "pfState": "finite",
+        "profit": 8306.653402713104,
+        "loss": 16431.85085085117,
+        "fees": 16.140300000004974
+      },
+      "rsi-reclaim-8-30/base": {
+        "closed": 27873,
+        "profitFactor": 0.4627618722650629,
+        "pfState": "finite",
+        "profit": 2930.6311033142397,
+        "loss": 6332.913921732124,
+        "fees": 6.132060000000266
+      },
+      "sar-std/base": {
+        "closed": 26837,
+        "profitFactor": 0.4667849024994455,
+        "pfState": "finite",
+        "profit": 2979.839452379787,
+        "loss": 6383.752851525284,
+        "fees": 5.904140000000457
+      },
+      "parabolic-sar-0.01-0.15/base": {
+        "closed": 15341,
+        "profitFactor": 0.4547507132928831,
+        "pfState": "finite",
+        "profit": 1697.6444650367764,
+        "loss": 3733.1320554595923,
+        "fees": 3.375020000000002
+      },
+      "rsi-reclaim-14-30/base": {
+        "closed": 9113,
+        "profitFactor": 0.485430219910096,
+        "pfState": "finite",
+        "profit": 1023.427988944049,
+        "loss": 2108.2906398649693,
+        "fees": 2.004859999999984
+      },
+      "rsi-mom-14-25/base": {
+        "closed": 1142,
+        "profitFactor": 1.0817541846686205,
+        "pfState": "finite",
+        "profit": 308.0809853979394,
+        "loss": 284.79759058414504,
+        "fees": 0.25123999999999946
+      },
+      "rsi-reclaim-5-25/main": {
+        "closed": 584,
+        "profitFactor": 0.5699954663146967,
+        "pfState": "finite",
+        "profit": 87.2710750761005,
+        "loss": 153.10836705483163,
+        "fees": 0.12847999999999998
+      },
+      "RSI/main": {
+        "closed": 1272,
+        "profitFactor": 0.6776805997563197,
+        "pfState": "finite",
+        "profit": 203.3570434334513,
+        "loss": 300.0780065219137,
+        "fees": 0.279839999999999
+      },
+      "rsi-reclaim-5-25/real": {
+        "closed": 144,
+        "profitFactor": 1.1540431287124768,
+        "pfState": "finite",
+        "profit": 33.107139093923045,
+        "loss": 28.68795651585349,
+        "fees": 0.031680000000000035
+      },
+      "RSI/real": {
+        "closed": 288,
+        "profitFactor": 1.0858420482210602,
+        "pfState": "finite",
+        "profit": 57.80137050181406,
+        "loss": 53.23184029989472,
+        "fees": 0.0633599999999999
+      },
+      "parabolic-sar-0.005-0.1/main": {
+        "closed": 412,
+        "profitFactor": 0.5709823720251427,
+        "pfState": "finite",
+        "profit": 47.107065612025785,
+        "loss": 82.50178625471028,
+        "fees": 0.0906400000000001
+      },
+      "Parabolic SAR/main": {
+        "closed": 2122,
+        "profitFactor": 0.5404179665737858,
+        "pfState": "finite",
+        "profit": 275.4308390352708,
+        "loss": 509.66262424893847,
+        "fees": 0.4668399999999978
+      },
+      "rsi-reclaim-8-30/main": {
+        "closed": 322,
+        "profitFactor": 0.7041330277657074,
+        "pfState": "finite",
+        "profit": 46.262906001895466,
+        "loss": 65.70194008466386,
+        "fees": 0.07083999999999989
+      },
+      "sar-fast/main": {
+        "closed": 892,
+        "profitFactor": 0.8037596765569306,
+        "pfState": "finite",
+        "profit": 154.04855799405834,
+        "loss": 191.65997310782862,
+        "fees": 0.1962399999999994
+      },
+      "sar-std/main": {
+        "closed": 538,
+        "profitFactor": 0.33185883689996193,
+        "pfState": "finite",
+        "profit": 48.90841174785932,
+        "loss": 147.3771565185189,
+        "fees": 0.11836000000000013
+      },
+      "sar-fast/real": {
+        "closed": 104,
+        "profitFactor": 0.5529882954806183,
+        "pfState": "finite",
+        "profit": 13.397762505094562,
+        "loss": 24.227931431080606,
+        "fees": 0.022879999999999984
+      },
+      "Parabolic SAR/real": {
+        "closed": 136,
+        "profitFactor": 0.44977197213324466,
+        "pfState": "finite",
+        "profit": 14.967205073516809,
+        "loss": 33.27731828759393,
+        "fees": 0.02991999999999998
+      },
+      "parabolic-sar-0.01-0.15/main": {
+        "closed": 280,
+        "profitFactor": 0.28785447357061517,
+        "pfState": "finite",
+        "profit": 25.3668036813271,
+        "loss": 88.12370836788205,
+        "fees": 0.06159999999999999
+      },
+      "sar-std/real": {
+        "closed": 14,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 5.4754466826996815,
+        "fees": 0.0030800000000000016
+      },
+      "rsi-reclaim-14-30/main": {
+        "closed": 310,
+        "profitFactor": 0.6958832690982198,
+        "pfState": "finite",
+        "profit": 44.69044742178711,
+        "loss": 64.22118393462814,
+        "fees": 0.06819999999999996
+      },
+      "rsi-reclaim-14-30/real": {
+        "closed": 34,
+        "profitFactor": 0.3359299872289783,
+        "pfState": "finite",
+        "profit": 2.191694097146739,
+        "loss": 6.524258567166334,
+        "fees": 0.007479999999999998
+      },
+      "rsi-reclaim-8-30/real": {
+        "closed": 110,
+        "profitFactor": 1.2487794301998736,
+        "pfState": "finite",
+        "profit": 22.502537310744316,
+        "loss": 18.019625216874903,
+        "fees": 0.02420000000000002
+      },
+      "rsi-mom-14-25/main": {
+        "closed": 56,
+        "profitFactor": 1.4743549795055675,
+        "pfState": "finite",
+        "profit": 25.1326149336682,
+        "loss": 17.046515447790295,
+        "fees": 0.012319999999999992
+      },
+      "parabolic-sar-0.01-0.15/real": {
+        "closed": 2,
+        "profitFactor": 999,
+        "pfState": "no-losses",
+        "profit": 0.41069376313944606,
+        "loss": 0,
+        "fees": 0.0004400000000000001
+      },
+      "rsi-reclaim-8-30/exec": {
+        "closed": 24,
+        "profitFactor": 12.126371888061065,
+        "pfState": "finite",
+        "profit": 12.74876958470246,
+        "loss": 1.051325961498358,
+        "fees": 0.00528
+      },
+      "RSI/exec": {
+        "closed": 24,
+        "profitFactor": 12.126371888061065,
+        "pfState": "finite",
+        "profit": 12.74876958470246,
+        "loss": 1.051325961498358,
+        "fees": 0.00528
+      },
+      "parabolic-sar-0.005-0.1/real": {
+        "closed": 16,
+        "profitFactor": 0.3242216570307983,
+        "pfState": "finite",
+        "profit": 1.1587488052828003,
+        "loss": 3.5739401738136483,
+        "fees": 0.003520000000000002
+      }
+    }
+  },
+  "oscillators_twelve_day_wider": {
+    "scenario": {
+      "warmupMinutes": 17280,
+      "fitMinutes": 0,
+      "settings": {
+        "catalog": {
+          "strategyEnabledRanges": [
+            "Minimal",
+            "Short"
+          ],
+          "strategyTpSteps": [
+            6,
+            8,
+            12
+          ],
+          "strategySlRatios": [
+            0.3
+          ],
+          "strategyExitModes": [
+            "fixed"
+          ],
+          "strategyIndicationTypes": [
+            "Tactic"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5
+          ],
+          "strategySignalPeriods": [
+            10
+          ],
+          "strategySignalTimeframes": [
+            1,
+            5
+          ],
+          "strategyIndicationSources": [
+            "rsi-reclaim-5-25",
+            "rsi-reclaim-8-30",
+            "rsi-mom-14-25",
+            "parabolic-sar-0.01-0.15",
+            "sar-std",
+            "sar-fast"
+          ],
+          "strategyLowRangeSources": [
+            "low-range-research-6-band-reclaim-standalone",
+            "low-range-research-6-rsi2-reclaim-standalone",
+            "low-range-research-12-squeeze-break-activity"
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "autoPfFallback": 1.1,
+          "autoPfMinSamples": 16,
+          "autoPfHistory": 40,
+          "autoPfAdjustment": 0.75,
+          "autoPfMax": 2,
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          },
+          "strategyPriceDistancesEnabled": true,
+          "strategyStopDistancePcts": [
+            0.2,
+            0.4
+          ],
+          "strategyTrailDistancePcts": [
+            0.05,
+            0.1
+          ]
+        },
+        "coordinations": {
+          "axis": {
+            "enabled": false
+          },
+          "block": {
+            "enabled": false
+          },
+          "dca": {
+            "enabled": false
+          }
+        }
+      },
+      "groupSources": true,
+      "tapeMinutes": 20160
+    },
+    "dataset": "oscillators-12d",
+    "scoredCohort": "holdout",
+    "workers": 2,
+    "elapsedMs": 35779,
+    "stages": {
+      "base": {
+        "closed": 54814,
+        "profitFactor": 0.578350358986642,
+        "pfState": "finite",
+        "profit": 9928.363085062927,
+        "loss": 17166.693044781598,
+        "fees": 12.059080000002947
+      },
+      "main": {
+        "closed": 2342,
+        "profitFactor": 0.5794390228778965,
+        "pfState": "finite",
+        "profit": 459.6639877452111,
+        "loss": 793.2913897690228,
+        "fees": 0.5152399999999975
+      },
+      "real": {
+        "closed": 548,
+        "profitFactor": 0.8673607399394654,
+        "pfState": "finite",
+        "profit": 138.06909458934206,
+        "loss": 159.18301144109674,
+        "fees": 0.12056
+      },
+      "exec": {
+        "closed": 64,
+        "profitFactor": 1.3973337625519222,
+        "pfState": "finite",
+        "profit": 21.35725877225465,
+        "loss": 15.28429309061446,
+        "fees": 0.014079999999999995
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 978,
+      "main": 1956,
+      "real": 898,
+      "exec": 54,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 978,
+      "main": 1002,
+      "real": 94,
+      "exec": 0
+    },
+    "tapes": {
+      "AAVE-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "a049e0bb98c616316260cca623ee6f0bb7e6554ea1b1621b2ba4c868287ad898"
+      },
+      "AVAX-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "ed83d3d3e756b03ff4f5f12f1c1620bbf1ec015f4d47e4b6bef7416a24f9c292"
+      },
+      "ETH-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "044c5c5298daa0f679ef6e4d9a97d5ba4ecae77a940f2b334b7aac017cbd13f2"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "75468bc564950bad4b45c431b8d7eaddd1c0c6ae67bee207829310797910c367"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "0bb2e54cb87774b807b10fa442e5b19298f96ba813f6694832855912dbfdabba"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794096060000,
+        "lastClose": 1795305600000,
+        "sha256": "1403d833db1c16108319e9d7b91db958a4f057e2ab61289574f186ed0c5b38fe"
+      }
+    },
+    "bySource": {
+      "sar-fast/base": {
+        "closed": 14743,
+        "profitFactor": 0.6222845623501394,
+        "pfState": "finite",
+        "profit": 2808.117676063363,
+        "loss": 4512.5941505894625,
+        "fees": 3.2434599999999727
+      },
+      "Parabolic SAR/base": {
+        "closed": 33557,
+        "profitFactor": 0.5845174028913419,
+        "pfState": "finite",
+        "profit": 6189.240320462859,
+        "loss": 10588.633101166022,
+        "fees": 7.382540000000765
+      },
+      "rsi-reclaim-5-25/base": {
+        "closed": 11459,
+        "profitFactor": 0.602104405193217,
+        "pfState": "finite",
+        "profit": 2091.6128128035125,
+        "loss": 3473.8374188315534,
+        "fees": 2.5209799999999793
+      },
+      "RSI/base": {
+        "closed": 21257,
+        "profitFactor": 0.5684233340301399,
+        "pfState": "finite",
+        "profit": 3739.1227646000925,
+        "loss": 6578.059943615598,
+        "fees": 4.67653999999996
+      },
+      "rsi-reclaim-8-30/base": {
+        "closed": 9351,
+        "profitFactor": 0.5202007074175079,
+        "pfState": "finite",
+        "profit": 1537.5190935771802,
+        "loss": 2955.6266872647343,
+        "fees": 2.057219999999983
+      },
+      "sar-std/base": {
+        "closed": 11125,
+        "profitFactor": 0.5627093890528584,
+        "pfState": "finite",
+        "profit": 2017.938430256641,
+        "loss": 3586.111178370768,
+        "fees": 2.44749999999998
+      },
+      "sar-fast/main": {
+        "closed": 696,
+        "profitFactor": 0.6588156529245487,
+        "pfState": "finite",
+        "profit": 155.3730503245095,
+        "loss": 235.83691376304276,
+        "fees": 0.15312000000000006
+      },
+      "Parabolic SAR/main": {
+        "closed": 1288,
+        "profitFactor": 0.5100692866144492,
+        "pfState": "finite",
+        "profit": 247.77076837273748,
+        "loss": 485.7590426926103,
+        "fees": 0.28335999999999945
+      },
+      "parabolic-sar-0.01-0.15/base": {
+        "closed": 7689,
+        "profitFactor": 0.5474794206320363,
+        "pfState": "finite",
+        "profit": 1363.1842141428433,
+        "loss": 2489.9277722057914,
+        "fees": 1.691579999999987
+      },
+      "sar-std/main": {
+        "closed": 352,
+        "profitFactor": 0.3796595423902532,
+        "pfState": "finite",
+        "profit": 54.67237882796593,
+        "loss": 144.00369995644158,
+        "fees": 0.07743999999999997
+      },
+      "rsi-mom-14-25/base": {
+        "closed": 447,
+        "profitFactor": 0.7402014757317532,
+        "pfState": "finite",
+        "profit": 109.99085821939889,
+        "loss": 148.59583751932325,
+        "fees": 0.09834000000000008
+      },
+      "sar-std/real": {
+        "closed": 48,
+        "profitFactor": 0.4161770294185892,
+        "pfState": "finite",
+        "profit": 8.575096512580846,
+        "loss": 20.604444518623463,
+        "fees": 0.010560000000000003
+      },
+      "Parabolic SAR/real": {
+        "closed": 220,
+        "profitFactor": 0.6159183070163686,
+        "pfState": "finite",
+        "profit": 49.852942615334236,
+        "loss": 80.94083589889031,
+        "fees": 0.048399999999999985
+      },
+      "sar-fast/real": {
+        "closed": 142,
+        "profitFactor": 0.8001500830675189,
+        "pfState": "finite",
+        "profit": 36.86809141150866,
+        "loss": 46.07647014191165,
+        "fees": 0.03123999999999999
+      },
+      "sar-fast/exec": {
+        "closed": 14,
+        "profitFactor": 1.9534695252074217,
+        "pfState": "finite",
+        "profit": 7.283961000741634,
+        "loss": 3.7287302958914674,
+        "fees": 0.0030800000000000016
+      },
+      "Parabolic SAR/exec": {
+        "closed": 14,
+        "profitFactor": 1.9534695252074217,
+        "pfState": "finite",
+        "profit": 7.283961000741634,
+        "loss": 3.7287302958914674,
+        "fees": 0.0030800000000000016
+      },
+      "rsi-reclaim-5-25/main": {
+        "closed": 668,
+        "profitFactor": 0.6712122400355424,
+        "pfState": "finite",
+        "profit": 134.47913131453168,
+        "loss": 200.3526206664686,
+        "fees": 0.14696000000000004
+      },
+      "RSI/main": {
+        "closed": 1054,
+        "profitFactor": 0.6890111605717507,
+        "pfState": "finite",
+        "profit": 211.8932193724735,
+        "loss": 307.53234707641263,
+        "fees": 0.23187999999999956
+      },
+      "parabolic-sar-0.01-0.15/main": {
+        "closed": 240,
+        "profitFactor": 0.3561735156573546,
+        "pfState": "finite",
+        "profit": 37.72533922026205,
+        "loss": 105.91842897312587,
+        "fees": 0.0528
+      },
+      "parabolic-sar-0.01-0.15/real": {
+        "closed": 30,
+        "profitFactor": 0.3092411674325189,
+        "pfState": "finite",
+        "profit": 4.409754691244733,
+        "loss": 14.259921238355203,
+        "fees": 0.006600000000000003
+      },
+      "rsi-reclaim-5-25/real": {
+        "closed": 168,
+        "profitFactor": 1.366775670940716,
+        "pfState": "finite",
+        "profit": 53.98628132260217,
+        "loss": 39.499006655162965,
+        "fees": 0.03696000000000005
+      },
+      "RSI/real": {
+        "closed": 328,
+        "profitFactor": 1.1274757042820363,
+        "pfState": "finite",
+        "profit": 88.21615197400783,
+        "loss": 78.24217554220637,
+        "fees": 0.07215999999999997
+      },
+      "rsi-reclaim-8-30/main": {
+        "closed": 376,
+        "profitFactor": 0.7633212097623797,
+        "pfState": "finite",
+        "profit": 77.41408805794187,
+        "loss": 101.41744663696782,
+        "fees": 0.08272
+      },
+      "rsi-reclaim-8-30/real": {
+        "closed": 160,
+        "profitFactor": 0.883507251335162,
+        "pfState": "finite",
+        "profit": 34.22987065140566,
+        "loss": 38.74316888704338,
+        "fees": 0.035199999999999995
+      },
+      "rsi-mom-14-25/main": {
+        "closed": 10,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 5.762279772976265,
+        "fees": 0.002200000000000001
+      },
+      "rsi-reclaim-5-25/exec": {
+        "closed": 34,
+        "profitFactor": 1.456989950989216,
+        "pfState": "finite",
+        "profit": 10.385839180792837,
+        "loss": 7.128284703502192,
+        "fees": 0.007479999999999998
+      },
+      "RSI/exec": {
+        "closed": 50,
+        "profitFactor": 1.2178807749579954,
+        "pfState": "finite",
+        "profit": 14.073297771513015,
+        "loss": 11.555562794722992,
+        "fees": 0.010999999999999996
+      },
+      "rsi-reclaim-8-30/exec": {
+        "closed": 16,
+        "profitFactor": 0.8328951818121237,
+        "pfState": "finite",
+        "profit": 3.687458590720178,
+        "loss": 4.427278091220797,
+        "fees": 0.0035200000000000014
+      }
+    }
+  },
+  "fallback_1_05": {
+    "scenario": {
+      "warmupMinutes": 2880,
+      "fitMinutes": 2880,
+      "settings": {
+        "catalog": {
+          "strategyTpSteps": [
+            3,
+            6,
+            8
+          ],
+          "strategyEnabledRanges": [
+            "Micro",
+            "Minimal"
+          ],
+          "strategySlRatios": [
+            0.3,
+            1
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing"
+          ],
+          "strategyIndicationTypes": [
+            "Bollinger_Bounce",
+            "RSI_Band"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          },
+          "autoPfFallback": 1.05,
+          "autoPfMinSamples": 8,
+          "autoPfHistory": 40,
+          "autoPfAdjustment": 0.5,
+          "autoPfMax": 2
+        },
+        "coordinations": {
+          "axis": {
+            "enabled": false
+          },
+          "block": {
+            "enabled": false
+          },
+          "dca": {
+            "enabled": false
+          }
+        },
+        "stageMinPF": {
+          "base": 1.01,
+          "main": 1.01,
+          "real": 1.01
+        },
+        "execMinPF": 1.01
+      }
+    },
+    "dataset": "default-screen",
+    "scoredCohort": "fit",
+    "workers": 1,
+    "elapsedMs": 25184,
+    "stages": {
+      "base": {
+        "closed": 41037,
+        "profitFactor": 0.7598076922757612,
+        "pfState": "finite",
+        "profit": 7420.152732662909,
+        "loss": 9765.829969999662,
+        "fees": 9.028140000001951
+      },
+      "main": {
+        "closed": 2372,
+        "profitFactor": 1.0425096930412108,
+        "pfState": "finite",
+        "profit": 623.7019951656641,
+        "loss": 598.2697324820067,
+        "fees": 0.5218399999999966
+      },
+      "real": {
+        "closed": 370,
+        "profitFactor": 1.623698274335081,
+        "pfState": "finite",
+        "profit": 118.6777467763588,
+        "loss": 73.09100998149327,
+        "fees": 0.0814000000000001
+      },
+      "exec": {
+        "closed": 4,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 0.8934101747358274,
+        "fees": 0.0008800000000000002
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 587,
+      "main": 1174,
+      "real": 518,
+      "exec": 22,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 587,
+      "main": 610,
+      "real": 24,
+      "exec": 4
+    },
+    "tapes": {
+      "AVAX-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "8b43adeaa4a9d93a718bc24f87c36bff3e13c07957b0a1d4ff213dfcfd32b66c"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "fc8b7af215a64dcda93de9e169461a7e4ad06cd0bb830b881d0f167e8b5ec808"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "3c19487518aef02c9e8983fa4f3e7790234967c2fbc4d8b8e2e64a124642774f"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "a38425d68cd07b10e60d7999bd163a19cca644ff10bf1a82e9ea6449c6a96e3e"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "041ead3f9ca3bbd8642d894e2b1817c6cedbd56b812481babe497589b44cae35"
+      }
+    }
+  },
+  "fallback_1_10": {
+    "scenario": {
+      "warmupMinutes": 2880,
+      "fitMinutes": 2880,
+      "settings": {
+        "catalog": {
+          "strategyTpSteps": [
+            3,
+            6,
+            8
+          ],
+          "strategyEnabledRanges": [
+            "Micro",
+            "Minimal"
+          ],
+          "strategySlRatios": [
+            0.3,
+            1
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing"
+          ],
+          "strategyIndicationTypes": [
+            "Bollinger_Bounce",
+            "RSI_Band"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          },
+          "autoPfFallback": 1.1,
+          "autoPfMinSamples": 16,
+          "autoPfHistory": 40,
+          "autoPfAdjustment": 0.75,
+          "autoPfMax": 2
+        },
+        "coordinations": {
+          "axis": {
+            "enabled": false
+          },
+          "block": {
+            "enabled": false
+          },
+          "dca": {
+            "enabled": false
+          }
+        },
+        "stageMinPF": {
+          "base": 1.01,
+          "main": 1.01,
+          "real": 1.01
+        },
+        "execMinPF": 1.01
+      }
+    },
+    "dataset": "default-screen",
+    "scoredCohort": "fit",
+    "workers": 1,
+    "elapsedMs": 19239,
+    "stages": {
+      "base": {
+        "closed": 35631,
+        "profitFactor": 0.7527962114596214,
+        "pfState": "finite",
+        "profit": 6454.015741618239,
+        "loss": 8573.390305862904,
+        "fees": 7.838820000001418
+      },
+      "main": {
+        "closed": 1656,
+        "profitFactor": 1.1065509449571838,
+        "pfState": "finite",
+        "profit": 451.3475694185058,
+        "loss": 407.8868410671955,
+        "fees": 0.3643199999999979
+      },
+      "real": {
+        "closed": 206,
+        "profitFactor": 1.590179376995836,
+        "pfState": "finite",
+        "profit": 67.16140361743015,
+        "loss": 42.23511170438606,
+        "fees": 0.04532000000000003
+      },
+      "exec": {
+        "closed": 2,
+        "profitFactor": 0,
+        "pfState": "finite",
+        "profit": 0,
+        "loss": 0.16356659142212818,
+        "fees": 0.0004400000000000001
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 515,
+      "main": 1030,
+      "real": 422,
+      "exec": 16,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 515,
+      "main": 484,
+      "real": 18,
+      "exec": 0
+    },
+    "tapes": {
+      "AVAX-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "8b43adeaa4a9d93a718bc24f87c36bff3e13c07957b0a1d4ff213dfcfd32b66c"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "fc8b7af215a64dcda93de9e169461a7e4ad06cd0bb830b881d0f167e8b5ec808"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "3c19487518aef02c9e8983fa4f3e7790234967c2fbc4d8b8e2e64a124642774f"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "a38425d68cd07b10e60d7999bd163a19cca644ff10bf1a82e9ea6449c6a96e3e"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "041ead3f9ca3bbd8642d894e2b1817c6cedbd56b812481babe497589b44cae35"
+      }
+    }
+  },
+  "fallback_1_20": {
+    "scenario": {
+      "warmupMinutes": 2880,
+      "fitMinutes": 2880,
+      "settings": {
+        "catalog": {
+          "strategyTpSteps": [
+            3,
+            6,
+            8
+          ],
+          "strategyEnabledRanges": [
+            "Micro",
+            "Minimal"
+          ],
+          "strategySlRatios": [
+            0.3,
+            1
+          ],
+          "strategyExitModes": [
+            "fixed",
+            "trailing"
+          ],
+          "strategyIndicationTypes": [
+            "Bollinger_Bounce",
+            "RSI_Band"
+          ],
+          "strategyCoreSignalPeriods": [
+            0,
+            5
+          ],
+          "autoPfEnabled": true,
+          "autoPfMode": "set-history",
+          "strategyExecWindows": {
+            "base": {
+              "long": [
+                10
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "main": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "real": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            },
+            "exec": {
+              "long": [
+                "none"
+              ],
+              "short": [
+                4
+              ],
+              "last": [
+                1
+              ],
+              "lastOutcomes": [
+                "positive",
+                "negative"
+              ]
+            }
+          },
+          "autoPfFallback": 1.2,
+          "autoPfMinSamples": 8,
+          "autoPfHistory": 40,
+          "autoPfAdjustment": 1.5,
+          "autoPfMax": 2
+        },
+        "coordinations": {
+          "axis": {
+            "enabled": false
+          },
+          "block": {
+            "enabled": false
+          },
+          "dca": {
+            "enabled": false
+          }
+        },
+        "stageMinPF": {
+          "base": 1.01,
+          "main": 1.01,
+          "real": 1.01
+        },
+        "execMinPF": 1.01
+      }
+    },
+    "dataset": "default-screen",
+    "scoredCohort": "fit",
+    "workers": 1,
+    "elapsedMs": 15325,
+    "stages": {
+      "base": {
+        "closed": 27546,
+        "profitFactor": 0.7395918185800548,
+        "pfState": "finite",
+        "profit": 4987.547241407114,
+        "loss": 6743.648477592308,
+        "fees": 6.060120000000634
+      },
+      "main": {
+        "closed": 920,
+        "profitFactor": 1.171260996621632,
+        "pfState": "finite",
+        "profit": 254.40630892397803,
+        "loss": 217.20718922407886,
+        "fees": 0.20239999999999905
+      },
+      "real": {
+        "closed": 70,
+        "profitFactor": 1.8532364684717706,
+        "pfState": "finite",
+        "profit": 23.464319290472755,
+        "loss": 12.661265677456733,
+        "fees": 0.015399999999999994
+      },
+      "exec": {
+        "closed": 4,
+        "profitFactor": 10.974816645125081,
+        "pfState": "finite",
+        "profit": 1.7951133501259458,
+        "loss": 0.16356659142212818,
+        "fees": 0.0008800000000000002
+      },
+      "live": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      },
+      "executed": {
+        "closed": 0,
+        "profitFactor": null,
+        "pfState": "empty",
+        "profit": 0,
+        "loss": 0,
+        "fees": 0
+      }
+    },
+    "distinctExecutedPricePaths": 0,
+    "sets": {
+      "base": 403,
+      "main": 806,
+      "real": 192,
+      "exec": 8,
+      "live": 0
+    },
+    "setsWithFullWindow": {
+      "base": 403,
+      "main": 306,
+      "real": 12,
+      "exec": 0
+    },
+    "tapes": {
+      "AVAX-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "8b43adeaa4a9d93a718bc24f87c36bff3e13c07957b0a1d4ff213dfcfd32b66c"
+      },
+      "BCH-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "fc8b7af215a64dcda93de9e169461a7e4ad06cd0bb830b881d0f167e8b5ec808"
+      },
+      "NEAR-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "3c19487518aef02c9e8983fa4f3e7790234967c2fbc4d8b8e2e64a124642774f"
+      },
+      "SOL-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "a38425d68cd07b10e60d7999bd163a19cca644ff10bf1a82e9ea6449c6a96e3e"
+      },
+      "XRP-USDT": {
+        "firstClose": 1794614460000,
+        "lastClose": 1794960000000,
+        "sha256": "041ead3f9ca3bbd8642d894e2b1817c6cedbd56b812481babe497589b44cae35"
+      }
+    }
+  }
+}

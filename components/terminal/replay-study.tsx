@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Download, FlaskConical, Play } from "lucide-react"
+import type { ExecProgressionReplay } from "@/core/terminal-replay"
+import { MAX_RESEARCH_CANDLES } from "@/core/market"
 import { formatProfitFactor, profitFactorRank, type ProfitFactorState } from "./profit-factor"
 
 type ReplayMetrics = { trades: number; pf: number | null; pfState?: ProfitFactorState; netReturnSumPct: number; maxDrawdownPct: number; winRate: number; long: number; short: number; open: number }
 type ReplayRow = {lookback?:number;signalTimeframeMinutes?:number; id: string; range: string; tactic: string; tpStep: number; slRatio: number; exitMode: string; training: ReplayMetrics; trainingPassed: boolean; holdout: ReplayMetrics }
-type ReplayResult = { success: boolean; source: string; createdAt: string | number; configurations: number; enoughSamples: number; samplesPercent: number; eligible: number; minSamples?: number; minPf?: number; trainingCandles: number; holdoutCandles: number; rows: ReplayRow[]; executionEligible: false; note: string }
+type ReplayResult = { success: boolean; source: string; createdAt: string | number; configurations: number; enoughSamples: number; samplesPercent: number; eligible: number; minSamples?: number; minPf?: number; trainingCandles: number; holdoutCandles: number; rows: ReplayRow[]; executionEligible: false; note: string; progression?:ExecProgressionReplay }
 const decimal = (value: number | null | undefined, places = 2) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(places) : "—"
 const stat = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "—"
 
@@ -64,7 +66,7 @@ export function ReplayStudy({connectionId="bingx-x02"}:{connectionId?:string}) {
         <fieldset disabled={running} className="flex min-w-0 flex-wrap items-end gap-3">
           <label className="space-y-2 text-xs"><span className="terminal-muted block">Symbol</span><input className="terminal-input w-36" value={symbol} onChange={event => setSymbol(event.target.value)} required placeholder="BTC-USDT" /></label>
           <label className="space-y-2 text-xs"><span className="terminal-muted block">Candle interval</span><select className="terminal-input" value={interval} onChange={event => setInterval(event.target.value)}>{["1m", "5m", "15m", "1h"].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-          <label className="space-y-2 text-xs"><span className="terminal-muted block">Completed candles</span><select className="terminal-input" value={candleCount} onChange={event=>setCandleCount(Number(event.target.value))}>{[500,1000,1440,3000,5000].map(value=><option key={value} value={value}>{value.toLocaleString()}</option>)}</select></label>
+          <label className="space-y-2 text-xs"><span className="terminal-muted block">Completed candles</span><select className="terminal-input" value={candleCount} onChange={event=>setCandleCount(Number(event.target.value))}>{[500,1000,1440,3000,5000,5760,14400,MAX_RESEARCH_CANDLES].map(value=><option key={value} value={value}>{value.toLocaleString()}</option>)}</select></label>
           <label className="space-y-2 text-xs"><span className="terminal-muted block">Market source</span><select className="terminal-input" value={exchange} onChange={event => { const value = event.target.value as "bingx" | "bybit"; setExchange(value); if (value === "bybit") setDemo(false) }}><option value="bingx">BingX</option><option value="bybit">Bybit</option></select></label>
           <label className="flex h-10 items-center gap-2 text-xs terminal-muted"><input type="checkbox" className="accent-cyan-400" checked={demo} disabled={exchange !== "bingx"} onChange={event => setDemo(event.target.checked)} />VST demo market feed</label>
           <button type="submit" className="terminal-button border-violet-400/40 bg-violet-400/10 text-[var(--terminal-accent)]" disabled={running}><Play className="mr-2 inline h-4 w-4" />{running ? "Running replay…" : "Run replay"}</button>
@@ -81,6 +83,12 @@ export function ReplayStudy({connectionId="bingx-x02"}:{connectionId?:string}) {
           ["Candles", `${stat(result.trainingCandles)} / ${stat(result.holdoutCandles)}`, "Training / holdout"],
         ].map(([label, value, description]) => <div key={label} className="rounded-lg border border-[var(--terminal-border)] p-4"><p className="terminal-muted text-[10px] uppercase tracking-wider">{label}</p><p className="mt-2 font-mono text-2xl">{value}</p><p className="terminal-muted mt-1 text-[11px]">{description}</p></div>)}</div>
         <p className="terminal-muted text-xs leading-relaxed">{result.note}</p>
+        {result.progression&&<section className="space-y-3">
+          <h3 className="text-sm font-semibold">Saved stage progression on holdout</h3>
+          <div className="terminal-table-wrap"><table className="terminal-table"><thead><tr>{["Stage","Settled","Net return PF","Post-stage PF / settled","Win rate","Net P&L","Modeled costs"].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
+            <tbody>{result.progression.map(row=><tr key={row.stage}><th className="capitalize" scope="row">{row.stage}</th><td>{stat(row.closed)}</td><td>{formatProfitFactor(row.profitFactor,row.pfState)}</td><td>{row.postStage?`${formatProfitFactor(row.postStage.profitFactor,row.postStage.pfState)} / ${stat(row.postStage.closed)}`:"—"}</td><td>{row.closed?`${decimal(100*row.wins/row.closed,1)}%`:"—"}</td><td>{decimal(row.net,4)}</td><td>{decimal(row.cost,4)}</td></tr>)}</tbody>
+          </table></div>
+        </section>}
         <p className="terminal-muted text-xs leading-relaxed">The table contains a training-ranked shortlist of up to three configurations per range, evaluated separately on holdout candles.{result.minSamples !== undefined && result.minPf !== undefined ? ` Training gate: at least ${result.minSamples} completed samples and PF ${decimal(result.minPf)}.` : ""}</p>
         <div className="flex flex-wrap items-center gap-3 text-xs">
           <label className="flex items-center gap-2 terminal-muted">Range<select className="terminal-input" value={range} onChange={event => { setRange(event.target.value); setPage(0) }}><option value="all">All ranges</option>{[...new Set(result.rows.map(row => row.range))].map(value => <option key={value} value={value}>{value}</option>)}</select></label>

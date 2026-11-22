@@ -1,3 +1,5 @@
+export const SYSTEM_VOLUME_DIVISOR = 5
+
 /** Relative execution weights. Neutral defaults preserve the existing economic basis exactly. */
 export const VOLUME_BUCKETS=["indicationTypes","indications","strategies","ranges","symbols"] as const;
 export type VolumeBucket=typeof VOLUME_BUCKETS[number];
