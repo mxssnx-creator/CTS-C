@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const connection=connectionInfo(body.connectionId??undefined)
     const settings=getStore(connection.id).engineSettings()
     if(interval!=='1m'&&Array.isArray(settings?.catalog.strategyIndicationTypes)&&settings.catalog.strategyIndicationTypes.some(t=>(TECHNICAL_INDICATIONS as readonly unknown[]).includes(t)))return NextResponse.json({success:false,error:'Trend and Break timeframe grids require one-minute source candles. Select 1m.'},{status:400})
-    const demo=venue==='bingx'&&(typeof body.demo==='boolean'?body.demo:connection.demo)
+    const demo=typeof body.demo==='boolean'?body.demo:connection.demo
     const candles=await getResearchCandles(venue,symbol,interval,demo,limit,undefined,request.signal)
     const study=await runTerminalReplayAsync(symbol,candles,{...settings?.catalog,...settings?.symbolFees?.[symbol],stageGateMode:settings?.stageGateMode,mainEvalPosCount:settings?.stageLastN.base??20,baseProfitFactor:settings?.stageMinPF.base??1.1,replayBarSeconds:intervalSeconds(interval)},request.signal)
     const progression = interval==="1m"&&settings?.stageGateMode==="exec-branches"
