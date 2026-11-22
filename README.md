@@ -257,6 +257,8 @@ npm run test:runtime
 
 `npm run check` runs that sequence. The standalone smoke uses isolated temporary state, blank exchange credentials, login/write protection, persisted settings, restart, and durable logout. It submits no exchange orders. [VALIDATION.md](docs/VALIDATION.md) separates those checks from actual x02 checks and optional-adapter checks.
 
+[Signals research and replay evidence](docs/SIGNALS-RESEARCH-20261122.md) describes signed Last-N windows, optional continuation sources, bounded source batching, and the results and limits of the latest historical comparisons.
+
 `npm run test:browser` checks the built terminal with an isolated deterministic fixture, blank exchange keys, and a transport that rejects exchange writes. It exercises all six views, saved and unsaved settings, import/export, the replay UI→API→data→results flow, mobile layout and logout. Install Chromium with `npx playwright-core install --with-deps chromium`, or set `CTS_CHROMIUM_PATH` to an existing Chromium executable. Research accepts 100–5,000 completed candles, rejects gaps/stale data, carries training indicator prehistory into fresh holdout positions, and yields between candidates to keep the event loop responsive.
 
 The application currently has one x02 executor and no portfolio-wide capital reservation, risk optimizer, or verified multi-host worker coordination. Independent candidate exposure does not imply available exchange margin. Replay does not model funding, liquidation, depth, queue priority, or exchange latency. Verification does not establish profitability or universally best configurations.

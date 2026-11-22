@@ -1,0 +1,129 @@
+{
+  "tapeMinutes": 11520,
+  "warmupMinutes": 4320,
+  "fitMinutes": 2880,
+  "groupSources": true,
+  "settings": {
+    "catalog": {
+      "strategyEnabledRanges": [
+        "Micro",
+        "Minimal",
+        "Short",
+        "Normal",
+        "Long"
+      ],
+      "strategyTpSteps": [
+        3,
+        8,
+        12,
+        18
+      ],
+      "strategySlRatios": [
+        0.4,
+        1.2
+      ],
+      "strategyExitModes": [
+        "fixed",
+        "trailing",
+        "trailing-fixed"
+      ],
+      "strategyIndicationTypes": [
+        "Signals"
+      ],
+      "strategySignalsSources": [
+        "sig-ema-cross-s",
+        "sig-rsi-momentum-s",
+        "sig-donchian-s",
+        "sig-ema-cross-s-follow",
+        "sig-rsi-momentum-s-follow",
+        "sig-donchian-s-follow"
+      ],
+      "strategySignalTimeframes": [
+        1
+      ],
+      "autoPfEnabled": true,
+      "autoPfMode": "set-history",
+      "autoPfFallback": 1.1,
+      "autoPfHistory": 40,
+      "autoPfMinSamples": 16,
+      "strategyExecWindows": {
+        "base": {
+          "long": [
+            10
+          ],
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ]
+        },
+        "main": {
+          "long": [
+            "none"
+          ],
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ]
+        },
+        "real": {
+          "long": [
+            "none"
+          ],
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ]
+        },
+        "exec": {
+          "long": [
+            "none"
+          ],
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ]
+        }
+      },
+      "strategyStageCoordinations": {
+        "main": [
+          "dca"
+        ],
+        "real": [
+          "dca"
+        ],
+        "exec": [
+          "dca"
+        ]
+      }
+    },
+    "coordinations": {
+      "axis": {
+        "enabled": false
+      },
+      "block": {
+        "enabled": false
+      },
+      "dca": {
+        "enabled": true,
+        "steps": 2,
+        "distancePct": 0.25,
+        "multiplier": 0.5
+      },
+      "relate": {
+        "enabled": false
+      }
+    }
+  }
+}

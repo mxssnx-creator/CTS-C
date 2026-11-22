@@ -4,7 +4,7 @@ import {INDICATIONS,indicationState} from "./origin/indications/registry.ts";
 import {SeriesCache} from "./origin/indications/cache.ts";
 import {MarketSource} from "./origin/indications/market.ts";
 import type {Bars} from "./origin/domain/types.ts";
-import {SIGNALS_BY_ID} from './signals-catalog.ts';
+import {SIGNALS_BY_ID,signalContinuationBase} from './signals-catalog.ts';
 import { LOW_RANGE_IDS, LOW_RANGE_TIMEFRAMES } from "./low-range-catalog.ts";
 import { isResearchTacticSource, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "./research-sources.ts";
 import { oscillatorContinuationBase } from "./oscillator-sources.ts";
@@ -36,7 +36,7 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
    const pair=/^inverse-pair-(btc|eth)-/.exec(id);
    available[id]=lowRange ? LOW_RANGE_TIMEFRAMES.some(tf => tf === tfMin) : isResearchTacticSource(id)||PORTED_BY_ID.get(id)?.kind==="tactic" ? supportsTacticTimeframe(id,tfMin) : ![1,5,15].includes(tfMin)&&id.startsWith("inverse-")?false:pair?symbol!==pair[1].toUpperCase()+"-USDT"&&unique.has(pair[1].toUpperCase()+"-USDT")
      :id.includes("market-")?marketBars.length>1:true;
-   states[id]=available[id]?indicationState(oscillatorContinuationBase(id)??id,k)??new Int8Array(b.n):new Int8Array(b.n);
+   states[id]=available[id]?indicationState(oscillatorContinuationBase(id)??signalContinuationBase(id)??id,k)??new Int8Array(b.n):new Int8Array(b.n);
  }
  return {states,available};
 }

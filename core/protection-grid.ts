@@ -3,7 +3,7 @@ import type { ExitMode, StrategyRange } from "./types"
 export const STOP_DISTANCE_PCTS = Array.from({ length: 21 }, (_, i) => (i + 2) / 10)
 export const TRAIL_DISTANCE_PCTS = Array.from({ length: 25 }, (_, i) => (i + 2) / 10)
 export const SELECTABLE_STOP_DISTANCE_PCTS = [.1,.15,...STOP_DISTANCE_PCTS]
-export const SELECTABLE_TRAIL_DISTANCE_PCTS = [.05,.1,.15,...TRAIL_DISTANCE_PCTS]
+export const SELECTABLE_TRAIL_DISTANCE_PCTS = [.05,.1,.15,...TRAIL_DISTANCE_PCTS,3,4,5,6,8]
 export const EXPANDED_CATALOG_MAX = 100_000
 
 export function priceProtection(settings: Record<string, unknown>) {

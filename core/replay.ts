@@ -7,6 +7,7 @@ import { INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import {technicalSignal} from './technical-signals'
 import { SIGNAL_TIMEFRAMES } from "../shared/cts-indications/research-sources"
 import { oscillatorContinuationBase } from "../shared/cts-indications/oscillator-sources"
+import { signalContinuationBase } from "../shared/cts-indications/signals-catalog"
 
 const sourceStreams=new WeakMap<SignalState,{first:number;stream:StreamMath}>()
 export const PORTED_HISTORY_LIMIT=4320
@@ -128,7 +129,7 @@ function configuredClosedBar(state:SignalState,bar:Candle,minutes:number):Candle
 function portedEntry(id:string,series:Int8Array,index:number):Direction|undefined {
   if (index < 1) return
   const direction=series[index]
-  if (direction===0 || (direction===series[index-1] && !oscillatorContinuationBase(id))) return
+  if (direction===0 || (direction===series[index-1] && !oscillatorContinuationBase(id) && !signalContinuationBase(id))) return
   return direction>0 ? "long" : "short"
 }
 

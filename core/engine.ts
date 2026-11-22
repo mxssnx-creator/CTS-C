@@ -527,8 +527,11 @@ export class TradingEngine {
     const axisWindow = !lane.config.execProfile && lane.coordination === "normal" && s.coordinations.axis.enabled&&(s.coordinations.axis.reference!=='base'||lane.stage==='base')
       ? s.coordinations.axis.previous + s.coordinations.axis.last : 0
     const relateWindow = lane.coordination === "relate" && lane.stage !== "base" ? s.coordinations.relate?.lastN ?? 0 : 0
-    const retained = Math.max(gateWindow, axisWindow, relateWindow) + (lane.config.autoPfPolicy?.history ?? 0)
-    return Math.min(s.maxSamples, retained) + 1
+    // maxSamples bounds the decision window. Auto PF needs its own older,
+    // disjoint calibration history in addition to that window, including when
+    // the Relate window already occupies the full configured limit.
+    const window = Math.min(s.maxSamples, Math.max(gateWindow, axisWindow, relateWindow))
+    return window + (lane.config.autoPfPolicy?.history ?? 0) + 1
   }
   private trimSamples(lane:LaneState):void {
     const retained=this.sampleRetention(lane)

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {createHash} from 'node:crypto'
-import {SIGNAL_SOURCES,SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES,signalsCoordinationId} from '../shared/cts-indications/signals-catalog'
+import {SIGNAL_SOURCES,SIGNALS_CATALOG,SIGNAL_CONTINUATION_SOURCES,DEFAULT_SIGNALS_SOURCES,signalsCoordinationId} from '../shared/cts-indications/signals-catalog'
 import {portedStates,entryOnsets} from '../shared/cts-indications/index'
 import {signalCoordinationId,signalCoordinationVoteCounts,signalCoordinationStateFromVotes} from '../shared/cts-indications/origin/signal-coordination'
 import {waveBars} from '../shared/cts-indications/fixtures'
@@ -12,12 +12,32 @@ import {DEFAULTS,validateConfiguration,configurationCount,hydrate} from '../core
 import {LEGACY_INDICATIONS} from '../core/indications'
 
 test('all 103 Signals source families and 225 disjoint coordinators keep their pinned oracle states',()=>{
- assert.equal(SIGNAL_SOURCES.length,103);assert.equal(SIGNALS_CATALOG.length,431)
+ assert.equal(SIGNAL_SOURCES.length,103);assert.equal(SIGNALS_CATALOG.length,437)
  const ids=SIGNALS_CATALOG.map(s=>s.id);assert.equal(new Set(ids).size,ids.length)
  const data=portedStates('BTC-USDT',1,waveBars(600),ids),hash=createHash('sha256')
- for(const id of ids){assert.equal(data.available[id],true);hash.update(id);hash.update(data.states[id]);assert.ok(data.states[id].every(v=>[-1,0,1].includes(v)))}
+ for(const id of ids){assert.equal(data.available[id],true);if(!SIGNAL_CONTINUATION_SOURCES.some(source=>source.id===id)){hash.update(id);hash.update(data.states[id])}assert.ok(data.states[id].every(v=>[-1,0,1].includes(v)))}
  assert.equal(hash.digest('hex'),'ec8e903b2a95632523083cecc33795b6540ba301457716237e86ec34a8768467')
  const names=['ema-cross','rsi-momentum','donchian','adx','vwap'];for(const ratio of [.6,.65,.7,.75,.8])for(const min of [2,3,5])for(const mask of [1,2,3])assert.equal(signalsCoordinationId(names,ratio,min,mask),signalCoordinationId(names,ratio as .6,min,mask as 1))
+})
+test('optional Signals continuations keep source states, closed-bar causality and separate configurations',()=>{
+ const rows=waveBars(400), ids=SIGNAL_CONTINUATION_SOURCES.flatMap(source=>[source.baseId,source.id])
+ const full=portedStates('BTC-USDT',1,rows,ids)
+ for(const source of SIGNAL_CONTINUATION_SOURCES){
+  assert.deepEqual(full.states[source.id],full.states[source.baseId])
+  const config={type:'Signals',position_cost_step:20,indicationSourceId:source.id,signalTimeframeMinutes:1}
+  let state=newSignalState()
+  for(let i=0;i<rows.length;i++){
+   if(i===200)state=JSON.parse(JSON.stringify(state))
+   const signal=advanceConfiguredSignal(state,{...rows[i],timestamp:rows[i].timestamp+60000},config,{symbol:'BTC-USDT'})
+   const value=full.states[source.baseId][i]
+   assert.equal(signal,i===0||!value?undefined:value>0?'long':'short',source.id+'/'+i)
+  }
+ }
+ const sources=[SIGNAL_CONTINUATION_SOURCES[0].baseId,SIGNAL_CONTINUATION_SOURCES[0].id]
+ const configs=generateStrategyCatalog('test',{strategyIndicationTypes:['Signals'],strategySignalsSources:sources,
+  strategyEnabledRanges:['Short'],strategyTpSteps:[12],strategySlRatios:[1],strategyExitModes:['fixed']})
+ assert.equal(configs.length,2);assert.equal(new Set(configs.map(config=>config.id)).size,2)
+ assert.ok(SIGNAL_CONTINUATION_SOURCES.every(source=>!DEFAULT_SIGNALS_SOURCES.includes(source.id)))
 })
 test('Signals abstain on conflicting variants and vote once per source with exact band boundaries',()=>{
  const counts=signalCoordinationVoteCounts([[Int8Array.of(1),Int8Array.of(-1)],[Int8Array.of(1),Int8Array.of(1)],[Int8Array.of(-1)]],1)

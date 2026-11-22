@@ -9,6 +9,7 @@ import { EXEC_PROFILES, execProfileEnabled } from "../core/exec-profile"
 import { describeProfitFactor } from "../core/metrics"
 import { EXIT_MODES, type Candle, type ClosedTrade, type EngineSettings } from "../core/types"
 import { checkExecWindows } from "../core/last-n-grid"
+import { settledDrawdown } from "./settled-drawdown"
 
 type Scenario = { tapeMinutes?: number; warmupMinutes?: number; fitMinutes?: number; groupSources?: boolean; settings?: Partial<EngineSettings> }
 type Job = { file: string; family: "ordinary" | "signals"; profile: "short" | "mixed" | "full"; scenario: Scenario }
@@ -74,6 +75,7 @@ function run({file,family,profile,scenario}: Job) {
   const sources = scenario.groupSources ? new Map(generateEngineCatalog(settings,settings.symbolFees?.[symbol])
     .map(config=>[config.id,config.execProfile??config.indicationSourceId??config.type])) : undefined
   const distinct = {fit:new Map<string,{n:number;returns:number}>(),holdout:new Map<string,{n:number;returns:number}>()}
+  const cashFlows = {fit:new Map<number,number>(),holdout:new Map<number,number>()}
   const shortPaths = Object.fromEntries(execShorts.map(count=>[count,{fit:new Set<string>(),holdout:new Set<string>()}]))
   const awaitingMirror = new Map<string,Readonly<ClosedTrade>>()
   let crossingCloses = 0
@@ -120,6 +122,7 @@ function run({file,family,profile,scenario}: Job) {
     }
     if (trade.executed) {
       record(stages.executed[period])
+      cashFlows[period].set(trade.closedAt,(cashFlows[period].get(trade.closedAt)??0)+trade.netPnl)
       const key = [trade.configId,trade.coordination,trade.direction].join("/")
       record((variants[key]??=cohort())[period])
       const [type,range] = geometry.slice(3).split(/_(?=(?:Micro|Low-Range|Minimal|Short|Normal|Long|Wide)_)/,2)
@@ -164,6 +167,7 @@ function run({file,family,profile,scenario}: Job) {
     baseCandidates:snapshot.stages[0].baseCandidates,
     open:snapshot.positions.filter(position=>position.executed&&position.openedAt>=from).length,
     unique,distinctReturns,crossingCloses,stages,postStages,shortBooks,shortAccepted,shortCoverage,variants,groups,
+    settledCashFlows:Object.fromEntries(periods.map(period=>[period,[...cashFlows[period].entries()]])),
     shortUnique:Object.fromEntries(execShorts.map(n=>[n,{fit:shortPaths[n].fit.size,holdout:shortPaths[n].holdout.size}])) }
 }
 
@@ -228,6 +232,13 @@ async function main() {
     }
     return [period,{...totals,...describeProfitFactor(totals.profit,totals.loss,totals.closed)}]
   }))
+  const realizedDrawdown = Object.fromEntries(periods.map(period=>[period,settledDrawdown(
+    results.flatMap(result=>result.settledCashFlows[period])
+  )]))
+  for(const period of periods){
+    const expected=stages.executed[period].pnl, actual=realizedDrawdown[period].netPnl
+    if(Math.abs(expected-actual)>1e-8*Math.max(1,Math.abs(expected)))throw new Error(`Settled cash-PnL mismatch for ${period}`)
+  }
   const rank = Object.entries(variants).filter(([,row])=>row.fit.closes>=30)
     .sort(([,a],[,b])=>score(b.fit).profitFactor-score(a.fit).profitFactor).slice(0,10)
     .map(([config,row])=>({config,fit:score(row.fit),holdout:score(row.holdout)}))
@@ -237,7 +248,7 @@ async function main() {
     stages:scoredCohorts(stages),postStages:scoredCohorts(postStages),groups:scoredCohorts(groups),
     execShort:{coverage:shortCoverage,book:scoredCohorts(shortBooks),accepted:scoredCohorts(shortAccepted),unique:shortUnique},
     unique:Object.fromEntries(periods.map(period=>[period,distinctReturns[period].closed])),
-    distinctReturns,rank,results:results.sort((a,b)=>a.symbol.localeCompare(b.symbol)),
+    distinctReturns,realizedDrawdown,rank,results:results.sort((a,b)=>a.symbol.localeCompare(b.symbol)),
   },null,2)+"\n")
 }
 

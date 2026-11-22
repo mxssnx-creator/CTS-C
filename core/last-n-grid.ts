@@ -24,7 +24,7 @@ const inherited = { ...shortLast, long: EXEC_LONG_MODES }
 export const DEFAULT_EXEC_WINDOWS: ExecWindows = { base: { ...shortLast, long: EXEC_LONG_COUNTS }, main: inherited, real: inherited, exec: inherited }
 
 export function stageShortCounts(stage: EvaluationStage): readonly number[] {
-  return stage === "exec" ? EXEC_SHORT_COUNTS : DEFAULT_SHORT_COUNTS
+  return stage === "real" || stage === "exec" ? EXEC_SHORT_COUNTS : DEFAULT_SHORT_COUNTS
 }
 
 export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindows {
@@ -69,9 +69,8 @@ export function execPathCount(windows: ExecWindows): number {
   }, 1)
 }
 
-export function execShortOutcomes(windows: ShortLast, short: number): readonly Polarity[] {
-  const outcomes = windows.shortOutcomes ?? POSITIVE_EXEC_OUTCOME
-  return short <= 12 ? outcomes : outcomes.filter(outcome=>outcome==="positive")
+export function execShortOutcomes(windows: ShortLast, _short: number): readonly Polarity[] {
+  return windows.shortOutcomes ?? POSITIVE_EXEC_OUTCOME
 }
 
 export function execBlockPolicy(long: number, short: number, last: number, shortPolarity:Polarity="positive",minimalPolarity:Polarity="positive"): BlockPolicy {
