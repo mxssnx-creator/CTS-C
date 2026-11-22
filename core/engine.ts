@@ -935,6 +935,7 @@ export class TradingEngine {
         return
       }
       if (plan.exec && parent && entryProof) parent.progressionProof ??= entryProof.at(-1)
+      if (plan.exec && !baseGate && lane.samples.length < blockRequired(config.branch!.windows![stage]!)) return
       const scope = this.stageScope(config)
       const exact = baseGate ?? this.stageWindow(lane,stage,candle.timestamp,true)
       const qualified = exact.qualified &&
@@ -980,9 +981,9 @@ export class TradingEngine {
         }
         continue
       }
-      const evidence = this.contextEvidence(observation,candle.timestamp)
+      const evidence = observation.samples.length >= baseSampleCounts[0] ? this.contextEvidence(observation,candle.timestamp) : undefined
       this.open(observation,candle)
-      if (evidence.samples.length < baseSampleCounts[0]) continue
+      if (!evidence || evidence.samples.length < baseSampleCounts[0]) continue
       // A Base observation can feed different window sizes at this exact clock.
       // Auto PF's older history stays out of the much smaller gate prefix.
       gatePrefix(evidence.samples,baseSampleCounts.at(-1)!)

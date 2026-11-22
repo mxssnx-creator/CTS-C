@@ -14,6 +14,14 @@ export const PARABOLIC_SAR_VARIANTS = sarSteps.flatMap(step=>sarCaps.map(cap=>{
   return {id:importedId??`parabolic-sar-${step}-${cap}`,step,cap,label:`Parabolic SAR · AF ${step} · max ${cap}`,imported:Boolean(importedId)}
 }))
 
+const continuation = ({id,label}:{id:string;label:string}) => ({id:`${id}-follow`,baseId:id,label:`${label} · continuation`})
+export const RSI_CONTINUATION_SOURCES = RSI_VARIANTS
+  .filter(({method,period,lower})=>method==="momentum"&&[5,8,14].includes(period)&&[25,35].includes(lower)).map(continuation)
+export const SAR_CONTINUATION_SOURCES = PARABOLIC_SAR_VARIANTS
+  .filter(({id})=>["parabolic-sar-0.01-0.15","parabolic-sar-0.02-0.1","sar-std","sar-fast"].includes(id)).map(continuation)
+const continuationBases = new Map([...RSI_CONTINUATION_SOURCES,...SAR_CONTINUATION_SOURCES].map(({id,baseId})=>[id,baseId]))
+export const oscillatorContinuationBase = (id:string) => continuationBases.get(id)
+
 export const THIN_OSCILLATOR_SOURCE_IDS = [
   "rsi-reclaim-5-25", "rsi-reclaim-8-30", "rsi-reclaim-14-30", "rsi-mom-14-25",
   "parabolic-sar-0.005-0.1", "parabolic-sar-0.01-0.15", "sar-std", "sar-fast",

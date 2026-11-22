@@ -16,7 +16,7 @@ import { EXEC_PROFILES, withDefaultExecProfile } from './exec-profile'
 
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
-interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null;readyAt?:number}
+interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null;readyAt?:number;batchSize?:number}
 const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:4320,lastTick:null,lastError:null,feeReadFailures:[],feeCheckedAt:null }
 const EXECUTION_INTERVAL_MS = 250
 const RECONCILIATION_INTERVAL_MS = 1000
@@ -24,6 +24,9 @@ const MARKET_INTERVAL_MS = 45
 const HISTORY_QUOTE_WAIT_MS = 2_000
 const HISTORY_REQUESTS = 16
 const HISTORY_QUEUE_LIMIT = 32
+function historyBatchSize(processed:number,ms:number) {
+  return Math.max(1,Math.min(8,processed*2,Math.floor(10*processed/Math.max(1,ms))))
+}
 function retainEvents(target:EngineEvent[],source:readonly EngineEvent[],limit=5000){
   if(source.length>=limit)target.length=0
   for(let i=Math.max(0,source.length-limit);i<source.length;i++)target.push(source[i])
@@ -132,9 +135,13 @@ export class TerminalRuntime {
     validateObservedCandles(candles)
     const latest=Math.floor(Date.now()/60000)*60000
     if(candles.some((bar,i)=>bar.timestamp>latest||bar.timestamp%60000!==0||(i>0&&bar.timestamp-candles[i-1].timestamp!==60000)))throw new Error('Warmup requires complete contiguous one-minute observations')
-    for(let offset=0;offset<candles.length;offset++){
+    let batchSize=1
+    for(let offset=0;offset<candles.length;){
       this.ensureLease()
-      this.engine.processCandles(symbol,candles.slice(offset,offset+1),{allowExecution:false,eventLimit:0})
+      const chunk=candles.slice(offset,offset+batchSize), began=performance.now()
+      this.engine.processCandles(symbol,chunk,{allowExecution:false,eventLimit:0})
+      batchSize=historyBatchSize(chunk.length,performance.now()-began)
+      offset+=chunk.length
       await new Promise<void>(resolve=>setImmediate(resolve))
     }
     this.persist()
@@ -331,13 +338,15 @@ export class TerminalRuntime {
               job.offset=0;job.validated=true
             }
             if(this.engine.lastProcessedAt(symbol)!==job.cursor)throw new Error('History cursor changed during a partial recovery')
-            const offset=job.offset??0
-            while((job.offset??0)<job.data.length&&(job.offset??0)-offset<128&&performance.now()-batchBegan<100){
+            const end=Math.min(job.data.length,(job.offset??0)+128)
+            while((job.offset??0)<end&&performance.now()-batchBegan<100){
               this.ensureLease()
-              const chunk=job.data.slice(job.offset,(job.offset??0)+1)
+              const offset=job.offset??0, chunk=job.data.slice(offset,Math.min(end,offset+(job.batchSize??1)))
               const fresh=job.live===true&&job.data.length===1&&job.plan?.cutoff===Math.floor(Date.now()/60000)*60000&&this.verifiedQuote(symbol,job.plan.cutoff)
+              const began=performance.now()
               retainEvents(events,this.engine.processCandles(symbol,chunk,{allowExecution:fresh&&this.control.exchangeExecution,eventLimit:fresh?5000:0}))
-              job.offset=(job.offset??0)+chunk.length;job.cursor=this.engine.lastProcessedAt(symbol)
+              job.batchSize=historyBatchSize(chunk.length,performance.now()-began)
+              job.offset=offset+chunk.length;job.cursor=this.engine.lastProcessedAt(symbol)
             }
             if((job.offset??0)>=job.data.length){
               this.warmJobs.delete(symbol)

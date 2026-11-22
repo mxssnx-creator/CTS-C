@@ -1,0 +1,6307 @@
+{
+  "createdOn": "2026-11-22",
+  "mode": "Paper execution of chronological, closed BingX minute candles",
+  "modeledRoundTripCostPct": 0.11,
+  "exchangeWrites": 0,
+  "evidence": "P/L and PF use net returns after modeled fees for entries and exits inside each period. Same symbol/direction/time/price paths count once in unique. Counts in exec include separate Sets.",
+  "catalogs": [
+    {
+      "id": "trend-dca-v1",
+      "setting": "strategyTrendDcaEnabled",
+      "label": "Trend + DCA",
+      "enabledByDefault": true,
+      "windows": {
+        "base": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            10
+          ]
+        },
+        "main": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "real": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "exec": {
+          "short": [
+            4,
+            8,
+            12
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        }
+      },
+      "catalogs": [
+        {}
+      ]
+    },
+    {
+      "id": "sar-dca-v1",
+      "setting": "strategySarDcaEnabled",
+      "label": "Parabolic SAR + DCA",
+      "enabledByDefault": true,
+      "windows": {
+        "base": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            10
+          ]
+        },
+        "main": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "real": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "exec": {
+          "short": [
+            4,
+            8,
+            12
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        }
+      },
+      "catalogs": [
+        {
+          "strategyIndicationTypes": [
+            "Tactic"
+          ],
+          "strategyIndicationSources": [
+            "parabolic-sar-0.01-0.15",
+            "sar-fast"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rsi-continuation-dca-v1",
+      "setting": "strategyRsiContinuationDcaEnabled",
+      "label": "RSI Momentum + DCA",
+      "enabledByDefault": true,
+      "windows": {
+        "base": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            10
+          ]
+        },
+        "main": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "real": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "exec": {
+          "short": [
+            4,
+            8,
+            12
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        }
+      },
+      "catalogs": [
+        {
+          "strategyIndicationTypes": [
+            "Tactic"
+          ],
+          "strategyIndicationSources": [
+            "rsi-mom-8-35-follow"
+          ],
+          "strategyEnabledRanges": [
+            "Normal"
+          ],
+          "strategyTpSteps": [
+            18
+          ]
+        },
+        {
+          "strategyIndicationTypes": [
+            "Tactic"
+          ],
+          "strategyIndicationSources": [
+            "rsi-mom-5-35"
+          ],
+          "strategyEnabledRanges": [
+            "Minimal"
+          ],
+          "strategyTpSteps": [
+            8
+          ]
+        }
+      ]
+    },
+    {
+      "id": "breakout-continuation-dca-v1",
+      "setting": "strategyBreakoutContinuationDcaEnabled",
+      "label": "Breakout Continuation + DCA",
+      "enabledByDefault": true,
+      "windows": {
+        "base": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            10
+          ]
+        },
+        "main": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "real": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "exec": {
+          "short": [
+            4,
+            8,
+            12
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        }
+      },
+      "catalogs": [
+        {
+          "strategyIndicationTypes": [
+            "Break_Continuation"
+          ],
+          "strategySignalPeriods": [
+            20
+          ],
+          "strategySlRatios": [
+            0.8
+          ]
+        }
+      ]
+    },
+    {
+      "id": "trend-recovery-dca-v1",
+      "setting": "strategyTrendRecoveryDcaEnabled",
+      "label": "Trend Efficiency + DCA",
+      "enabledByDefault": true,
+      "windows": {
+        "base": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "shortOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            10,
+            20
+          ]
+        },
+        "main": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "shortOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "real": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "shortOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "exec": {
+          "short": [
+            4,
+            8,
+            12
+          ],
+          "last": [
+            1
+          ],
+          "shortOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        }
+      },
+      "catalogs": [
+        {
+          "strategyIndicationTypes": [
+            "Trend_Efficiency"
+          ],
+          "strategyEnabledRanges": [
+            "Minimal"
+          ],
+          "strategyTpSteps": [
+            8
+          ],
+          "strategySlRatios": [
+            0.8
+          ]
+        }
+      ]
+    },
+    {
+      "id": "breakout-recovery-dca-v1",
+      "setting": "strategyBreakoutRecoveryDcaEnabled",
+      "label": "Breakout Retest + DCA",
+      "enabledByDefault": true,
+      "windows": {
+        "base": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "shortOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            10,
+            20
+          ]
+        },
+        "main": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "shortOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "real": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "shortOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "exec": {
+          "short": [
+            4,
+            8,
+            12
+          ],
+          "last": [
+            1
+          ],
+          "shortOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        }
+      },
+      "catalogs": [
+        {
+          "strategyIndicationTypes": [
+            "Break_Retest"
+          ],
+          "strategySlRatios": [
+            0.8
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sar-af04-dca-v1",
+      "setting": "strategySar04DcaEnabled",
+      "label": "Parabolic SAR 0.04/0.10 + DCA",
+      "enabledByDefault": true,
+      "windows": {
+        "base": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            10
+          ]
+        },
+        "main": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "real": {
+          "short": [
+            4
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        },
+        "exec": {
+          "short": [
+            4,
+            8,
+            12
+          ],
+          "last": [
+            1
+          ],
+          "lastOutcomes": [
+            "positive",
+            "negative"
+          ],
+          "long": [
+            "none"
+          ]
+        }
+      },
+      "catalogs": [
+        {
+          "strategyIndicationTypes": [
+            "Tactic"
+          ],
+          "strategyIndicationSources": [
+            "parabolic-sar-0.04-0.1"
+          ],
+          "strategySlRatios": [
+            0.8
+          ]
+        }
+      ]
+    }
+  ],
+  "scans": {
+    "publicFixed": 1392,
+    "vstFixed": 1392,
+    "publicSigned": 180,
+    "vstSigned": 180,
+    "publicContinuation": 36,
+    "publicTrailing": 152,
+    "vstShort": 153
+  },
+  "checks": [
+    {
+      "feed": "public",
+      "cases": [
+        {
+          "label": "initial bundle",
+          "geometries": 9,
+          "execCloses": 608,
+          "liveCloses": 608
+        },
+        {
+          "label": "final SAR settings",
+          "geometries": 1,
+          "execCloses": 46,
+          "liveCloses": 46
+        }
+      ]
+    },
+    {
+      "feed": "vst",
+      "cases": [
+        {
+          "label": "initial bundle",
+          "geometries": 9,
+          "execCloses": 321,
+          "liveCloses": 321
+        },
+        {
+          "label": "final SAR settings",
+          "geometries": 1,
+          "execCloses": 9,
+          "liveCloses": 9
+        }
+      ]
+    },
+    {
+      "feed": "short",
+      "cases": [
+        {
+          "label": "initial bundle",
+          "geometries": 9,
+          "execCloses": 0,
+          "liveCloses": 0
+        },
+        {
+          "label": "final SAR settings",
+          "geometries": 1,
+          "execCloses": 0,
+          "liveCloses": 0
+        }
+      ]
+    }
+  ],
+  "tapes": {
+    "public": [
+      {
+        "sym": "AAVE-USDT",
+        "tapeHash": "ff5e1800bdaaeed5636d5b684f6b11d9e2ea1697f9509f7868b0ed1717e6dc4c",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "ADA-USDT",
+        "tapeHash": "f00bf0de7ae93a87c08c5d7365f980a6fdc07d3d2ed55a150cb4c8d3ff98b334",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "ATOM-USDT",
+        "tapeHash": "8f5630a5693e4e26ed5c0e9d402372c3443fc19850214bc9597d3333e35dae7a",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "AVAX-USDT",
+        "tapeHash": "ca0ad506931b8b45b0fc6472fe689eae1b6f0e10b8b13d866a54c6f26a0b12f9",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "BCH-USDT",
+        "tapeHash": "7263c4e9d2fb3ab29cfa4735b6e3f9b5e81a160363364efb77d52594d97ccfbb",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "BNB-USDT",
+        "tapeHash": "c8653451676145b4d9371bf2ec712ebe4c138ef20525302c22aebe77dc71c893",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "BTC-USDT",
+        "tapeHash": "d15f707ef2489145e7573dd586e015e6b6b02cb163af2f961d826e498eb92acf",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "DOGE-USDT",
+        "tapeHash": "e0ae08ef26edac15219acd5b3fb4d9135c12741ec59c39e4791e8c13002e1056",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "DOT-USDT",
+        "tapeHash": "d71ad3a3ef8bc7143473de30443110a94bef9470f28e31494aad0da095fc8df1",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "ETH-USDT",
+        "tapeHash": "e58f22ec0015a7175592fea8eeb0e36eb1b6f8e35cf314befbf78d3c2f32c36e",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "LINK-USDT",
+        "tapeHash": "0b9a13b0097bc21c53bb4eb43113debf8b4ae235635cb41a7a739b1a46827d12",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "LTC-USDT",
+        "tapeHash": "e0f8454f313eef15c758ed902c94ca43b966cc0b5edb2b055c56e574f6f9935b",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "NEAR-USDT",
+        "tapeHash": "35115e7d5ee1a122789daf352a7e8f273badc2430b293beee4621e55d968ba50",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "OP-USDT",
+        "tapeHash": "196553134d329178f0feda9faf72aaf6fae5663257540a29b14c8c9eebe3ad10",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "SOL-USDT",
+        "tapeHash": "6a8b122bb0d840b8a78ec982c11a771b7b35325acfb9b587be15faa571ff0660",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "SUI-USDT",
+        "tapeHash": "f9482ec86dcbc517b22309a48099d32a6db85832edf346aa7ee7d239177d68b6",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "TRX-USDT",
+        "tapeHash": "e541de5955c011908097b559770010a5151ff48e986766c899ccbbd046ce716c",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "UNI-USDT",
+        "tapeHash": "a77aacb4005f508706fcbed1f85209fe3a53a2aada9f7321336284d088b64080",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "XRP-USDT",
+        "tapeHash": "a06fc7fa1c39090bb0e0435b43c49cb5a59b134c0c3d6c879349d6c3ee743e06",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "ZEC-USDT",
+        "tapeHash": "a76e4d49c42dc58a33112bb5a1456d7ed2b69996eb5bdf29e3ce92285bc10a5e",
+        "bars": 38880,
+        "first": 1792972860000,
+        "last": 1795305600000
+      }
+    ],
+    "vst": [
+      {
+        "sym": "AAVE-USDT",
+        "tapeHash": "a049e0bb98c616316260cca623ee6f0bb7e6554ea1b1621b2ba4c868287ad898",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "ADA-USDT",
+        "tapeHash": "c000da5f5fd53ec28e24cfef49635bb6119e0e6ec8679580dffd730b6b531613",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "ATOM-USDT",
+        "tapeHash": "367322314d6350065ca6c3e0a3557dc36ff631e20c22cbe47bc035f463955859",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "AVAX-USDT",
+        "tapeHash": "ed83d3d3e756b03ff4f5f12f1c1620bbf1ec015f4d47e4b6bef7416a24f9c292",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "BCH-USDT",
+        "tapeHash": "45076c8d86bb4d52d82a0814a98348dfa0d7510014011f5e7b7e9f44ea8015b2",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "BNB-USDT",
+        "tapeHash": "401c9ee1ccf2d3505ba0a791f6a0b54b054e3a97bd3db0be98a32108b853818c",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "DOGE-USDT",
+        "tapeHash": "2bd647fcb85790f3cd04c677977ac6eb1e514aeabc14980fbb362f79d9a255e1",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "DOT-USDT",
+        "tapeHash": "e9251b4fffd10e57094e3a7fb10145012b394a5beaf2170a3b29c289413af845",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "ETH-USDT",
+        "tapeHash": "044c5c5298daa0f679ef6e4d9a97d5ba4ecae77a940f2b334b7aac017cbd13f2",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "LINK-USDT",
+        "tapeHash": "224f3acedaa15b601abdab8c933f69cec6f421ea5cffac5a7dc8b3132a79195c",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "LTC-USDT",
+        "tapeHash": "74dd6674da5aca77338d1e4adb30ab849780a5d35b78d6eeb5a1c3033641968f",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "NEAR-USDT",
+        "tapeHash": "75468bc564950bad4b45c431b8d7eaddd1c0c6ae67bee207829310797910c367",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "OP-USDT",
+        "tapeHash": "95b413e99bcf35553d05b747ddeed1859189081f427dcc8c7482d57fdb0af150",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "SOL-USDT",
+        "tapeHash": "0bb2e54cb87774b807b10fa442e5b19298f96ba813f6694832855912dbfdabba",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "SUI-USDT",
+        "tapeHash": "6c19f51fdab13dc6ba568661040a1feea0fa93c83646766cb3d9fdb9921a89a1",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "TRX-USDT",
+        "tapeHash": "38ae0e19f08e577e03caa5e4b2c20b1d1de27860420671b991dc744967d566f0",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "UNI-USDT",
+        "tapeHash": "d9d81dc4c00f6a12068242593fd314dff81e8c36484e3586906148991c2a00a2",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "XLM-USDT",
+        "tapeHash": "8cdccf77e68e96a721a7b94e87955c54b7fedf16da081787de0f40773e6d6e4e",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "XRP-USDT",
+        "tapeHash": "1403d833db1c16108319e9d7b91db958a4f057e2ab61289574f186ed0c5b38fe",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      },
+      {
+        "sym": "ZEC-USDT",
+        "tapeHash": "424bd90ed5ec60c6b613db1b238d1297de63ecc77a1ba2529d8b8312252a7ba0",
+        "bars": 20160,
+        "first": 1794096060000,
+        "last": 1795305600000
+      }
+    ],
+    "short": [
+      {
+        "sym": "AAVE-USDT",
+        "tapeHash": "70f43c4121a70fbc8434900f67b08b841a18e154a50cac859c8f262e656f8f58",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "ADA-USDT",
+        "tapeHash": "0f5137d6598c405b55dc18acc9055309bfed8113e225e1cf432016fcdd0a7579",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "ATOM-USDT",
+        "tapeHash": "104eedf47c6b1155e5ae0e8969c4e910e57aac82060f628c10b3cb7cc9e67d85",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "AVAX-USDT",
+        "tapeHash": "c4aa0590782c0e60a807837c81fb1ab1cdbaba03191927f183113ca6f87d6548",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "BCH-USDT",
+        "tapeHash": "434e9c0250accbdbe1bcd8e252982ed51467e1db130a6ea9559d87438e9e5ded",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "BTC-USDT",
+        "tapeHash": "95ecea4603d7d4ff914bf22f01b9c01fb1d56b64824211c245d527360d456ec2",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "DOGE-USDT",
+        "tapeHash": "1739df17fd59c5f42de71adbbae5afd23a935b98aebc2b935ea92eb63c53d563",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "DOT-USDT",
+        "tapeHash": "ded57dcaf40e49965372420f8409b2c957762f2a7cf63d8a4ea4ced9de96fb3a",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "ETH-USDT",
+        "tapeHash": "4d62f6a1fc5f04420cdc450e14faeb1ba39e2f89fba2f69689cdb98ee724d8a7",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "FIL-USDT",
+        "tapeHash": "650a81ca67403814e3ad478245678765ac51d3533c0292135a8f4de8eee145fd",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "LINK-USDT",
+        "tapeHash": "c17dce703402c4b0594bb1f922ba43dd7da59fbc771ed4d044a5e036c939c04e",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "LTC-USDT",
+        "tapeHash": "1a4ae54c1f2e64cb338aa36139b9fcbc18495099cdb1fa66a69600f77c66c57f",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "NEAR-USDT",
+        "tapeHash": "45c7006a9af22288663df5149e942db1791545f59cf552413a1dd15603855f36",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "SOL-USDT",
+        "tapeHash": "4d12225673d0fe70fe4f17d414ea8a492ed4e838e06e8714090dd532e2a689da",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "TRX-USDT",
+        "tapeHash": "44e9a649d3203239b6179e91f47324c7006894c9e66cb35d2451c127b67dc497",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "UNI-USDT",
+        "tapeHash": "41946582a659d7637afc955944fc2b98b86177c4d04aa3538a7d378d44281fc9",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "XLM-USDT",
+        "tapeHash": "b832bdbf4dfce77a4a4a15e6e01df500b0b829cee181dcd11d04157e17de46bd",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "XRP-USDT",
+        "tapeHash": "85d5f11cf942863271adc3f9192108192cdbc56b384a6bc16e2507b34a99f221",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "XTZ-USDT",
+        "tapeHash": "7a5ddf8cb8bdc5d6fdbd9b7566ef122792074fa5b6058ee6a7e369b122cc970f",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      },
+      {
+        "sym": "ZEC-USDT",
+        "tapeHash": "92801020e4845c600492f5cb7713136b69796f5da8f5e1eafcbaa8ed2452d080",
+        "bars": 5760,
+        "first": 1794070860000,
+        "last": 1794416400000
+      }
+    ]
+  },
+  "cases": {
+    "cal": {
+      "feed": "public",
+      "from": "2026-11-05T00:00:00Z",
+      "to": "2026-11-08T00:00:00Z",
+      "label": "05.–08.11. Kalibrierung",
+      "symbols": 20,
+      "scenario": {
+        "tapeMinutes": 18720,
+        "warmupMinutes": 14400,
+        "fitMinutes": 0,
+        "groupSources": true,
+        "settings": {
+          "stageGateMode": "exec-branches",
+          "catalog": {
+            "strategyEnabledRanges": [],
+            "strategyTpSteps": [],
+            "strategyIndicationTypes": [
+              "MA_Cross"
+            ],
+            "strategyTrendDcaEnabled": true,
+            "strategySarDcaEnabled": true,
+            "strategyRsiContinuationDcaEnabled": true,
+            "strategyBreakoutContinuationDcaEnabled": true,
+            "strategyTrendRecoveryDcaEnabled": true,
+            "strategyBreakoutRecoveryDcaEnabled": true,
+            "strategySar04DcaEnabled": true
+          }
+        }
+      },
+      "aggregates": {
+        "breakout-continuation-dca-v1": {
+          "base": {
+            "n": 251,
+            "p": 97.94771125601994,
+            "l": 80.7051403038934,
+            "netUsd": -0.017814136659980464,
+            "feesUsd": 0.08019000000000001,
+            "pf": 1.2136489805630724,
+            "state": "finite"
+          },
+          "main": {
+            "n": 86,
+            "p": 44.507821246982914,
+            "l": 19.104440725778378,
+            "netUsd": 0.04316888326751982,
+            "feesUsd": 0.027940000000000017,
+            "pf": 2.32971076650921,
+            "state": "finite"
+          },
+          "real": {
+            "n": 15,
+            "p": 14.787007082091032,
+            "l": 2.2724922705767483,
+            "netUsd": 0.03186187222149923,
+            "feesUsd": 0.005060000000000002,
+            "pf": 6.506955941521489,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 3,
+            "p": 2.917805289495181,
+            "l": 0.16701012078696884,
+            "netUsd": 0.0065177677996338095,
+            "feesUsd": 0.0009900000000000002,
+            "pf": 17.470829167395262,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 3,
+            "p": 2.917805289495181,
+            "l": 0.16701012078696884,
+            "netUsd": 0.0065177677996338095,
+            "feesUsd": 0.0009900000000000002,
+            "pf": 17.470829167395262,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "ATOM-USDT"
+          ]
+        },
+        "breakout-continuation-dca-v1/Break_Continuation/20/12/0.8/fixed": {
+          "base": {
+            "n": 251,
+            "p": 97.94771125601994,
+            "l": 80.7051403038934,
+            "netUsd": -0.017814136659980464,
+            "feesUsd": 0.08019000000000001,
+            "pf": 1.2136489805630724,
+            "state": "finite"
+          },
+          "main": {
+            "n": 86,
+            "p": 44.507821246982914,
+            "l": 19.104440725778378,
+            "netUsd": 0.04316888326751982,
+            "feesUsd": 0.027940000000000017,
+            "pf": 2.32971076650921,
+            "state": "finite"
+          },
+          "real": {
+            "n": 15,
+            "p": 14.787007082091032,
+            "l": 2.2724922705767483,
+            "netUsd": 0.03186187222149923,
+            "feesUsd": 0.005060000000000002,
+            "pf": 6.506955941521489,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 3,
+            "p": 2.917805289495181,
+            "l": 0.16701012078696884,
+            "netUsd": 0.0065177677996338095,
+            "feesUsd": 0.0009900000000000002,
+            "pf": 17.470829167395262,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 3,
+            "p": 2.917805289495181,
+            "l": 0.16701012078696884,
+            "netUsd": 0.0065177677996338095,
+            "feesUsd": 0.0009900000000000002,
+            "pf": 17.470829167395262,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "ATOM-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1": {
+          "base": {
+            "n": 1012,
+            "p": 278.92554008351067,
+            "l": 290.14887404290556,
+            "netUsd": -0.2800057806815499,
+            "feesUsd": 0.3085500000000001,
+            "pf": 0.9613187057974409,
+            "state": "finite"
+          },
+          "main": {
+            "n": 320,
+            "p": 97.84750489660117,
+            "l": 85.31592207007363,
+            "netUsd": -0.09132473920786943,
+            "feesUsd": 0.10604000000000001,
+            "pf": 1.14688445629451,
+            "state": "finite"
+          },
+          "real": {
+            "n": 36,
+            "p": 11.87709393470481,
+            "l": 10.087159707600136,
+            "netUsd": -0.011969307990905332,
+            "feesUsd": 0.012100000000000005,
+            "pf": 1.177446801576469,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 2,
+            "p": 0,
+            "l": 1.6186830205975984,
+            "netUsd": -0.006062838850043121,
+            "feesUsd": 0.0007700000000000003,
+            "pf": 0,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 2,
+            "p": 0,
+            "l": 1.6186830205975984,
+            "netUsd": -0.006062838850043121,
+            "feesUsd": 0.0007700000000000003,
+            "pf": 0,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AVAX-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1/Break_Retest/10/12/0.8/fixed": {
+          "base": {
+            "n": 1012,
+            "p": 278.92554008351067,
+            "l": 290.14887404290556,
+            "netUsd": -0.2800057806815499,
+            "feesUsd": 0.3085500000000001,
+            "pf": 0.9613187057974409,
+            "state": "finite"
+          },
+          "main": {
+            "n": 320,
+            "p": 97.84750489660117,
+            "l": 85.31592207007363,
+            "netUsd": -0.09132473920786943,
+            "feesUsd": 0.10604000000000001,
+            "pf": 1.14688445629451,
+            "state": "finite"
+          },
+          "real": {
+            "n": 36,
+            "p": 11.87709393470481,
+            "l": 10.087159707600136,
+            "netUsd": -0.011969307990905332,
+            "feesUsd": 0.012100000000000005,
+            "pf": 1.177446801576469,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 2,
+            "p": 0,
+            "l": 1.6186830205975984,
+            "netUsd": -0.006062838850043121,
+            "feesUsd": 0.0007700000000000003,
+            "pf": 0,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 2,
+            "p": 0,
+            "l": 1.6186830205975984,
+            "netUsd": -0.006062838850043121,
+            "feesUsd": 0.0007700000000000003,
+            "pf": 0,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AVAX-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1": {
+          "base": {
+            "n": 593,
+            "p": 160.87547012494377,
+            "l": 206.91404033024898,
+            "netUsd": -0.26944709007147166,
+            "feesUsd": 0.18139,
+            "pf": 0.7774990516263445,
+            "state": "finite"
+          },
+          "main": {
+            "n": 108,
+            "p": 25.534927811733795,
+            "l": 33.73916467312297,
+            "netUsd": -0.06234653322014347,
+            "feesUsd": 0.036300000000000006,
+            "pf": 0.7568334325738428,
+            "state": "finite"
+          },
+          "real": {
+            "n": 5,
+            "p": 0,
+            "l": 2.557311924460477,
+            "netUsd": -0.009352667440054247,
+            "feesUsd": 0.0018700000000000006,
+            "pf": 0,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "rsi-continuation-dca-v1/rsi-mom-5-35/20/8/1.2/fixed": {
+          "base": {
+            "n": 459,
+            "p": 96.53962627250615,
+            "l": 141.42379617968754,
+            "netUsd": -0.21975338601553876,
+            "feesUsd": 0.13772,
+            "pf": 0.6826264665519703,
+            "state": "finite"
+          },
+          "main": {
+            "n": 93,
+            "p": 18.996662572784498,
+            "l": 28.779271570762454,
+            "netUsd": -0.06031987663049908,
+            "feesUsd": 0.03102000000000001,
+            "pf": 0.6600814244403482,
+            "state": "finite"
+          },
+          "real": {
+            "n": 5,
+            "p": 0,
+            "l": 2.557311924460477,
+            "netUsd": -0.009352667440054247,
+            "feesUsd": 0.0018700000000000006,
+            "pf": 0,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "rsi-continuation-dca-v1/rsi-mom-8-35-follow/20/18/1.2/fixed": {
+          "base": {
+            "n": 134,
+            "p": 64.33584385243763,
+            "l": 65.4902441505614,
+            "netUsd": -0.049693704055932916,
+            "feesUsd": 0.043670000000000014,
+            "pf": 0.9823729425184337,
+            "state": "finite"
+          },
+          "main": {
+            "n": 15,
+            "p": 6.5382652389492995,
+            "l": 4.959893102360517,
+            "netUsd": -0.002026656589644384,
+            "feesUsd": 0.005280000000000003,
+            "pf": 1.3182270472397082,
+            "state": "finite"
+          },
+          "real": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "sar-af04-dca-v1": {
+          "base": {
+            "n": 450,
+            "p": 111.8525707281095,
+            "l": 149.7017011666452,
+            "netUsd": -0.2345078267490201,
+            "feesUsd": 0.13937000000000002,
+            "pf": 0.7471696704608404,
+            "state": "finite"
+          },
+          "main": {
+            "n": 107,
+            "p": 26.936708459500206,
+            "l": 26.567267622766654,
+            "netUsd": -0.03663473868786855,
+            "feesUsd": 0.03432000000000001,
+            "pf": 1.0139058649906836,
+            "state": "finite"
+          },
+          "real": {
+            "n": 13,
+            "p": 1.484842918606972,
+            "l": 4.22705643061101,
+            "netUsd": -0.012830443364190853,
+            "feesUsd": 0.004290000000000001,
+            "pf": 0.35127113701492313,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "sar-af04-dca-v1/parabolic-sar-0.04-0.1/20/12/0.8/fixed": {
+          "base": {
+            "n": 450,
+            "p": 111.8525707281095,
+            "l": 149.7017011666452,
+            "netUsd": -0.2345078267490201,
+            "feesUsd": 0.13937000000000002,
+            "pf": 0.7471696704608404,
+            "state": "finite"
+          },
+          "main": {
+            "n": 107,
+            "p": 26.936708459500206,
+            "l": 26.567267622766654,
+            "netUsd": -0.03663473868786855,
+            "feesUsd": 0.03432000000000001,
+            "pf": 1.0139058649906836,
+            "state": "finite"
+          },
+          "real": {
+            "n": 13,
+            "p": 1.484842918606972,
+            "l": 4.22705643061101,
+            "netUsd": -0.012830443364190853,
+            "feesUsd": 0.004290000000000001,
+            "pf": 0.35127113701492313,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "sar-dca-v1": {
+          "base": {
+            "n": 897,
+            "p": 248.45307356106747,
+            "l": 296.562545779528,
+            "netUsd": -0.3997850860899297,
+            "feesUsd": 0.27786000000000005,
+            "pf": 0.8377763041789291,
+            "state": "finite"
+          },
+          "main": {
+            "n": 252,
+            "p": 66.94428887811648,
+            "l": 84.70641558368524,
+            "netUsd": -0.1626686060680675,
+            "feesUsd": 0.08404000000000003,
+            "pf": 0.7903095464118564,
+            "state": "finite"
+          },
+          "real": {
+            "n": 27,
+            "p": 6.329067768407618,
+            "l": 6.422816883278975,
+            "netUsd": -0.010646983171644187,
+            "feesUsd": 0.008690000000000003,
+            "pf": 0.9854037384881045,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 4,
+            "p": 1.5266201979915446,
+            "l": 0.0517679257735249,
+            "netUsd": 0.0029497045444360397,
+            "feesUsd": 0.0008800000000000002,
+            "pf": 29.489692221207115,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 4,
+            "p": 1.5266201979915446,
+            "l": 0.0517679257735249,
+            "netUsd": 0.0029497045444360397,
+            "feesUsd": 0.0008800000000000002,
+            "pf": 29.489692221207115,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT"
+          ]
+        },
+        "sar-dca-v1/parabolic-sar-0.01-0.15/20/12/1.2/fixed": {
+          "base": {
+            "n": 484,
+            "p": 149.85220319152586,
+            "l": 144.4454748976973,
+            "netUsd": -0.11414561004092752,
+            "feesUsd": 0.14663000000000004,
+            "pf": 1.0374309288515813,
+            "state": "finite"
+          },
+          "main": {
+            "n": 169,
+            "p": 49.12940142473965,
+            "l": 53.65174395623945,
+            "netUsd": -0.08345576839023396,
+            "feesUsd": 0.055660000000000015,
+            "pf": 0.9157093097441826,
+            "state": "finite"
+          },
+          "real": {
+            "n": 25,
+            "p": 6.0924473178010485,
+            "l": 6.203790228552722,
+            "netUsd": -0.010244117453952314,
+            "feesUsd": 0.008030000000000002,
+            "pf": 0.9820524378404637,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 4,
+            "p": 1.5266201979915446,
+            "l": 0.0517679257735249,
+            "netUsd": 0.0029497045444360397,
+            "feesUsd": 0.0008800000000000002,
+            "pf": 29.489692221207115,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 4,
+            "p": 1.5266201979915446,
+            "l": 0.0517679257735249,
+            "netUsd": 0.0029497045444360397,
+            "feesUsd": 0.0008800000000000002,
+            "pf": 29.489692221207115,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT"
+          ]
+        },
+        "sar-dca-v1/sar-fast/20/12/1.2/fixed": {
+          "base": {
+            "n": 413,
+            "p": 98.60087036954152,
+            "l": 152.11707088183076,
+            "netUsd": -0.2856394760490022,
+            "feesUsd": 0.13123000000000007,
+            "pf": 0.6481906981113101,
+            "state": "finite"
+          },
+          "main": {
+            "n": 83,
+            "p": 17.814887453376834,
+            "l": 31.0546716274458,
+            "netUsd": -0.07921283767783352,
+            "feesUsd": 0.028380000000000013,
+            "pf": 0.5736620778701849,
+            "state": "finite"
+          },
+          "real": {
+            "n": 2,
+            "p": 0.2366204506065696,
+            "l": 0.21902665472625302,
+            "netUsd": -0.0004028657176918728,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 1.0803271907809846,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-dca-v1": {
+          "base": {
+            "n": 452,
+            "p": 144.65486379737172,
+            "l": 151.80342231525321,
+            "netUsd": -0.1220571741953224,
+            "feesUsd": 0.14432000000000006,
+            "pf": 0.9529091083135403,
+            "state": "finite"
+          },
+          "main": {
+            "n": 125,
+            "p": 37.11159969055445,
+            "l": 44.92282174918694,
+            "netUsd": -0.06568274651107028,
+            "feesUsd": 0.04455000000000001,
+            "pf": 0.8261190692284626,
+            "state": "finite"
+          },
+          "real": {
+            "n": 9,
+            "p": 3.4924863446271512,
+            "l": 5.391766439334427,
+            "netUsd": -0.013990487899887973,
+            "feesUsd": 0.003630000000000001,
+            "pf": 0.6477443679957087,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-dca-v1/Trend/10/12/1.2/fixed": {
+          "base": {
+            "n": 452,
+            "p": 144.65486379737172,
+            "l": 151.80342231525321,
+            "netUsd": -0.1220571741953224,
+            "feesUsd": 0.14432000000000006,
+            "pf": 0.9529091083135403,
+            "state": "finite"
+          },
+          "main": {
+            "n": 125,
+            "p": 37.11159969055445,
+            "l": 44.92282174918694,
+            "netUsd": -0.06568274651107028,
+            "feesUsd": 0.04455000000000001,
+            "pf": 0.8261190692284626,
+            "state": "finite"
+          },
+          "real": {
+            "n": 9,
+            "p": 3.4924863446271512,
+            "l": 5.391766439334427,
+            "netUsd": -0.013990487899887973,
+            "feesUsd": 0.003630000000000001,
+            "pf": 0.6477443679957087,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-recovery-dca-v1": {
+          "base": {
+            "n": 988,
+            "p": 213.04927477326532,
+            "l": 280.34581799828123,
+            "netUsd": -0.40368578991361037,
+            "feesUsd": 0.29238000000000014,
+            "pf": 0.759951677875828,
+            "state": "finite"
+          },
+          "main": {
+            "n": 245,
+            "p": 52.628580329028644,
+            "l": 67.09438336343334,
+            "netUsd": -0.10647108684954668,
+            "feesUsd": 0.07733,
+            "pf": 0.7843962145676623,
+            "state": "finite"
+          },
+          "real": {
+            "n": 4,
+            "p": 1.0175973870406252,
+            "l": 1.4119261327944328,
+            "netUsd": -0.0033001096646963738,
+            "feesUsd": 0.0013200000000000004,
+            "pf": 0.7207157395880431,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-recovery-dca-v1/Trend_Efficiency/10/8/0.8/fixed": {
+          "base": {
+            "n": 988,
+            "p": 213.04927477326532,
+            "l": 280.34581799828123,
+            "netUsd": -0.40368578991361037,
+            "feesUsd": 0.29238000000000014,
+            "pf": 0.759951677875828,
+            "state": "finite"
+          },
+          "main": {
+            "n": 245,
+            "p": 52.628580329028644,
+            "l": 67.09438336343334,
+            "netUsd": -0.10647108684954668,
+            "feesUsd": 0.07733,
+            "pf": 0.7843962145676623,
+            "state": "finite"
+          },
+          "real": {
+            "n": 4,
+            "p": 1.0175973870406252,
+            "l": 1.4119261327944328,
+            "netUsd": -0.0033001096646963738,
+            "feesUsd": 0.0013200000000000004,
+            "pf": 0.7207157395880431,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        }
+      }
+    },
+    "public-a": {
+      "feed": "public",
+      "from": "2026-11-08T00:00:00Z",
+      "to": "2026-11-15T00:00:00Z",
+      "label": "08.–15.11. BingX",
+      "symbols": 20,
+      "scenario": {
+        "tapeMinutes": 28800,
+        "warmupMinutes": 18720,
+        "fitMinutes": 0,
+        "groupSources": true,
+        "settings": {
+          "stageGateMode": "exec-branches",
+          "catalog": {
+            "strategyEnabledRanges": [],
+            "strategyTpSteps": [],
+            "strategyIndicationTypes": [
+              "MA_Cross"
+            ],
+            "strategyTrendDcaEnabled": true,
+            "strategySarDcaEnabled": true,
+            "strategyRsiContinuationDcaEnabled": true,
+            "strategyBreakoutContinuationDcaEnabled": true,
+            "strategyTrendRecoveryDcaEnabled": true,
+            "strategyBreakoutRecoveryDcaEnabled": true,
+            "strategySar04DcaEnabled": true
+          }
+        }
+      },
+      "aggregates": {
+        "breakout-continuation-dca-v1": {
+          "base": {
+            "n": 848,
+            "p": 360.99037437447413,
+            "l": 302.2804892044595,
+            "netUsd": -0.06223790334947385,
+            "feesUsd": 0.2700500000000001,
+            "pf": 1.1942232041655318,
+            "state": "finite"
+          },
+          "main": {
+            "n": 318,
+            "p": 171.43117938366868,
+            "l": 110.95766405273574,
+            "netUsd": 0.05195938642303924,
+            "feesUsd": 0.10934000000000005,
+            "pf": 1.5450143155698663,
+            "state": "finite"
+          },
+          "real": {
+            "n": 89,
+            "p": 54.93185524401735,
+            "l": 31.354426358404105,
+            "netUsd": 0.03754951938868968,
+            "feesUsd": 0.030910000000000007,
+            "pf": 1.751964925656937,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 7,
+            "p": 4.601425040144412,
+            "l": 3.637734335173065,
+            "netUsd": 0.003157481063005377,
+            "feesUsd": 0.0024200000000000007,
+            "pf": 1.264915086198976,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 7,
+            "p": 4.601425040144412,
+            "l": 3.637734335173065,
+            "netUsd": 0.003157481063005377,
+            "feesUsd": 0.0024200000000000007,
+            "pf": 1.264915086198976,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "OP-USDT",
+            "UNI-USDT"
+          ]
+        },
+        "breakout-continuation-dca-v1/Break_Continuation/20/12/0.8/fixed": {
+          "base": {
+            "n": 848,
+            "p": 360.99037437447413,
+            "l": 302.2804892044595,
+            "netUsd": -0.06223790334947385,
+            "feesUsd": 0.2700500000000001,
+            "pf": 1.1942232041655318,
+            "state": "finite"
+          },
+          "main": {
+            "n": 318,
+            "p": 171.43117938366868,
+            "l": 110.95766405273574,
+            "netUsd": 0.05195938642303924,
+            "feesUsd": 0.10934000000000005,
+            "pf": 1.5450143155698663,
+            "state": "finite"
+          },
+          "real": {
+            "n": 89,
+            "p": 54.93185524401735,
+            "l": 31.354426358404105,
+            "netUsd": 0.03754951938868968,
+            "feesUsd": 0.030910000000000007,
+            "pf": 1.751964925656937,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 7,
+            "p": 4.601425040144412,
+            "l": 3.637734335173065,
+            "netUsd": 0.003157481063005377,
+            "feesUsd": 0.0024200000000000007,
+            "pf": 1.264915086198976,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 7,
+            "p": 4.601425040144412,
+            "l": 3.637734335173065,
+            "netUsd": 0.003157481063005377,
+            "feesUsd": 0.0024200000000000007,
+            "pf": 1.264915086198976,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "OP-USDT",
+            "UNI-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1": {
+          "base": {
+            "n": 1971,
+            "p": 775.9709858423621,
+            "l": 651.2945009550689,
+            "netUsd": -0.23142556046736917,
+            "feesUsd": 0.6252399999999999,
+            "pf": 1.1914287387724993,
+            "state": "finite"
+          },
+          "main": {
+            "n": 779,
+            "p": 346.1466913599194,
+            "l": 236.78537823809248,
+            "netUsd": 0.0073281330528444585,
+            "feesUsd": 0.26532000000000006,
+            "pf": 1.46185838811323,
+            "state": "finite"
+          },
+          "real": {
+            "n": 135,
+            "p": 63.863815482847755,
+            "l": 46.82893348193747,
+            "netUsd": 0.0007903890478757822,
+            "feesUsd": 0.045870000000000015,
+            "pf": 1.3637683101939715,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 4,
+            "p": 1.2276427216550085,
+            "l": 0.45061459342508636,
+            "netUsd": 0.0020303050845090556,
+            "feesUsd": 0.0014300000000000003,
+            "pf": 2.7243740872300473,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 4,
+            "p": 1.2276427216550085,
+            "l": 0.45061459342508636,
+            "netUsd": 0.0020303050845090556,
+            "feesUsd": 0.0014300000000000003,
+            "pf": 2.7243740872300473,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "DOT-USDT",
+            "XRP-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1/Break_Retest/10/12/0.8/fixed": {
+          "base": {
+            "n": 1971,
+            "p": 775.9709858423621,
+            "l": 651.2945009550689,
+            "netUsd": -0.23142556046736917,
+            "feesUsd": 0.6252399999999999,
+            "pf": 1.1914287387724993,
+            "state": "finite"
+          },
+          "main": {
+            "n": 779,
+            "p": 346.1466913599194,
+            "l": 236.78537823809248,
+            "netUsd": 0.0073281330528444585,
+            "feesUsd": 0.26532000000000006,
+            "pf": 1.46185838811323,
+            "state": "finite"
+          },
+          "real": {
+            "n": 135,
+            "p": 63.863815482847755,
+            "l": 46.82893348193747,
+            "netUsd": 0.0007903890478757822,
+            "feesUsd": 0.045870000000000015,
+            "pf": 1.3637683101939715,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 4,
+            "p": 1.2276427216550085,
+            "l": 0.45061459342508636,
+            "netUsd": 0.0020303050845090556,
+            "feesUsd": 0.0014300000000000003,
+            "pf": 2.7243740872300473,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 4,
+            "p": 1.2276427216550085,
+            "l": 0.45061459342508636,
+            "netUsd": 0.0020303050845090556,
+            "feesUsd": 0.0014300000000000003,
+            "pf": 2.7243740872300473,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "DOT-USDT",
+            "XRP-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1": {
+          "base": {
+            "n": 1888,
+            "p": 990.7373829928748,
+            "l": 693.0640568416652,
+            "netUsd": 0.3406618180369607,
+            "feesUsd": 0.58157,
+            "pf": 1.429503338418277,
+            "state": "finite"
+          },
+          "main": {
+            "n": 696,
+            "p": 437.781499051957,
+            "l": 245.94076435792562,
+            "netUsd": 0.2983492337361077,
+            "feesUsd": 0.24420000000000006,
+            "pf": 1.780028212056946,
+            "state": "finite"
+          },
+          "real": {
+            "n": 142,
+            "p": 95.91127573114188,
+            "l": 49.94495004320356,
+            "netUsd": 0.08419990688903944,
+            "feesUsd": 0.04928000000000001,
+            "pf": 1.9203398070911346,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 28,
+            "p": 15.66953691694789,
+            "l": 7.905018547738443,
+            "netUsd": 0.013935305338796982,
+            "feesUsd": 0.009460000000000003,
+            "pf": 1.9822264580809628,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 20,
+            "p": 11.508994160841866,
+            "l": 4.8022414747898985,
+            "netUsd": 0.013043603516374989,
+            "feesUsd": 0.006490000000000002,
+            "pf": 2.396587972774816,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "NEAR-USDT",
+            "UNI-USDT",
+            "XRP-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1/rsi-mom-5-35/20/8/1.2/fixed": {
+          "base": {
+            "n": 1155,
+            "p": 356.48554270640585,
+            "l": 323.53177368923974,
+            "netUsd": -0.17349880564590262,
+            "feesUsd": 0.34628000000000014,
+            "pf": 1.101856360633126,
+            "state": "finite"
+          },
+          "main": {
+            "n": 386,
+            "p": 144.50640030338477,
+            "l": 102.18971189879545,
+            "netUsd": -0.007847548246092044,
+            "feesUsd": 0.12936000000000003,
+            "pf": 1.4140993023495168,
+            "state": "finite"
+          },
+          "real": {
+            "n": 85,
+            "p": 37.22573289132365,
+            "l": 21.050650579009954,
+            "netUsd": 0.0157178006773121,
+            "feesUsd": 0.02816000000000001,
+            "pf": 1.7683887132895653,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 23,
+            "p": 11.544286867932358,
+            "l": 5.382456160561443,
+            "netUsd": 0.012555433551335968,
+            "feesUsd": 0.007700000000000004,
+            "pf": 2.144799051503687,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 15,
+            "p": 7.383744111826333,
+            "l": 2.279679087612899,
+            "netUsd": 0.011663731728913971,
+            "feesUsd": 0.0047300000000000016,
+            "pf": 3.238940143789278,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "NEAR-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1/rsi-mom-8-35-follow/20/18/1.2/fixed": {
+          "base": {
+            "n": 733,
+            "p": 634.251840286469,
+            "l": 369.5322831524254,
+            "netUsd": 0.5141606236828634,
+            "feesUsd": 0.23529000000000003,
+            "pf": 1.7163638177313227,
+            "state": "finite"
+          },
+          "main": {
+            "n": 310,
+            "p": 293.27509874857225,
+            "l": 143.75105245913014,
+            "netUsd": 0.30619678198219974,
+            "feesUsd": 0.11484000000000004,
+            "pf": 2.040159663053273,
+            "state": "finite"
+          },
+          "real": {
+            "n": 57,
+            "p": 58.685542839818226,
+            "l": 28.8942994641936,
+            "netUsd": 0.06848210621172736,
+            "feesUsd": 0.021120000000000007,
+            "pf": 2.031042244597158,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 5,
+            "p": 4.1252500490155315,
+            "l": 2.5225623871769995,
+            "netUsd": 0.001379871787461016,
+            "feesUsd": 0.0017600000000000005,
+            "pf": 1.6353411396227548,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 5,
+            "p": 4.1252500490155315,
+            "l": 2.5225623871769995,
+            "netUsd": 0.001379871787461016,
+            "feesUsd": 0.0017600000000000005,
+            "pf": 1.6353411396227548,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "XRP-USDT"
+          ]
+        },
+        "sar-af04-dca-v1": {
+          "base": {
+            "n": 1284,
+            "p": 538.6051456559426,
+            "l": 363.3584970747501,
+            "netUsd": 0.07932084834455237,
+            "feesUsd": 0.38258000000000025,
+            "pf": 1.4822968225376072,
+            "state": "finite"
+          },
+          "main": {
+            "n": 510,
+            "p": 260.230505475053,
+            "l": 148.87281267049738,
+            "netUsd": 0.0655617546717702,
+            "feesUsd": 0.16500000000000004,
+            "pf": 1.7480055680215125,
+            "state": "finite"
+          },
+          "real": {
+            "n": 131,
+            "p": 74.9442490867239,
+            "l": 41.992784021774355,
+            "netUsd": 0.010717071902699292,
+            "feesUsd": 0.04114000000000001,
+            "pf": 1.7846935094339864,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 8,
+            "p": 3.9562288858762233,
+            "l": 2.8911603118110665,
+            "netUsd": -0.002543232599777634,
+            "feesUsd": 0.002640000000000001,
+            "pf": 1.3683879339772695,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 8,
+            "p": 3.9562288858762233,
+            "l": 2.8911603118110665,
+            "netUsd": -0.002543232599777634,
+            "feesUsd": 0.002640000000000001,
+            "pf": 1.3683879339772695,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "UNI-USDT"
+          ]
+        },
+        "sar-af04-dca-v1/parabolic-sar-0.04-0.1/20/12/0.8/fixed": {
+          "base": {
+            "n": 1284,
+            "p": 538.6051456559426,
+            "l": 363.3584970747501,
+            "netUsd": 0.07932084834455237,
+            "feesUsd": 0.38258000000000025,
+            "pf": 1.4822968225376072,
+            "state": "finite"
+          },
+          "main": {
+            "n": 510,
+            "p": 260.230505475053,
+            "l": 148.87281267049738,
+            "netUsd": 0.0655617546717702,
+            "feesUsd": 0.16500000000000004,
+            "pf": 1.7480055680215125,
+            "state": "finite"
+          },
+          "real": {
+            "n": 131,
+            "p": 74.9442490867239,
+            "l": 41.992784021774355,
+            "netUsd": 0.010717071902699292,
+            "feesUsd": 0.04114000000000001,
+            "pf": 1.7846935094339864,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 8,
+            "p": 3.9562288858762233,
+            "l": 2.8911603118110665,
+            "netUsd": -0.002543232599777634,
+            "feesUsd": 0.002640000000000001,
+            "pf": 1.3683879339772695,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 8,
+            "p": 3.9562288858762233,
+            "l": 2.8911603118110665,
+            "netUsd": -0.002543232599777634,
+            "feesUsd": 0.002640000000000001,
+            "pf": 1.3683879339772695,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "UNI-USDT"
+          ]
+        },
+        "sar-dca-v1": {
+          "base": {
+            "n": 2646,
+            "p": 1134.3439304032884,
+            "l": 802.0779665320172,
+            "netUsd": 0.06681752580137627,
+            "feesUsd": 0.8015699999999993,
+            "pf": 1.414256441063835,
+            "state": "finite"
+          },
+          "main": {
+            "n": 1056,
+            "p": 533.1963327971944,
+            "l": 293.8569710132456,
+            "netUsd": 0.25080275118946904,
+            "feesUsd": 0.3523300000000001,
+            "pf": 1.814475698700238,
+            "state": "finite"
+          },
+          "real": {
+            "n": 277,
+            "p": 162.1149848034752,
+            "l": 77.6820643341704,
+            "netUsd": 0.13455406932944425,
+            "feesUsd": 0.09273000000000002,
+            "pf": 2.0869036655114335,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 31,
+            "p": 20.70059264883372,
+            "l": 12.57095519370366,
+            "netUsd": 0.007645486803616582,
+            "feesUsd": 0.011000000000000005,
+            "pf": 1.6467000581787057,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 28,
+            "p": 20.636326020892973,
+            "l": 8.501561273593218,
+            "netUsd": 0.023794529228176858,
+            "feesUsd": 0.009900000000000004,
+            "pf": 2.4273572061394963,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "AVAX-USDT",
+            "BCH-USDT",
+            "DOGE-USDT",
+            "OP-USDT",
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-dca-v1/parabolic-sar-0.01-0.15/20/12/1.2/fixed": {
+          "base": {
+            "n": 1216,
+            "p": 471.5304608233693,
+            "l": 410.71724650843703,
+            "netUsd": -0.2578560059195424,
+            "feesUsd": 0.3725700000000001,
+            "pf": 1.1480658892021547,
+            "state": "finite"
+          },
+          "main": {
+            "n": 432,
+            "p": 178.57863393160213,
+            "l": 143.91651644972566,
+            "netUsd": -0.10845998216039124,
+            "feesUsd": 0.14751000000000003,
+            "pf": 1.2408487805080035,
+            "state": "finite"
+          },
+          "real": {
+            "n": 90,
+            "p": 31.62793075357234,
+            "l": 30.24701726522191,
+            "netUsd": -0.028821915469290547,
+            "feesUsd": 0.03135000000000001,
+            "pf": 1.0456545343377777,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 2,
+            "p": 0,
+            "l": 1.0697660719737163,
+            "netUsd": -0.004279064287894865,
+            "feesUsd": 0.0008800000000000002,
+            "pf": 0,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 2,
+            "p": 0,
+            "l": 1.0697660719737163,
+            "netUsd": -0.004279064287894865,
+            "feesUsd": 0.0008800000000000002,
+            "pf": 0,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "SUI-USDT"
+          ]
+        },
+        "sar-dca-v1/sar-fast/20/12/1.2/fixed": {
+          "base": {
+            "n": 1430,
+            "p": 662.8134695799195,
+            "l": 391.3607200235802,
+            "netUsd": 0.3246735317209189,
+            "feesUsd": 0.4290000000000002,
+            "pf": 1.6936126587767513,
+            "state": "finite"
+          },
+          "main": {
+            "n": 624,
+            "p": 354.6176988655922,
+            "l": 149.94045456351992,
+            "netUsd": 0.3592627333498602,
+            "feesUsd": 0.20482,
+            "pf": 2.3650568480527316,
+            "state": "finite"
+          },
+          "real": {
+            "n": 187,
+            "p": 130.48705404990287,
+            "l": 47.435047068948506,
+            "netUsd": 0.16337598479873477,
+            "feesUsd": 0.06138000000000002,
+            "pf": 2.750857480129309,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 29,
+            "p": 20.70059264883372,
+            "l": 11.501189121729944,
+            "netUsd": 0.011924551091511453,
+            "feesUsd": 0.010120000000000002,
+            "pf": 1.7998654251952735,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 26,
+            "p": 20.636326020892973,
+            "l": 7.431795201619504,
+            "netUsd": 0.028073593516071728,
+            "feesUsd": 0.009020000000000002,
+            "pf": 2.776761934504868,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "AVAX-USDT",
+            "BCH-USDT",
+            "DOGE-USDT",
+            "OP-USDT",
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "trend-dca-v1": {
+          "base": {
+            "n": 1166,
+            "p": 494.8047267883576,
+            "l": 388.47780417806644,
+            "netUsd": 0.013914420376890006,
+            "feesUsd": 0.36993000000000015,
+            "pf": 1.2737014096217298,
+            "state": "finite"
+          },
+          "main": {
+            "n": 480,
+            "p": 252.80293827192293,
+            "l": 165.3818493908648,
+            "netUsd": 0.090276164772953,
+            "feesUsd": 0.17303000000000002,
+            "pf": 1.5286014710988411,
+            "state": "finite"
+          },
+          "real": {
+            "n": 115,
+            "p": 80.8246319455666,
+            "l": 35.44358500056214,
+            "netUsd": 0.11131269192991997,
+            "feesUsd": 0.04246000000000002,
+            "pf": 2.2803740632976237,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 23,
+            "p": 16.321003194474464,
+            "l": 11.28149499130284,
+            "netUsd": 0.017861488487953894,
+            "feesUsd": 0.009790000000000004,
+            "pf": 1.4467057076262229,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 20,
+            "p": 13.723578651598407,
+            "l": 9.450422288206465,
+            "netUsd": 0.014796081128835174,
+            "feesUsd": 0.008470000000000004,
+            "pf": 1.4521656528221574,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "ADA-USDT",
+            "BCH-USDT",
+            "NEAR-USDT",
+            "OP-USDT",
+            "UNI-USDT"
+          ]
+        },
+        "trend-dca-v1/Trend/10/12/1.2/fixed": {
+          "base": {
+            "n": 1166,
+            "p": 494.8047267883576,
+            "l": 388.47780417806644,
+            "netUsd": 0.013914420376890006,
+            "feesUsd": 0.36993000000000015,
+            "pf": 1.2737014096217298,
+            "state": "finite"
+          },
+          "main": {
+            "n": 480,
+            "p": 252.80293827192293,
+            "l": 165.3818493908648,
+            "netUsd": 0.090276164772953,
+            "feesUsd": 0.17303000000000002,
+            "pf": 1.5286014710988411,
+            "state": "finite"
+          },
+          "real": {
+            "n": 115,
+            "p": 80.8246319455666,
+            "l": 35.44358500056214,
+            "netUsd": 0.11131269192991997,
+            "feesUsd": 0.04246000000000002,
+            "pf": 2.2803740632976237,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 23,
+            "p": 16.321003194474464,
+            "l": 11.28149499130284,
+            "netUsd": 0.017861488487953894,
+            "feesUsd": 0.009790000000000004,
+            "pf": 1.4467057076262229,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 20,
+            "p": 13.723578651598407,
+            "l": 9.450422288206465,
+            "netUsd": 0.014796081128835174,
+            "feesUsd": 0.008470000000000004,
+            "pf": 1.4521656528221574,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "ADA-USDT",
+            "BCH-USDT",
+            "NEAR-USDT",
+            "OP-USDT",
+            "UNI-USDT"
+          ]
+        },
+        "trend-recovery-dca-v1": {
+          "base": {
+            "n": 2536,
+            "p": 709.68324149012,
+            "l": 765.6312540880389,
+            "netUsd": -0.6614482312658985,
+            "feesUsd": 0.7782499999999988,
+            "pf": 0.9269256416856182,
+            "state": "finite"
+          },
+          "main": {
+            "n": 884,
+            "p": 282.5688266177156,
+            "l": 282.8507262255458,
+            "netUsd": -0.17615935515067044,
+            "feesUsd": 0.28556000000000004,
+            "pf": 0.9990033626160626,
+            "state": "finite"
+          },
+          "real": {
+            "n": 103,
+            "p": 46.68570366399078,
+            "l": 34.519973840817556,
+            "netUsd": 0.0031669507778353326,
+            "feesUsd": 0.03278000000000001,
+            "pf": 1.3524258123506474,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 2,
+            "p": 1.1159059411628958,
+            "l": 0.007312533359778602,
+            "netUsd": 0.003325780223409352,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 152.6018256956959,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 2,
+            "p": 1.1159059411628958,
+            "l": 0.007312533359778602,
+            "netUsd": 0.003325780223409352,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 152.6018256956959,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "UNI-USDT"
+          ]
+        },
+        "trend-recovery-dca-v1/Trend_Efficiency/10/8/0.8/fixed": {
+          "base": {
+            "n": 2536,
+            "p": 709.68324149012,
+            "l": 765.6312540880389,
+            "netUsd": -0.6614482312658985,
+            "feesUsd": 0.7782499999999988,
+            "pf": 0.9269256416856182,
+            "state": "finite"
+          },
+          "main": {
+            "n": 884,
+            "p": 282.5688266177156,
+            "l": 282.8507262255458,
+            "netUsd": -0.17615935515067044,
+            "feesUsd": 0.28556000000000004,
+            "pf": 0.9990033626160626,
+            "state": "finite"
+          },
+          "real": {
+            "n": 103,
+            "p": 46.68570366399078,
+            "l": 34.519973840817556,
+            "netUsd": 0.0031669507778353326,
+            "feesUsd": 0.03278000000000001,
+            "pf": 1.3524258123506474,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 2,
+            "p": 1.1159059411628958,
+            "l": 0.007312533359778602,
+            "netUsd": 0.003325780223409352,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 152.6018256956959,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 2,
+            "p": 1.1159059411628958,
+            "l": 0.007312533359778602,
+            "netUsd": 0.003325780223409352,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 152.6018256956959,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "UNI-USDT"
+          ]
+        }
+      }
+    },
+    "public-b": {
+      "feed": "public",
+      "from": "2026-11-15T00:00:00Z",
+      "to": "2026-11-18T00:00:00Z",
+      "label": "15.–18.11. BingX",
+      "symbols": 20,
+      "scenario": {
+        "tapeMinutes": 33120,
+        "warmupMinutes": 28800,
+        "fitMinutes": 0,
+        "groupSources": true,
+        "settings": {
+          "stageGateMode": "exec-branches",
+          "catalog": {
+            "strategyEnabledRanges": [],
+            "strategyTpSteps": [],
+            "strategyIndicationTypes": [
+              "MA_Cross"
+            ],
+            "strategyTrendDcaEnabled": true,
+            "strategySarDcaEnabled": true,
+            "strategyRsiContinuationDcaEnabled": true,
+            "strategyBreakoutContinuationDcaEnabled": true,
+            "strategyTrendRecoveryDcaEnabled": true,
+            "strategyBreakoutRecoveryDcaEnabled": true,
+            "strategySar04DcaEnabled": true
+          }
+        }
+      },
+      "aggregates": {
+        "breakout-continuation-dca-v1": {
+          "base": {
+            "n": 297,
+            "p": 101.51659828122203,
+            "l": 102.3173410519936,
+            "netUsd": -0.09462790779628137,
+            "feesUsd": 0.10054000000000003,
+            "pf": 0.992173929047231,
+            "state": "finite"
+          },
+          "main": {
+            "n": 132,
+            "p": 52.628894454366076,
+            "l": 47.330852189573505,
+            "netUsd": -0.038653705815435355,
+            "feesUsd": 0.04906000000000002,
+            "pf": 1.1119363379212444,
+            "state": "finite"
+          },
+          "real": {
+            "n": 34,
+            "p": 14.017013323034089,
+            "l": 10.857892558188102,
+            "netUsd": -0.0023152228927730296,
+            "feesUsd": 0.012540000000000004,
+            "pf": 1.290951558777734,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 2,
+            "p": 1.07808085878384,
+            "l": 0.03062163236676034,
+            "netUsd": 0.00314237767925124,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 35.20651171928027,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 2,
+            "p": 1.07808085878384,
+            "l": 0.03062163236676034,
+            "netUsd": 0.00314237767925124,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 35.20651171928027,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "XRP-USDT"
+          ]
+        },
+        "breakout-continuation-dca-v1/Break_Continuation/20/12/0.8/fixed": {
+          "base": {
+            "n": 297,
+            "p": 101.51659828122203,
+            "l": 102.3173410519936,
+            "netUsd": -0.09462790779628137,
+            "feesUsd": 0.10054000000000003,
+            "pf": 0.992173929047231,
+            "state": "finite"
+          },
+          "main": {
+            "n": 132,
+            "p": 52.628894454366076,
+            "l": 47.330852189573505,
+            "netUsd": -0.038653705815435355,
+            "feesUsd": 0.04906000000000002,
+            "pf": 1.1119363379212444,
+            "state": "finite"
+          },
+          "real": {
+            "n": 34,
+            "p": 14.017013323034089,
+            "l": 10.857892558188102,
+            "netUsd": -0.0023152228927730296,
+            "feesUsd": 0.012540000000000004,
+            "pf": 1.290951558777734,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 2,
+            "p": 1.07808085878384,
+            "l": 0.03062163236676034,
+            "netUsd": 0.00314237767925124,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 35.20651171928027,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 2,
+            "p": 1.07808085878384,
+            "l": 0.03062163236676034,
+            "netUsd": 0.00314237767925124,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 35.20651171928027,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "XRP-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1": {
+          "base": {
+            "n": 1218,
+            "p": 328.5977729003598,
+            "l": 404.7846574114998,
+            "netUsd": -0.5066066091045448,
+            "feesUsd": 0.38335000000000014,
+            "pf": 0.8117841595125252,
+            "state": "finite"
+          },
+          "main": {
+            "n": 579,
+            "p": 154.3567764561684,
+            "l": 202.50354373158842,
+            "netUsd": -0.3536637307562867,
+            "feesUsd": 0.20537000000000005,
+            "pf": 0.7622423470315318,
+            "state": "finite"
+          },
+          "real": {
+            "n": 81,
+            "p": 18.893628700123745,
+            "l": 42.28249384632398,
+            "netUsd": -0.10823821561489712,
+            "feesUsd": 0.029260000000000015,
+            "pf": 0.44684281794713365,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 10,
+            "p": 2.917351906474245,
+            "l": 1.7234572757942823,
+            "netUsd": 0.0013053131836130887,
+            "feesUsd": 0.0034100000000000007,
+            "pf": 1.6927323627037623,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 6,
+            "p": 2.917351906474245,
+            "l": 0.5744857585980939,
+            "netUsd": 0.005179697054565818,
+            "feesUsd": 0.0018700000000000008,
+            "pf": 5.078197088111288,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "XRP-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1/Break_Retest/10/12/0.8/fixed": {
+          "base": {
+            "n": 1218,
+            "p": 328.5977729003598,
+            "l": 404.7846574114998,
+            "netUsd": -0.5066066091045448,
+            "feesUsd": 0.38335000000000014,
+            "pf": 0.8117841595125252,
+            "state": "finite"
+          },
+          "main": {
+            "n": 579,
+            "p": 154.3567764561684,
+            "l": 202.50354373158842,
+            "netUsd": -0.3536637307562867,
+            "feesUsd": 0.20537000000000005,
+            "pf": 0.7622423470315318,
+            "state": "finite"
+          },
+          "real": {
+            "n": 81,
+            "p": 18.893628700123745,
+            "l": 42.28249384632398,
+            "netUsd": -0.10823821561489712,
+            "feesUsd": 0.029260000000000015,
+            "pf": 0.44684281794713365,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 10,
+            "p": 2.917351906474245,
+            "l": 1.7234572757942823,
+            "netUsd": 0.0013053131836130887,
+            "feesUsd": 0.0034100000000000007,
+            "pf": 1.6927323627037623,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 6,
+            "p": 2.917351906474245,
+            "l": 0.5744857585980939,
+            "netUsd": 0.005179697054565818,
+            "feesUsd": 0.0018700000000000008,
+            "pf": 5.078197088111288,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "XRP-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1": {
+          "base": {
+            "n": 589,
+            "p": 201.15193718283265,
+            "l": 292.3055629538267,
+            "netUsd": -0.39629739669180863,
+            "feesUsd": 0.19074000000000002,
+            "pf": 0.6881563770122537,
+            "state": "finite"
+          },
+          "main": {
+            "n": 261,
+            "p": 97.77607220585965,
+            "l": 149.50638603953448,
+            "netUsd": -0.279367402425413,
+            "feesUsd": 0.09691000000000001,
+            "pf": 0.6539926139342596,
+            "state": "finite"
+          },
+          "real": {
+            "n": 75,
+            "p": 27.029851767268674,
+            "l": 43.30292600053033,
+            "netUsd": -0.07697391893376311,
+            "feesUsd": 0.028270000000000007,
+            "pf": 0.624203818627352,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 13,
+            "p": 11.20863904557632,
+            "l": 2.298632674817616,
+            "netUsd": 0.03144682908775449,
+            "feesUsd": 0.005170000000000002,
+            "pf": 4.87622018444755,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 9,
+            "p": 7.360490659112195,
+            "l": 1.8131372115352484,
+            "netUsd": 0.017996217395027457,
+            "feesUsd": 0.003410000000000001,
+            "pf": 4.059533173928852,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "NEAR-USDT",
+            "OP-USDT",
+            "XRP-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1/rsi-mom-5-35/20/8/1.2/fixed": {
+          "base": {
+            "n": 367,
+            "p": 83.68856432967367,
+            "l": 113.72385200350125,
+            "netUsd": -0.16332528673665653,
+            "feesUsd": 0.11539000000000002,
+            "pf": 0.7358928039748172,
+            "state": "finite"
+          },
+          "main": {
+            "n": 139,
+            "p": 35.46010584230348,
+            "l": 43.65840322545117,
+            "netUsd": -0.06655725420814179,
+            "feesUsd": 0.04807000000000002,
+            "pf": 0.8122171958325677,
+            "state": "finite"
+          },
+          "real": {
+            "n": 44,
+            "p": 13.438984952845317,
+            "l": 12.633029852824079,
+            "netUsd": -0.0027694121456537718,
+            "feesUsd": 0.015730000000000004,
+            "pf": 1.0637974507628563,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 7,
+            "p": 3.5123422726480693,
+            "l": 1.9836346773597697,
+            "netUsd": 0.0019216339858728702,
+            "feesUsd": 0.002530000000000001,
+            "pf": 1.770659846158275,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 6,
+            "p": 3.5123422726480693,
+            "l": 1.6556382128063252,
+            "netUsd": 0.003233619844086648,
+            "feesUsd": 0.0020900000000000007,
+            "pf": 2.1214431060361973,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "NEAR-USDT",
+            "OP-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1/rsi-mom-8-35-follow/20/18/1.2/fixed": {
+          "base": {
+            "n": 222,
+            "p": 117.46337285315897,
+            "l": 178.58171095032546,
+            "netUsd": -0.232972109955152,
+            "feesUsd": 0.07535000000000004,
+            "pf": 0.6577570134594172,
+            "state": "finite"
+          },
+          "main": {
+            "n": 122,
+            "p": 62.31596636355618,
+            "l": 105.84798281408334,
+            "netUsd": -0.2128101482172712,
+            "feesUsd": 0.048840000000000015,
+            "pf": 0.588730788313756,
+            "state": "finite"
+          },
+          "real": {
+            "n": 31,
+            "p": 13.590866814423356,
+            "l": 30.669896147706226,
+            "netUsd": -0.07420450678810933,
+            "feesUsd": 0.012540000000000006,
+            "pf": 0.44313377355338074,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 6,
+            "p": 7.69629677292825,
+            "l": 0.3149979974578464,
+            "netUsd": 0.029525195101881615,
+            "feesUsd": 0.002640000000000001,
+            "pf": 24.432843494372314,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 3,
+            "p": 3.848148386464125,
+            "l": 0.1574989987289232,
+            "netUsd": 0.01476259755094081,
+            "feesUsd": 0.0013200000000000004,
+            "pf": 24.432843494372314,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "XRP-USDT"
+          ]
+        },
+        "sar-af04-dca-v1": {
+          "base": {
+            "n": 407,
+            "p": 126.4318902760298,
+            "l": 207.1964955404153,
+            "netUsd": -0.3532792722717401,
+            "feesUsd": 0.13816000000000003,
+            "pf": 0.610202841251088,
+            "state": "finite"
+          },
+          "main": {
+            "n": 187,
+            "p": 75.8127049746742,
+            "l": 95.059622337216,
+            "netUsd": -0.13373535285210716,
+            "feesUsd": 0.07018000000000002,
+            "pf": 0.7975279420502537,
+            "state": "finite"
+          },
+          "real": {
+            "n": 71,
+            "p": 29.701452731601908,
+            "l": 39.77307798791218,
+            "netUsd": -0.06359191254139436,
+            "feesUsd": 0.027060000000000004,
+            "pf": 0.7467727979370559,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 9,
+            "p": 6.509739304738986,
+            "l": 6.278217814991867,
+            "netUsd": -0.002988947456543928,
+            "feesUsd": 0.0036300000000000013,
+            "pf": 1.0368769444720864,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 9,
+            "p": 6.509739304738986,
+            "l": 6.278217814991867,
+            "netUsd": -0.002988947456543928,
+            "feesUsd": 0.0036300000000000013,
+            "pf": 1.0368769444720864,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "LINK-USDT",
+            "LTC-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-af04-dca-v1/parabolic-sar-0.04-0.1/20/12/0.8/fixed": {
+          "base": {
+            "n": 407,
+            "p": 126.4318902760298,
+            "l": 207.1964955404153,
+            "netUsd": -0.3532792722717401,
+            "feesUsd": 0.13816000000000003,
+            "pf": 0.610202841251088,
+            "state": "finite"
+          },
+          "main": {
+            "n": 187,
+            "p": 75.8127049746742,
+            "l": 95.059622337216,
+            "netUsd": -0.13373535285210716,
+            "feesUsd": 0.07018000000000002,
+            "pf": 0.7975279420502537,
+            "state": "finite"
+          },
+          "real": {
+            "n": 71,
+            "p": 29.701452731601908,
+            "l": 39.77307798791218,
+            "netUsd": -0.06359191254139436,
+            "feesUsd": 0.027060000000000004,
+            "pf": 0.7467727979370559,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 9,
+            "p": 6.509739304738986,
+            "l": 6.278217814991867,
+            "netUsd": -0.002988947456543928,
+            "feesUsd": 0.0036300000000000013,
+            "pf": 1.0368769444720864,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 9,
+            "p": 6.509739304738986,
+            "l": 6.278217814991867,
+            "netUsd": -0.002988947456543928,
+            "feesUsd": 0.0036300000000000013,
+            "pf": 1.0368769444720864,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "LINK-USDT",
+            "LTC-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-dca-v1": {
+          "base": {
+            "n": 921,
+            "p": 296.21207736702223,
+            "l": 477.77838595604277,
+            "netUsd": -0.8127136636043313,
+            "feesUsd": 0.3018400000000001,
+            "pf": 0.6199779773927964,
+            "state": "finite"
+          },
+          "main": {
+            "n": 419,
+            "p": 144.49775435163227,
+            "l": 227.0708801489279,
+            "netUsd": -0.47428231974531987,
+            "feesUsd": 0.15422000000000002,
+            "pf": 0.6363552836755696,
+            "state": "finite"
+          },
+          "real": {
+            "n": 141,
+            "p": 48.94258341703301,
+            "l": 82.46766073744612,
+            "netUsd": -0.18254432593815034,
+            "feesUsd": 0.05445000000000003,
+            "pf": 0.5934760726735351,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 19,
+            "p": 10.349066252284777,
+            "l": 15.106709128203608,
+            "netUsd": -0.03161498422935886,
+            "feesUsd": 0.007040000000000002,
+            "pf": 0.6850642429437853,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 17,
+            "p": 10.349066252284777,
+            "l": 10.881182767760306,
+            "netUsd": -0.01471287878758564,
+            "feesUsd": 0.006160000000000003,
+            "pf": 0.9510975482323365,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "AVAX-USDT",
+            "LINK-USDT",
+            "LTC-USDT",
+            "OP-USDT",
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-dca-v1/parabolic-sar-0.01-0.15/20/12/1.2/fixed": {
+          "base": {
+            "n": 453,
+            "p": 144.197721269674,
+            "l": 227.91603207739942,
+            "netUsd": -0.3599332218660042,
+            "feesUsd": 0.14773000000000006,
+            "pf": 0.6326791492259087,
+            "state": "finite"
+          },
+          "main": {
+            "n": 220,
+            "p": 74.1783072046338,
+            "l": 110.08227783844741,
+            "netUsd": -0.20626926425257344,
+            "feesUsd": 0.07986000000000003,
+            "pf": 0.6738442250758572,
+            "state": "finite"
+          },
+          "real": {
+            "n": 72,
+            "p": 22.968943582901396,
+            "l": 35.113981483941515,
+            "netUsd": -0.06912920835606033,
+            "feesUsd": 0.027170000000000007,
+            "pf": 0.6541252974518329,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 4,
+            "p": 1.4080637156852112,
+            "l": 0.5858335468518638,
+            "netUsd": 0.0004733428207792955,
+            "feesUsd": 0.0012100000000000004,
+            "pf": 2.4035218250163806,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 4,
+            "p": 1.4080637156852112,
+            "l": 0.5858335468518638,
+            "netUsd": 0.0004733428207792955,
+            "feesUsd": 0.0012100000000000004,
+            "pf": 2.4035218250163806,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "OP-USDT",
+            "SUI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-dca-v1/sar-fast/20/12/1.2/fixed": {
+          "base": {
+            "n": 468,
+            "p": 152.0143560973483,
+            "l": 249.86235387864326,
+            "netUsd": -0.4527804417383274,
+            "feesUsd": 0.15411000000000002,
+            "pf": 0.6083923958035744,
+            "state": "finite"
+          },
+          "main": {
+            "n": 199,
+            "p": 70.31944714699853,
+            "l": 116.98860231048053,
+            "netUsd": -0.26801305549274645,
+            "feesUsd": 0.07436000000000002,
+            "pf": 0.6010794706340286,
+            "state": "finite"
+          },
+          "real": {
+            "n": 69,
+            "p": 25.973639834131617,
+            "l": 47.353679253504595,
+            "netUsd": -0.11341511758209008,
+            "feesUsd": 0.02728000000000001,
+            "pf": 0.5485030993068893,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 15,
+            "p": 8.941002536599566,
+            "l": 14.520875581351746,
+            "netUsd": -0.03208832705013815,
+            "feesUsd": 0.005830000000000002,
+            "pf": 0.6157343947001335,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 13,
+            "p": 8.941002536599566,
+            "l": 10.295349220908442,
+            "netUsd": -0.015186221608364936,
+            "feesUsd": 0.004950000000000002,
+            "pf": 0.8684506319068436,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "AVAX-USDT",
+            "LINK-USDT",
+            "LTC-USDT",
+            "UNI-USDT"
+          ]
+        },
+        "trend-dca-v1": {
+          "base": {
+            "n": 358,
+            "p": 96.8642844245418,
+            "l": 157.40650267914836,
+            "netUsd": -0.3020247638547857,
+            "feesUsd": 0.11770000000000004,
+            "pf": 0.6153766380413546,
+            "state": "finite"
+          },
+          "main": {
+            "n": 138,
+            "p": 44.10193194577758,
+            "l": 54.541795770595215,
+            "netUsd": -0.09494031730977166,
+            "feesUsd": 0.04807000000000002,
+            "pf": 0.8085896572102598,
+            "state": "finite"
+          },
+          "real": {
+            "n": 34,
+            "p": 9.061803594624912,
+            "l": 15.601047907107224,
+            "netUsd": -0.03551378172332528,
+            "feesUsd": 0.012430000000000002,
+            "pf": 0.5808458283431532,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-dca-v1/Trend/10/12/1.2/fixed": {
+          "base": {
+            "n": 358,
+            "p": 96.8642844245418,
+            "l": 157.40650267914836,
+            "netUsd": -0.3020247638547857,
+            "feesUsd": 0.11770000000000004,
+            "pf": 0.6153766380413546,
+            "state": "finite"
+          },
+          "main": {
+            "n": 138,
+            "p": 44.10193194577758,
+            "l": 54.541795770595215,
+            "netUsd": -0.09494031730977166,
+            "feesUsd": 0.04807000000000002,
+            "pf": 0.8085896572102598,
+            "state": "finite"
+          },
+          "real": {
+            "n": 34,
+            "p": 9.061803594624912,
+            "l": 15.601047907107224,
+            "netUsd": -0.03551378172332528,
+            "feesUsd": 0.012430000000000002,
+            "pf": 0.5808458283431532,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-recovery-dca-v1": {
+          "base": {
+            "n": 1091,
+            "p": 245.52293321159152,
+            "l": 284.2988401045587,
+            "netUsd": -0.2974387481106803,
+            "feesUsd": 0.33143000000000006,
+            "pf": 0.8636086349184321,
+            "state": "finite"
+          },
+          "main": {
+            "n": 452,
+            "p": 104.0627933613159,
+            "l": 104.04228188540318,
+            "netUsd": -0.09715266687812449,
+            "feesUsd": 0.14003000000000002,
+            "pf": 1.0001971455790954,
+            "state": "finite"
+          },
+          "real": {
+            "n": 71,
+            "p": 12.558926654644107,
+            "l": 18.98557125900473,
+            "netUsd": -0.0339473758070377,
+            "feesUsd": 0.022990000000000003,
+            "pf": 0.6614984865776684,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 3,
+            "p": 1.8353980039110762,
+            "l": 0.3703394524537784,
+            "netUsd": 0.003223223042980339,
+            "feesUsd": 0.0009900000000000002,
+            "pf": 4.955988328411081,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 3,
+            "p": 1.8353980039110762,
+            "l": 0.3703394524537784,
+            "netUsd": 0.003223223042980339,
+            "feesUsd": 0.0009900000000000002,
+            "pf": 4.955988328411081,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "UNI-USDT"
+          ]
+        },
+        "trend-recovery-dca-v1/Trend_Efficiency/10/8/0.8/fixed": {
+          "base": {
+            "n": 1091,
+            "p": 245.52293321159152,
+            "l": 284.2988401045587,
+            "netUsd": -0.2974387481106803,
+            "feesUsd": 0.33143000000000006,
+            "pf": 0.8636086349184321,
+            "state": "finite"
+          },
+          "main": {
+            "n": 452,
+            "p": 104.0627933613159,
+            "l": 104.04228188540318,
+            "netUsd": -0.09715266687812449,
+            "feesUsd": 0.14003000000000002,
+            "pf": 1.0001971455790954,
+            "state": "finite"
+          },
+          "real": {
+            "n": 71,
+            "p": 12.558926654644107,
+            "l": 18.98557125900473,
+            "netUsd": -0.0339473758070377,
+            "feesUsd": 0.022990000000000003,
+            "pf": 0.6614984865776684,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 3,
+            "p": 1.8353980039110762,
+            "l": 0.3703394524537784,
+            "netUsd": 0.003223223042980339,
+            "feesUsd": 0.0009900000000000002,
+            "pf": 4.955988328411081,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 3,
+            "p": 1.8353980039110762,
+            "l": 0.3703394524537784,
+            "netUsd": 0.003223223042980339,
+            "feesUsd": 0.0009900000000000002,
+            "pf": 4.955988328411081,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "UNI-USDT"
+          ]
+        }
+      }
+    },
+    "public-c": {
+      "feed": "public",
+      "from": "2026-11-18T00:00:00Z",
+      "to": "2026-11-22T00:00:00Z",
+      "label": "18.–22.11. BingX",
+      "symbols": 20,
+      "scenario": {
+        "tapeMinutes": 38880,
+        "warmupMinutes": 33120,
+        "fitMinutes": 0,
+        "groupSources": true,
+        "settings": {
+          "stageGateMode": "exec-branches",
+          "catalog": {
+            "strategyEnabledRanges": [],
+            "strategyTpSteps": [],
+            "strategyIndicationTypes": [
+              "MA_Cross"
+            ],
+            "strategyTrendDcaEnabled": true,
+            "strategySarDcaEnabled": true,
+            "strategyRsiContinuationDcaEnabled": true,
+            "strategyBreakoutContinuationDcaEnabled": true,
+            "strategyTrendRecoveryDcaEnabled": true,
+            "strategyBreakoutRecoveryDcaEnabled": true,
+            "strategySar04DcaEnabled": true
+          }
+        }
+      },
+      "aggregates": {
+        "breakout-continuation-dca-v1": {
+          "base": {
+            "n": 598,
+            "p": 256.37011007995915,
+            "l": 210.26976986860498,
+            "netUsd": -0.002104702263032219,
+            "feesUsd": 0.19129000000000002,
+            "pf": 1.2192437849728075,
+            "state": "finite"
+          },
+          "main": {
+            "n": 282,
+            "p": 124.444797819265,
+            "l": 99.14890123192758,
+            "netUsd": -0.02420123333012522,
+            "feesUsd": 0.10087000000000004,
+            "pf": 1.2551303773721674,
+            "state": "finite"
+          },
+          "real": {
+            "n": 95,
+            "p": 46.31115385456401,
+            "l": 32.21296453200606,
+            "netUsd": 0.00586895765156464,
+            "feesUsd": 0.03289000000000001,
+            "pf": 1.437655755295366,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 16,
+            "p": 8.670860596357286,
+            "l": 5.656372010479152,
+            "netUsd": 0.0009526709891676663,
+            "feesUsd": 0.005280000000000002,
+            "pf": 1.532936762344027,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 15,
+            "p": 8.175472892523992,
+            "l": 5.656372010479152,
+            "netUsd": -0.0005334921223322164,
+            "feesUsd": 0.004950000000000002,
+            "pf": 1.4453562950558916,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "ATOM-USDT",
+            "BCH-USDT",
+            "BNB-USDT",
+            "DOT-USDT",
+            "OP-USDT",
+            "UNI-USDT",
+            "XRP-USDT"
+          ]
+        },
+        "breakout-continuation-dca-v1/Break_Continuation/20/12/0.8/fixed": {
+          "base": {
+            "n": 598,
+            "p": 256.37011007995915,
+            "l": 210.26976986860498,
+            "netUsd": -0.002104702263032219,
+            "feesUsd": 0.19129000000000002,
+            "pf": 1.2192437849728075,
+            "state": "finite"
+          },
+          "main": {
+            "n": 282,
+            "p": 124.444797819265,
+            "l": 99.14890123192758,
+            "netUsd": -0.02420123333012522,
+            "feesUsd": 0.10087000000000004,
+            "pf": 1.2551303773721674,
+            "state": "finite"
+          },
+          "real": {
+            "n": 95,
+            "p": 46.31115385456401,
+            "l": 32.21296453200606,
+            "netUsd": 0.00586895765156464,
+            "feesUsd": 0.03289000000000001,
+            "pf": 1.437655755295366,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 16,
+            "p": 8.670860596357286,
+            "l": 5.656372010479152,
+            "netUsd": 0.0009526709891676663,
+            "feesUsd": 0.005280000000000002,
+            "pf": 1.532936762344027,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 15,
+            "p": 8.175472892523992,
+            "l": 5.656372010479152,
+            "netUsd": -0.0005334921223322164,
+            "feesUsd": 0.004950000000000002,
+            "pf": 1.4453562950558916,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "ATOM-USDT",
+            "BCH-USDT",
+            "BNB-USDT",
+            "DOT-USDT",
+            "OP-USDT",
+            "UNI-USDT",
+            "XRP-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1": {
+          "base": {
+            "n": 1097,
+            "p": 389.4466160756001,
+            "l": 397.66923708358627,
+            "netUsd": -0.362237383242281,
+            "feesUsd": 0.35827000000000003,
+            "pf": 0.9793229643100156,
+            "state": "finite"
+          },
+          "main": {
+            "n": 493,
+            "p": 181.43142947397268,
+            "l": 183.58793924256193,
+            "netUsd": -0.2541814671182597,
+            "feesUsd": 0.16907000000000003,
+            "pf": 0.9882535324625001,
+            "state": "finite"
+          },
+          "real": {
+            "n": 109,
+            "p": 46.75836355411862,
+            "l": 40.3823887929688,
+            "netUsd": -0.03841366268809862,
+            "feesUsd": 0.03652000000000001,
+            "pf": 1.1578899850090092,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 15,
+            "p": 6.371226722603216,
+            "l": 6.19781647967007,
+            "netUsd": -0.010467586362046751,
+            "feesUsd": 0.005500000000000002,
+            "pf": 1.0279792477724958,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 8,
+            "p": 4.50290922506977,
+            "l": 3.098908239835035,
+            "netUsd": -0.0024341948835685523,
+            "feesUsd": 0.0028600000000000014,
+            "pf": 1.4530631037043789,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "DOT-USDT",
+            "XRP-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1/Break_Retest/10/12/0.8/fixed": {
+          "base": {
+            "n": 1097,
+            "p": 389.4466160756001,
+            "l": 397.66923708358627,
+            "netUsd": -0.362237383242281,
+            "feesUsd": 0.35827000000000003,
+            "pf": 0.9793229643100156,
+            "state": "finite"
+          },
+          "main": {
+            "n": 493,
+            "p": 181.43142947397268,
+            "l": 183.58793924256193,
+            "netUsd": -0.2541814671182597,
+            "feesUsd": 0.16907000000000003,
+            "pf": 0.9882535324625001,
+            "state": "finite"
+          },
+          "real": {
+            "n": 109,
+            "p": 46.75836355411862,
+            "l": 40.3823887929688,
+            "netUsd": -0.03841366268809862,
+            "feesUsd": 0.03652000000000001,
+            "pf": 1.1578899850090092,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 15,
+            "p": 6.371226722603216,
+            "l": 6.19781647967007,
+            "netUsd": -0.010467586362046751,
+            "feesUsd": 0.005500000000000002,
+            "pf": 1.0279792477724958,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 8,
+            "p": 4.50290922506977,
+            "l": 3.098908239835035,
+            "netUsd": -0.0024341948835685523,
+            "feesUsd": 0.0028600000000000014,
+            "pf": 1.4530631037043789,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "DOT-USDT",
+            "XRP-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1": {
+          "base": {
+            "n": 1229,
+            "p": 603.2137678458514,
+            "l": 585.2739980043928,
+            "netUsd": -0.33465497877207717,
+            "feesUsd": 0.38368,
+            "pf": 1.0306519167135868,
+            "state": "finite"
+          },
+          "main": {
+            "n": 537,
+            "p": 328.0154607354787,
+            "l": 253.8701561198236,
+            "netUsd": -0.0991392557594761,
+            "feesUsd": 0.18612000000000006,
+            "pf": 1.2920599480809372,
+            "state": "finite"
+          },
+          "real": {
+            "n": 178,
+            "p": 108.50382086030133,
+            "l": 87.25973471344301,
+            "netUsd": -0.03928684533766774,
+            "feesUsd": 0.06215000000000002,
+            "pf": 1.2434580647835216,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 42,
+            "p": 29.431213480178624,
+            "l": 18.380575177806655,
+            "netUsd": 0.007918422120625703,
+            "feesUsd": 0.014960000000000008,
+            "pf": 1.6012128671422041,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 24,
+            "p": 20.387541413844957,
+            "l": 10.063588736630823,
+            "netUsd": 0.015560349645833174,
+            "feesUsd": 0.008360000000000003,
+            "pf": 2.0258718780543568,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "NEAR-USDT",
+            "UNI-USDT",
+            "XRP-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1/rsi-mom-5-35/20/8/1.2/fixed": {
+          "base": {
+            "n": 819,
+            "p": 205.65638259647523,
+            "l": 250.01409569358344,
+            "netUsd": -0.3247571427434216,
+            "feesUsd": 0.25344000000000005,
+            "pf": 0.8225791510912532,
+            "state": "finite"
+          },
+          "main": {
+            "n": 313,
+            "p": 109.08454460343407,
+            "l": 78.85476634357256,
+            "netUsd": -0.02178822019824201,
+            "feesUsd": 0.10219000000000003,
+            "pf": 1.3833601906592363,
+            "state": "finite"
+          },
+          "real": {
+            "n": 106,
+            "p": 39.91843425097663,
+            "l": 33.2238274774199,
+            "netUsd": -0.024061103388722933,
+            "feesUsd": 0.03509000000000001,
+            "pf": 1.2015001666531835,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 28,
+            "p": 11.829558048250059,
+            "l": 9.027139351616023,
+            "netUsd": -0.006009257298030872,
+            "feesUsd": 0.010010000000000005,
+            "pf": 1.3104437172704497,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 13,
+            "p": 6.651803305701392,
+            "l": 3.5975523385820125,
+            "netUsd": 0.0016808244859643252,
+            "feesUsd": 0.004510000000000002,
+            "pf": 1.8489802731607299,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "NEAR-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1/rsi-mom-8-35-follow/20/18/1.2/fixed": {
+          "base": {
+            "n": 410,
+            "p": 397.55738524937624,
+            "l": 335.25990231080925,
+            "netUsd": -0.009897836028655627,
+            "feesUsd": 0.13024000000000005,
+            "pf": 1.185818472502008,
+            "state": "finite"
+          },
+          "main": {
+            "n": 224,
+            "p": 218.93091613204467,
+            "l": 175.01538977625108,
+            "netUsd": -0.0773510355612341,
+            "feesUsd": 0.08393000000000003,
+            "pf": 1.2509237982553278,
+            "state": "finite"
+          },
+          "real": {
+            "n": 72,
+            "p": 68.5853866093247,
+            "l": 54.03590723602312,
+            "netUsd": -0.015225741948944814,
+            "feesUsd": 0.027060000000000008,
+            "pf": 1.2692557619094096,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 14,
+            "p": 17.601655431928563,
+            "l": 9.353435826190632,
+            "netUsd": 0.013927679418656575,
+            "feesUsd": 0.004950000000000001,
+            "pf": 1.8818384772194645,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 11,
+            "p": 13.735738108143561,
+            "l": 6.466036398048811,
+            "netUsd": 0.013879525159868846,
+            "feesUsd": 0.003850000000000001,
+            "pf": 2.124290254890686,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "NEAR-USDT",
+            "XRP-USDT"
+          ]
+        },
+        "sar-af04-dca-v1": {
+          "base": {
+            "n": 764,
+            "p": 291.87302549482206,
+            "l": 275.79212243063773,
+            "netUsd": -0.16446203912261154,
+            "feesUsd": 0.2398,
+            "pf": 1.058308057976633,
+            "state": "finite"
+          },
+          "main": {
+            "n": 322,
+            "p": 147.75353539363476,
+            "l": 118.07872188184152,
+            "netUsd": -0.05233221256830119,
+            "feesUsd": 0.11099000000000003,
+            "pf": 1.2513138103026564,
+            "state": "finite"
+          },
+          "real": {
+            "n": 132,
+            "p": 62.451623388650404,
+            "l": 52.00842579399217,
+            "netUsd": -0.04093209460052011,
+            "feesUsd": 0.04532000000000001,
+            "pf": 1.2007981867404378,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 29,
+            "p": 18.152601028825195,
+            "l": 3.762226336570466,
+            "netUsd": 0.03566625183941402,
+            "feesUsd": 0.009350000000000002,
+            "pf": 4.824962510196175,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 21,
+            "p": 13.274711251697969,
+            "l": 3.3200098074991224,
+            "netUsd": 0.02240767696025453,
+            "feesUsd": 0.0066000000000000026,
+            "pf": 3.9983951920001903,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AVAX-USDT",
+            "BCH-USDT",
+            "LINK-USDT",
+            "NEAR-USDT",
+            "UNI-USDT",
+            "XRP-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-af04-dca-v1/parabolic-sar-0.04-0.1/20/12/0.8/fixed": {
+          "base": {
+            "n": 764,
+            "p": 291.87302549482206,
+            "l": 275.79212243063773,
+            "netUsd": -0.16446203912261154,
+            "feesUsd": 0.2398,
+            "pf": 1.058308057976633,
+            "state": "finite"
+          },
+          "main": {
+            "n": 322,
+            "p": 147.75353539363476,
+            "l": 118.07872188184152,
+            "netUsd": -0.05233221256830119,
+            "feesUsd": 0.11099000000000003,
+            "pf": 1.2513138103026564,
+            "state": "finite"
+          },
+          "real": {
+            "n": 132,
+            "p": 62.451623388650404,
+            "l": 52.00842579399217,
+            "netUsd": -0.04093209460052011,
+            "feesUsd": 0.04532000000000001,
+            "pf": 1.2007981867404378,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 29,
+            "p": 18.152601028825195,
+            "l": 3.762226336570466,
+            "netUsd": 0.03566625183941402,
+            "feesUsd": 0.009350000000000002,
+            "pf": 4.824962510196175,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 21,
+            "p": 13.274711251697969,
+            "l": 3.3200098074991224,
+            "netUsd": 0.02240767696025453,
+            "feesUsd": 0.0066000000000000026,
+            "pf": 3.9983951920001903,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AVAX-USDT",
+            "BCH-USDT",
+            "LINK-USDT",
+            "NEAR-USDT",
+            "UNI-USDT",
+            "XRP-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-dca-v1": {
+          "base": {
+            "n": 1603,
+            "p": 587.7624414544406,
+            "l": 609.3494437887681,
+            "netUsd": -0.5159450071358193,
+            "feesUsd": 0.5093000000000002,
+            "pf": 0.9645736899337999,
+            "state": "finite"
+          },
+          "main": {
+            "n": 662,
+            "p": 273.24797874455004,
+            "l": 241.36929445841602,
+            "netUsd": -0.19441411867395636,
+            "feesUsd": 0.23331000000000005,
+            "pf": 1.1320743152423898,
+            "state": "finite"
+          },
+          "real": {
+            "n": 232,
+            "p": 107.1219039505276,
+            "l": 86.82749040504851,
+            "netUsd": -0.06957809596662759,
+            "feesUsd": 0.08206000000000001,
+            "pf": 1.2337325822824783,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 52,
+            "p": 25.73092740677599,
+            "l": 21.36896579315364,
+            "netUsd": -0.007685099641499389,
+            "feesUsd": 0.020240000000000008,
+            "pf": 1.2041260047793174,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 33,
+            "p": 13.262023773128071,
+            "l": 15.764195011544274,
+            "netUsd": -0.023860281624379306,
+            "feesUsd": 0.012870000000000005,
+            "pf": 0.8412750389992106,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "AVAX-USDT",
+            "DOGE-USDT",
+            "NEAR-USDT",
+            "OP-USDT",
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-dca-v1/parabolic-sar-0.01-0.15/20/12/1.2/fixed": {
+          "base": {
+            "n": 611,
+            "p": 225.7574726159658,
+            "l": 254.35016208431136,
+            "netUsd": -0.26444078505038093,
+            "feesUsd": 0.20052999999999999,
+            "pf": 0.8875853302626647,
+            "state": "finite"
+          },
+          "main": {
+            "n": 222,
+            "p": 90.6412313903102,
+            "l": 95.84156407153837,
+            "netUsd": -0.12560895775872963,
+            "feesUsd": 0.07997000000000001,
+            "pf": 0.9457403191234804,
+            "state": "finite"
+          },
+          "real": {
+            "n": 64,
+            "p": 29.550548776390734,
+            "l": 25.060868117379115,
+            "netUsd": -0.027552952931469792,
+            "feesUsd": 0.022440000000000005,
+            "pf": 1.1791510428921708,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 7,
+            "p": 3.13068544205343,
+            "l": 3.5731073925228998,
+            "netUsd": -0.008031058685984738,
+            "feesUsd": 0.002640000000000001,
+            "pf": 0.8761800578971447,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 7,
+            "p": 3.13068544205343,
+            "l": 3.5731073925228998,
+            "netUsd": -0.008031058685984738,
+            "feesUsd": 0.002640000000000001,
+            "pf": 0.8761800578971447,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-dca-v1/sar-fast/20/12/1.2/fixed": {
+          "base": {
+            "n": 992,
+            "p": 362.0049688384747,
+            "l": 354.99928170445673,
+            "netUsd": -0.25150422208543827,
+            "feesUsd": 0.30877000000000004,
+            "pf": 1.0197343698848673,
+            "state": "finite"
+          },
+          "main": {
+            "n": 440,
+            "p": 182.60674735423981,
+            "l": 145.52773038687764,
+            "netUsd": -0.06880516091522673,
+            "feesUsd": 0.15334000000000003,
+            "pf": 1.2547900449542475,
+            "state": "finite"
+          },
+          "real": {
+            "n": 168,
+            "p": 77.57135517413687,
+            "l": 61.76662228766939,
+            "netUsd": -0.042025143035157815,
+            "feesUsd": 0.05962000000000002,
+            "pf": 1.25587821223021,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 45,
+            "p": 22.60024196472256,
+            "l": 17.795858400630742,
+            "netUsd": 0.0003459590444853493,
+            "feesUsd": 0.017600000000000005,
+            "pf": 1.2699720044929967,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 26,
+            "p": 10.131338331074641,
+            "l": 12.191087619021376,
+            "netUsd": -0.015829222938394567,
+            "feesUsd": 0.010230000000000003,
+            "pf": 0.8310446653887573,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "AVAX-USDT",
+            "DOGE-USDT",
+            "NEAR-USDT",
+            "OP-USDT",
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "trend-dca-v1": {
+          "base": {
+            "n": 915,
+            "p": 413.16866489506293,
+            "l": 295.6179089466759,
+            "netUsd": 0.09719516433094327,
+            "feesUsd": 0.28687999999999997,
+            "pf": 1.3976442305787062,
+            "state": "finite"
+          },
+          "main": {
+            "n": 395,
+            "p": 198.595100379713,
+            "l": 129.1721765343843,
+            "netUsd": 0.05542768993809331,
+            "feesUsd": 0.14036000000000004,
+            "pf": 1.5374448717046199,
+            "state": "finite"
+          },
+          "real": {
+            "n": 135,
+            "p": 62.901152034292444,
+            "l": 57.893881189405114,
+            "netUsd": -0.04812462986730856,
+            "feesUsd": 0.04840000000000001,
+            "pf": 1.0864905019669624,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 40,
+            "p": 21.538427624457416,
+            "l": 24.73379341416158,
+            "netUsd": -0.032501353382483764,
+            "feesUsd": 0.014740000000000003,
+            "pf": 0.8708097162372747,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 25,
+            "p": 14.645021179372035,
+            "l": 16.565552614001213,
+            "netUsd": -0.022106315287017023,
+            "feesUsd": 0.009020000000000004,
+            "pf": 0.8840647529617609,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "NEAR-USDT",
+            "OP-USDT",
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "trend-dca-v1/Trend/10/12/1.2/fixed": {
+          "base": {
+            "n": 915,
+            "p": 413.16866489506293,
+            "l": 295.6179089466759,
+            "netUsd": 0.09719516433094327,
+            "feesUsd": 0.28687999999999997,
+            "pf": 1.3976442305787062,
+            "state": "finite"
+          },
+          "main": {
+            "n": 395,
+            "p": 198.595100379713,
+            "l": 129.1721765343843,
+            "netUsd": 0.05542768993809331,
+            "feesUsd": 0.14036000000000004,
+            "pf": 1.5374448717046199,
+            "state": "finite"
+          },
+          "real": {
+            "n": 135,
+            "p": 62.901152034292444,
+            "l": 57.893881189405114,
+            "netUsd": -0.04812462986730856,
+            "feesUsd": 0.04840000000000001,
+            "pf": 1.0864905019669624,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 40,
+            "p": 21.538427624457416,
+            "l": 24.73379341416158,
+            "netUsd": -0.032501353382483764,
+            "feesUsd": 0.014740000000000003,
+            "pf": 0.8708097162372747,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 25,
+            "p": 14.645021179372035,
+            "l": 16.565552614001213,
+            "netUsd": -0.022106315287017023,
+            "feesUsd": 0.009020000000000004,
+            "pf": 0.8840647529617609,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "NEAR-USDT",
+            "OP-USDT",
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "trend-recovery-dca-v1": {
+          "base": {
+            "n": 2716,
+            "p": 685.3687716834413,
+            "l": 755.3084467062574,
+            "netUsd": -0.6701400954616341,
+            "feesUsd": 0.7983799999999994,
+            "pf": 0.9074024985053345,
+            "state": "finite"
+          },
+          "main": {
+            "n": 1010,
+            "p": 293.0895391426119,
+            "l": 287.9665482241893,
+            "netUsd": -0.25355944441071415,
+            "feesUsd": 0.31988000000000016,
+            "pf": 1.0177902292818894,
+            "state": "finite"
+          },
+          "real": {
+            "n": 248,
+            "p": 70.14058741846713,
+            "l": 76.70008416019557,
+            "netUsd": -0.08642982323867401,
+            "feesUsd": 0.08008000000000004,
+            "pf": 0.9144786239343846,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 34,
+            "p": 14.086017153759961,
+            "l": 9.793897060709567,
+            "netUsd": 0.0035053320462614997,
+            "feesUsd": 0.010340000000000004,
+            "pf": 1.4382443542590626,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 23,
+            "p": 10.09238617189117,
+            "l": 6.713669107544668,
+            "netUsd": 0.0030375150212438706,
+            "feesUsd": 0.007040000000000002,
+            "pf": 1.5032593966463996,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "trend-recovery-dca-v1/Trend_Efficiency/10/8/0.8/fixed": {
+          "base": {
+            "n": 2716,
+            "p": 685.3687716834413,
+            "l": 755.3084467062574,
+            "netUsd": -0.6701400954616341,
+            "feesUsd": 0.7983799999999994,
+            "pf": 0.9074024985053345,
+            "state": "finite"
+          },
+          "main": {
+            "n": 1010,
+            "p": 293.0895391426119,
+            "l": 287.9665482241893,
+            "netUsd": -0.25355944441071415,
+            "feesUsd": 0.31988000000000016,
+            "pf": 1.0177902292818894,
+            "state": "finite"
+          },
+          "real": {
+            "n": 248,
+            "p": 70.14058741846713,
+            "l": 76.70008416019557,
+            "netUsd": -0.08642982323867401,
+            "feesUsd": 0.08008000000000004,
+            "pf": 0.9144786239343846,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 34,
+            "p": 14.086017153759961,
+            "l": 9.793897060709567,
+            "netUsd": 0.0035053320462614997,
+            "feesUsd": 0.010340000000000004,
+            "pf": 1.4382443542590626,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 23,
+            "p": 10.09238617189117,
+            "l": 6.713669107544668,
+            "netUsd": 0.0030375150212438706,
+            "feesUsd": 0.007040000000000002,
+            "pf": 1.5032593966463996,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        }
+      }
+    },
+    "vst": {
+      "feed": "vst",
+      "from": "2026-11-18T00:00:00Z",
+      "to": "2026-11-22T00:00:00Z",
+      "label": "18.–22.11. x02",
+      "symbols": 20,
+      "scenario": {
+        "tapeMinutes": 20160,
+        "warmupMinutes": 14400,
+        "fitMinutes": 0,
+        "groupSources": true,
+        "settings": {
+          "stageGateMode": "exec-branches",
+          "catalog": {
+            "strategyEnabledRanges": [],
+            "strategyTpSteps": [],
+            "strategyIndicationTypes": [
+              "MA_Cross"
+            ],
+            "strategyTrendDcaEnabled": true,
+            "strategySarDcaEnabled": true,
+            "strategyRsiContinuationDcaEnabled": true,
+            "strategyBreakoutContinuationDcaEnabled": true,
+            "strategyTrendRecoveryDcaEnabled": true,
+            "strategyBreakoutRecoveryDcaEnabled": true,
+            "strategySar04DcaEnabled": true
+          }
+        }
+      },
+      "aggregates": {
+        "breakout-continuation-dca-v1": {
+          "base": {
+            "n": 504,
+            "p": 232.5201972150375,
+            "l": 178.20964761542862,
+            "netUsd": 0.047067043500043704,
+            "feesUsd": 0.16225,
+            "pf": 1.3047565063189481,
+            "state": "finite"
+          },
+          "main": {
+            "n": 256,
+            "p": 120.09570344407612,
+            "l": 92.26329192804967,
+            "netUsd": -0.033979527375826546,
+            "feesUsd": 0.09064000000000001,
+            "pf": 1.3016628925155977,
+            "state": "finite"
+          },
+          "real": {
+            "n": 55,
+            "p": 26.177536493869358,
+            "l": 20.567456796199068,
+            "netUsd": -0.008816725123169594,
+            "feesUsd": 0.018700000000000005,
+            "pf": 1.2727648708958053,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 7,
+            "p": 1.2278646670618414,
+            "l": 0.7893797780913339,
+            "netUsd": 0.0012638399656006453,
+            "feesUsd": 0.002640000000000001,
+            "pf": 1.555480265824308,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 4,
+            "p": 0.6363317143358743,
+            "l": 0.39468988904566693,
+            "netUsd": 0.0006767187444102296,
+            "feesUsd": 0.0014300000000000003,
+            "pf": 1.612232114368272,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "UNI-USDT"
+          ]
+        },
+        "breakout-continuation-dca-v1/Break_Continuation/20/12/0.8/fixed": {
+          "base": {
+            "n": 504,
+            "p": 232.5201972150375,
+            "l": 178.20964761542862,
+            "netUsd": 0.047067043500043704,
+            "feesUsd": 0.16225,
+            "pf": 1.3047565063189481,
+            "state": "finite"
+          },
+          "main": {
+            "n": 256,
+            "p": 120.09570344407612,
+            "l": 92.26329192804967,
+            "netUsd": -0.033979527375826546,
+            "feesUsd": 0.09064000000000001,
+            "pf": 1.3016628925155977,
+            "state": "finite"
+          },
+          "real": {
+            "n": 55,
+            "p": 26.177536493869358,
+            "l": 20.567456796199068,
+            "netUsd": -0.008816725123169594,
+            "feesUsd": 0.018700000000000005,
+            "pf": 1.2727648708958053,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 7,
+            "p": 1.2278646670618414,
+            "l": 0.7893797780913339,
+            "netUsd": 0.0012638399656006453,
+            "feesUsd": 0.002640000000000001,
+            "pf": 1.555480265824308,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 4,
+            "p": 0.6363317143358743,
+            "l": 0.39468988904566693,
+            "netUsd": 0.0006767187444102296,
+            "feesUsd": 0.0014300000000000003,
+            "pf": 1.612232114368272,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "UNI-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1": {
+          "base": {
+            "n": 967,
+            "p": 345.8108686586161,
+            "l": 364.2775615264453,
+            "netUsd": -0.38289845310321763,
+            "feesUsd": 0.31504000000000004,
+            "pf": 0.9493059830793651,
+            "state": "finite"
+          },
+          "main": {
+            "n": 358,
+            "p": 149.0387231393361,
+            "l": 140.1748498460753,
+            "netUsd": -0.15296295874476445,
+            "feesUsd": 0.12496000000000003,
+            "pf": 1.0632344054799712,
+            "state": "finite"
+          },
+          "real": {
+            "n": 39,
+            "p": 21.45272521451718,
+            "l": 12.634103105713667,
+            "netUsd": 0.0007230619684328622,
+            "feesUsd": 0.012540000000000003,
+            "pf": 1.698001435876787,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 2,
+            "p": 2.0956171089925286,
+            "l": 1.1671419464810082,
+            "netUsd": -0.0004773335679389753,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 1.795511775847762,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 2,
+            "p": 2.0956171089925286,
+            "l": 1.1671419464810082,
+            "netUsd": -0.0004773335679389753,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 1.795511775847762,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT"
+          ]
+        },
+        "breakout-recovery-dca-v1/Break_Retest/10/12/0.8/fixed": {
+          "base": {
+            "n": 967,
+            "p": 345.8108686586161,
+            "l": 364.2775615264453,
+            "netUsd": -0.38289845310321763,
+            "feesUsd": 0.31504000000000004,
+            "pf": 0.9493059830793651,
+            "state": "finite"
+          },
+          "main": {
+            "n": 358,
+            "p": 149.0387231393361,
+            "l": 140.1748498460753,
+            "netUsd": -0.15296295874476445,
+            "feesUsd": 0.12496000000000003,
+            "pf": 1.0632344054799712,
+            "state": "finite"
+          },
+          "real": {
+            "n": 39,
+            "p": 21.45272521451718,
+            "l": 12.634103105713667,
+            "netUsd": 0.0007230619684328622,
+            "feesUsd": 0.012540000000000003,
+            "pf": 1.698001435876787,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 2,
+            "p": 2.0956171089925286,
+            "l": 1.1671419464810082,
+            "netUsd": -0.0004773335679389753,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 1.795511775847762,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 2,
+            "p": 2.0956171089925286,
+            "l": 1.1671419464810082,
+            "netUsd": -0.0004773335679389753,
+            "feesUsd": 0.0006600000000000002,
+            "pf": 1.795511775847762,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1": {
+          "base": {
+            "n": 1167,
+            "p": 545.8637483728505,
+            "l": 540.8010634068125,
+            "netUsd": -0.3193212284961587,
+            "feesUsd": 0.36179,
+            "pf": 1.0093614552718244,
+            "state": "finite"
+          },
+          "main": {
+            "n": 463,
+            "p": 250.61036073369348,
+            "l": 238.90921652542812,
+            "netUsd": -0.2210089534641298,
+            "feesUsd": 0.16412000000000004,
+            "pf": 1.0489773662918525,
+            "state": "finite"
+          },
+          "real": {
+            "n": 121,
+            "p": 63.245656336436085,
+            "l": 53.70550670200609,
+            "netUsd": -0.025817329177460276,
+            "feesUsd": 0.04213000000000001,
+            "pf": 1.1776382017465192,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 34,
+            "p": 25.93610074405853,
+            "l": 10.407515505412936,
+            "netUsd": 0.02326609682587446,
+            "feesUsd": 0.011000000000000001,
+            "pf": 2.4920549703307375,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 17,
+            "p": 12.58013294526539,
+            "l": 7.656954316689285,
+            "netUsd": 0.00417490572406108,
+            "feesUsd": 0.005830000000000002,
+            "pf": 1.6429682645285508,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT",
+            "BCH-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1/rsi-mom-5-35/20/8/1.2/fixed": {
+          "base": {
+            "n": 786,
+            "p": 212.10172198123502,
+            "l": 222.59995692308223,
+            "netUsd": -0.2082033998455109,
+            "feesUsd": 0.23749000000000012,
+            "pf": 0.9528381088345188,
+            "state": "finite"
+          },
+          "main": {
+            "n": 294,
+            "p": 105.86604257069487,
+            "l": 74.80523539224933,
+            "netUsd": -0.013125751730633852,
+            "feesUsd": 0.09757000000000002,
+            "pf": 1.4152223706746574,
+            "state": "finite"
+          },
+          "real": {
+            "n": 86,
+            "p": 38.27024179131391,
+            "l": 19.908130298367027,
+            "netUsd": 0.025095390437391216,
+            "feesUsd": 0.028050000000000005,
+            "pf": 1.9223423404282742,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 31,
+            "p": 22.044153793452807,
+            "l": 7.531454770587237,
+            "netUsd": 0.023192018226601323,
+            "feesUsd": 0.009900000000000003,
+            "pf": 2.9269449880443212,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 14,
+            "p": 8.688185994659671,
+            "l": 4.780893581863585,
+            "netUsd": 0.004100827124787938,
+            "feesUsd": 0.0047300000000000016,
+            "pf": 1.817272408576187,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "BCH-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "rsi-continuation-dca-v1/rsi-mom-8-35-follow/20/18/1.2/fixed": {
+          "base": {
+            "n": 381,
+            "p": 333.76202639161545,
+            "l": 318.20110648373026,
+            "netUsd": -0.11111782865064777,
+            "feesUsd": 0.12430000000000002,
+            "pf": 1.0489027837767146,
+            "state": "finite"
+          },
+          "main": {
+            "n": 169,
+            "p": 144.74431816299855,
+            "l": 164.1039811331788,
+            "netUsd": -0.2078832017334959,
+            "feesUsd": 0.06655000000000003,
+            "pf": 0.882028072466634,
+            "state": "finite"
+          },
+          "real": {
+            "n": 35,
+            "p": 24.975414545122167,
+            "l": 33.79737640363906,
+            "netUsd": -0.05091271961485152,
+            "feesUsd": 0.014080000000000004,
+            "pf": 0.7389749502104249,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 3,
+            "p": 3.8919469506057194,
+            "l": 2.8760607348257,
+            "netUsd": 0.00007407859927314152,
+            "feesUsd": 0.0011000000000000003,
+            "pf": 1.3532214057508718,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 3,
+            "p": 3.8919469506057194,
+            "l": 2.8760607348257,
+            "netUsd": 0.00007407859927314152,
+            "feesUsd": 0.0011000000000000003,
+            "pf": 1.3532214057508718,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AAVE-USDT"
+          ]
+        },
+        "sar-af04-dca-v1": {
+          "base": {
+            "n": 733,
+            "p": 265.94170940426807,
+            "l": 285.6286874563211,
+            "netUsd": -0.25224144520449315,
+            "feesUsd": 0.23342000000000002,
+            "pf": 0.9310749272862742,
+            "state": "finite"
+          },
+          "main": {
+            "n": 308,
+            "p": 119.88787592870241,
+            "l": 122.2576441861343,
+            "netUsd": -0.14244880089775305,
+            "feesUsd": 0.10813000000000002,
+            "pf": 0.9806166046040935,
+            "state": "finite"
+          },
+          "real": {
+            "n": 81,
+            "p": 27.966566601648882,
+            "l": 34.67811750685191,
+            "netUsd": -0.04725215980951758,
+            "feesUsd": 0.028600000000000007,
+            "pf": 0.8064614982668272,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 5,
+            "p": 3.8927736567310083,
+            "l": 0.24376511384589322,
+            "netUsd": 0.00920587407957494,
+            "feesUsd": 0.0015400000000000006,
+            "pf": 15.969363274812142,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 5,
+            "p": 3.8927736567310083,
+            "l": 0.24376511384589322,
+            "netUsd": 0.00920587407957494,
+            "feesUsd": 0.0015400000000000006,
+            "pf": 15.969363274812142,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AVAX-USDT",
+            "NEAR-USDT"
+          ]
+        },
+        "sar-af04-dca-v1/parabolic-sar-0.04-0.1/20/12/0.8/fixed": {
+          "base": {
+            "n": 733,
+            "p": 265.94170940426807,
+            "l": 285.6286874563211,
+            "netUsd": -0.25224144520449315,
+            "feesUsd": 0.23342000000000002,
+            "pf": 0.9310749272862742,
+            "state": "finite"
+          },
+          "main": {
+            "n": 308,
+            "p": 119.88787592870241,
+            "l": 122.2576441861343,
+            "netUsd": -0.14244880089775305,
+            "feesUsd": 0.10813000000000002,
+            "pf": 0.9806166046040935,
+            "state": "finite"
+          },
+          "real": {
+            "n": 81,
+            "p": 27.966566601648882,
+            "l": 34.67811750685191,
+            "netUsd": -0.04725215980951758,
+            "feesUsd": 0.028600000000000007,
+            "pf": 0.8064614982668272,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 5,
+            "p": 3.8927736567310083,
+            "l": 0.24376511384589322,
+            "netUsd": 0.00920587407957494,
+            "feesUsd": 0.0015400000000000006,
+            "pf": 15.969363274812142,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 5,
+            "p": 3.8927736567310083,
+            "l": 0.24376511384589322,
+            "netUsd": 0.00920587407957494,
+            "feesUsd": 0.0015400000000000006,
+            "pf": 15.969363274812142,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AVAX-USDT",
+            "NEAR-USDT"
+          ]
+        },
+        "sar-dca-v1": {
+          "base": {
+            "n": 1711,
+            "p": 651.4356852074656,
+            "l": 610.5045268558664,
+            "netUsd": -0.3469308562756981,
+            "feesUsd": 0.5360300000000003,
+            "pf": 1.067044807288157,
+            "state": "finite"
+          },
+          "main": {
+            "n": 745,
+            "p": 316.69427788613484,
+            "l": 268.9044995038238,
+            "netUsd": -0.20518847820733338,
+            "feesUsd": 0.25938,
+            "pf": 1.1777202630320118,
+            "state": "finite"
+          },
+          "real": {
+            "n": 209,
+            "p": 91.84690034767164,
+            "l": 91.2380742582564,
+            "netUsd": -0.12200150812435864,
+            "feesUsd": 0.07436000000000004,
+            "pf": 1.0066729388401152,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 30,
+            "p": 13.286799032797186,
+            "l": 15.873472960554539,
+            "netUsd": -0.03004181729629868,
+            "feesUsd": 0.011330000000000003,
+            "pf": 0.8370442351094043,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 23,
+            "p": 10.32402287519265,
+            "l": 11.155574568187152,
+            "netUsd": -0.017095776042038203,
+            "feesUsd": 0.008690000000000003,
+            "pf": 0.9254586406184873,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AVAX-USDT",
+            "DOGE-USDT",
+            "LINK-USDT",
+            "LTC-USDT",
+            "NEAR-USDT",
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "sar-dca-v1/parabolic-sar-0.01-0.15/20/12/1.2/fixed": {
+          "base": {
+            "n": 685,
+            "p": 262.85564183311925,
+            "l": 254.0622643061771,
+            "netUsd": -0.17062936730656134,
+            "feesUsd": 0.21648,
+            "pf": 1.0346111121655792,
+            "state": "finite"
+          },
+          "main": {
+            "n": 285,
+            "p": 117.26083910873473,
+            "l": 115.65492850721263,
+            "netUsd": -0.13483747134421306,
+            "feesUsd": 0.10098000000000004,
+            "pf": 1.0138853624506106,
+            "state": "finite"
+          },
+          "real": {
+            "n": 70,
+            "p": 30.513333911812182,
+            "l": 37.974866278847934,
+            "netUsd": -0.06904213508271691,
+            "feesUsd": 0.025190000000000008,
+            "pf": 0.8035139264942761,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "sar-dca-v1/sar-fast/20/12/1.2/fixed": {
+          "base": {
+            "n": 1026,
+            "p": 388.58004337434625,
+            "l": 356.4422625496894,
+            "netUsd": -0.17630148896913678,
+            "feesUsd": 0.31955,
+            "pf": 1.09016265522155,
+            "state": "finite"
+          },
+          "main": {
+            "n": 460,
+            "p": 199.43343877740008,
+            "l": 153.2495709966111,
+            "netUsd": -0.0703510068631203,
+            "feesUsd": 0.15840000000000004,
+            "pf": 1.3013637655260402,
+            "state": "finite"
+          },
+          "real": {
+            "n": 139,
+            "p": 61.33356643585947,
+            "l": 53.263207979408456,
+            "netUsd": -0.05295937304164176,
+            "feesUsd": 0.04917000000000001,
+            "pf": 1.1515184451445548,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 30,
+            "p": 13.286799032797186,
+            "l": 15.873472960554539,
+            "netUsd": -0.03004181729629868,
+            "feesUsd": 0.011330000000000003,
+            "pf": 0.8370442351094043,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 23,
+            "p": 10.32402287519265,
+            "l": 11.155574568187152,
+            "netUsd": -0.017095776042038203,
+            "feesUsd": 0.008690000000000003,
+            "pf": 0.9254586406184873,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "AVAX-USDT",
+            "DOGE-USDT",
+            "LINK-USDT",
+            "LTC-USDT",
+            "NEAR-USDT",
+            "SUI-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "trend-dca-v1": {
+          "base": {
+            "n": 886,
+            "p": 405.85360511925603,
+            "l": 307.12998959989284,
+            "netUsd": 0.03359039776688087,
+            "feesUsd": 0.2763199999999999,
+            "pf": 1.3214391914250163,
+            "state": "finite"
+          },
+          "main": {
+            "n": 377,
+            "p": 191.3282457416109,
+            "l": 142.32049963242352,
+            "netUsd": -0.02761849239884066,
+            "feesUsd": 0.13442000000000004,
+            "pf": 1.3443477660334353,
+            "state": "finite"
+          },
+          "real": {
+            "n": 119,
+            "p": 67.28258154912218,
+            "l": 58.81545870681339,
+            "netUsd": -0.0427718927761969,
+            "feesUsd": 0.04400000000000001,
+            "pf": 1.143960840032145,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 42,
+            "p": 41.76863643806313,
+            "l": 10.82393546562959,
+            "netUsd": 0.09053129393673966,
+            "feesUsd": 0.016279999999999996,
+            "pf": 3.8589140309174597,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 18,
+            "p": 17.020512450934095,
+            "l": 4.249883093786503,
+            "netUsd": 0.03774777385324224,
+            "feesUsd": 0.007040000000000003,
+            "pf": 4.004936624214148,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "LINK-USDT",
+            "NEAR-USDT"
+          ]
+        },
+        "trend-dca-v1/Trend/10/12/1.2/fixed": {
+          "base": {
+            "n": 886,
+            "p": 405.85360511925603,
+            "l": 307.12998959989284,
+            "netUsd": 0.03359039776688087,
+            "feesUsd": 0.2763199999999999,
+            "pf": 1.3214391914250163,
+            "state": "finite"
+          },
+          "main": {
+            "n": 377,
+            "p": 191.3282457416109,
+            "l": 142.32049963242352,
+            "netUsd": -0.02761849239884066,
+            "feesUsd": 0.13442000000000004,
+            "pf": 1.3443477660334353,
+            "state": "finite"
+          },
+          "real": {
+            "n": 119,
+            "p": 67.28258154912218,
+            "l": 58.81545870681339,
+            "netUsd": -0.0427718927761969,
+            "feesUsd": 0.04400000000000001,
+            "pf": 1.143960840032145,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 42,
+            "p": 41.76863643806313,
+            "l": 10.82393546562959,
+            "netUsd": 0.09053129393673966,
+            "feesUsd": 0.016279999999999996,
+            "pf": 3.8589140309174597,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 18,
+            "p": 17.020512450934095,
+            "l": 4.249883093786503,
+            "netUsd": 0.03774777385324224,
+            "feesUsd": 0.007040000000000003,
+            "pf": 4.004936624214148,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "LINK-USDT",
+            "NEAR-USDT"
+          ]
+        },
+        "trend-recovery-dca-v1": {
+          "base": {
+            "n": 2586,
+            "p": 669.6611170339082,
+            "l": 755.6135153964708,
+            "netUsd": -0.7081753891804401,
+            "feesUsd": 0.7528399999999997,
+            "pf": 0.8862481988328871,
+            "state": "finite"
+          },
+          "main": {
+            "n": 888,
+            "p": 250.3364023159555,
+            "l": 291.4115604571127,
+            "netUsd": -0.37758044456559503,
+            "feesUsd": 0.2830300000000001,
+            "pf": 0.8590476023781414,
+            "state": "finite"
+          },
+          "real": {
+            "n": 135,
+            "p": 37.88420377806422,
+            "l": 53.39866510561326,
+            "netUsd": -0.08236415931471476,
+            "feesUsd": 0.04367000000000001,
+            "pf": 0.7094597534064917,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 23,
+            "p": 15.678658255498082,
+            "l": 8.675223268631207,
+            "netUsd": 0.0153198581971096,
+            "feesUsd": 0.007150000000000003,
+            "pf": 1.807291613138147,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 11,
+            "p": 6.949636711334575,
+            "l": 4.917260048048394,
+            "netUsd": 0.0032913854647005185,
+            "feesUsd": 0.003410000000000001,
+            "pf": 1.4133148630389822,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "NEAR-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        },
+        "trend-recovery-dca-v1/Trend_Efficiency/10/8/0.8/fixed": {
+          "base": {
+            "n": 2586,
+            "p": 669.6611170339082,
+            "l": 755.6135153964708,
+            "netUsd": -0.7081753891804401,
+            "feesUsd": 0.7528399999999997,
+            "pf": 0.8862481988328871,
+            "state": "finite"
+          },
+          "main": {
+            "n": 888,
+            "p": 250.3364023159555,
+            "l": 291.4115604571127,
+            "netUsd": -0.37758044456559503,
+            "feesUsd": 0.2830300000000001,
+            "pf": 0.8590476023781414,
+            "state": "finite"
+          },
+          "real": {
+            "n": 135,
+            "p": 37.88420377806422,
+            "l": 53.39866510561326,
+            "netUsd": -0.08236415931471476,
+            "feesUsd": 0.04367000000000001,
+            "pf": 0.7094597534064917,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 23,
+            "p": 15.678658255498082,
+            "l": 8.675223268631207,
+            "netUsd": 0.0153198581971096,
+            "feesUsd": 0.007150000000000003,
+            "pf": 1.807291613138147,
+            "state": "finite"
+          },
+          "unique": {
+            "n": 11,
+            "p": 6.949636711334575,
+            "l": 4.917260048048394,
+            "netUsd": 0.0032913854647005185,
+            "feesUsd": 0.003410000000000001,
+            "pf": 1.4133148630389822,
+            "state": "finite"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": [
+            "NEAR-USDT",
+            "UNI-USDT",
+            "ZEC-USDT"
+          ]
+        }
+      }
+    },
+    "48+48": {
+      "feed": "short",
+      "from": "2026-11-09T17:00:00Z",
+      "to": "2026-11-11T17:00:00Z",
+      "label": "09.–11.11. x02, 48+48 h",
+      "symbols": 20,
+      "scenario": {
+        "tapeMinutes": 5760,
+        "warmupMinutes": 2880,
+        "fitMinutes": 0,
+        "groupSources": true,
+        "settings": {
+          "stageGateMode": "exec-branches",
+          "catalog": {
+            "strategyEnabledRanges": [],
+            "strategyTpSteps": [],
+            "strategyIndicationTypes": [
+              "MA_Cross"
+            ],
+            "strategyTrendDcaEnabled": true,
+            "strategySarDcaEnabled": true,
+            "strategyRsiContinuationDcaEnabled": true,
+            "strategyBreakoutContinuationDcaEnabled": true,
+            "strategyTrendRecoveryDcaEnabled": true,
+            "strategyBreakoutRecoveryDcaEnabled": true,
+            "strategySar04DcaEnabled": true
+          }
+        }
+      },
+      "aggregates": {
+        "breakout-continuation-dca-v1": {
+          "base": {
+            "n": 94,
+            "p": 23.34829998264622,
+            "l": 35.182342898077074,
+            "netUsd": -0.06322290715528103,
+            "feesUsd": 0.03355000000000002,
+            "pf": 0.6636368717764486,
+            "state": "finite"
+          },
+          "main": {
+            "n": 5,
+            "p": 1.634695628354706,
+            "l": 0.5413749355489864,
+            "netUsd": 0.003322420113410258,
+            "feesUsd": 0.0017600000000000005,
+            "pf": 3.019525879411147,
+            "state": "finite"
+          },
+          "real": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "breakout-continuation-dca-v1/Break_Continuation/20/12/0.8/fixed": {
+          "base": {
+            "n": 94,
+            "p": 23.34829998264622,
+            "l": 35.182342898077074,
+            "netUsd": -0.06322290715528103,
+            "feesUsd": 0.03355000000000002,
+            "pf": 0.6636368717764486,
+            "state": "finite"
+          },
+          "main": {
+            "n": 5,
+            "p": 1.634695628354706,
+            "l": 0.5413749355489864,
+            "netUsd": 0.003322420113410258,
+            "feesUsd": 0.0017600000000000005,
+            "pf": 3.019525879411147,
+            "state": "finite"
+          },
+          "real": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "breakout-recovery-dca-v1": {
+          "base": {
+            "n": 466,
+            "p": 96.7457256316193,
+            "l": 149.81067951950092,
+            "netUsd": -0.23243651178339986,
+            "feesUsd": 0.15114000000000005,
+            "pf": 0.6457865750420407,
+            "state": "finite"
+          },
+          "main": {
+            "n": 19,
+            "p": 5.438781755124907,
+            "l": 10.733109285430475,
+            "netUsd": -0.02793826614384688,
+            "feesUsd": 0.007150000000000004,
+            "pf": 0.5067293745445892,
+            "state": "finite"
+          },
+          "real": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "breakout-recovery-dca-v1/Break_Retest/10/12/0.8/fixed": {
+          "base": {
+            "n": 466,
+            "p": 96.7457256316193,
+            "l": 149.81067951950092,
+            "netUsd": -0.23243651178339986,
+            "feesUsd": 0.15114000000000005,
+            "pf": 0.6457865750420407,
+            "state": "finite"
+          },
+          "main": {
+            "n": 19,
+            "p": 5.438781755124907,
+            "l": 10.733109285430475,
+            "netUsd": -0.02793826614384688,
+            "feesUsd": 0.007150000000000004,
+            "pf": 0.5067293745445892,
+            "state": "finite"
+          },
+          "real": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "rsi-continuation-dca-v1": {
+          "base": {
+            "n": 308,
+            "p": 111.76725156352848,
+            "l": 122.2467543381255,
+            "netUsd": -0.11399835138253134,
+            "feesUsd": 0.09602999999999999,
+            "pf": 0.9142758199893677,
+            "state": "finite"
+          },
+          "main": {
+            "n": 38,
+            "p": 10.272512956492236,
+            "l": 18.787281383734957,
+            "netUsd": -0.04497479481391439,
+            "feesUsd": 0.013200000000000003,
+            "pf": 0.546780172536599,
+            "state": "finite"
+          },
+          "real": {
+            "n": 1,
+            "p": 0,
+            "l": 2.010432195768945,
+            "netUsd": -0.006031296587306836,
+            "feesUsd": 0.0003300000000000001,
+            "pf": 0,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "rsi-continuation-dca-v1/rsi-mom-5-35/20/8/1.2/fixed": {
+          "base": {
+            "n": 177,
+            "p": 47.475705600439575,
+            "l": 51.76272455774997,
+            "netUsd": -0.055692579073780266,
+            "feesUsd": 0.05335,
+            "pf": 0.9171794183181469,
+            "state": "finite"
+          },
+          "main": {
+            "n": 35,
+            "p": 8.034108613636267,
+            "l": 13.570589722414795,
+            "netUsd": -0.03306164554005762,
+            "feesUsd": 0.011880000000000003,
+            "pf": 0.5920235434106582,
+            "state": "finite"
+          },
+          "real": {
+            "n": 1,
+            "p": 0,
+            "l": 2.010432195768945,
+            "netUsd": -0.006031296587306836,
+            "feesUsd": 0.0003300000000000001,
+            "pf": 0,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "rsi-continuation-dca-v1/rsi-mom-8-35-follow/20/18/1.2/fixed": {
+          "base": {
+            "n": 131,
+            "p": 64.29154596308891,
+            "l": 70.48402978037555,
+            "netUsd": -0.05830577230875104,
+            "feesUsd": 0.04268000000000002,
+            "pf": 0.9121434481458837,
+            "state": "finite"
+          },
+          "main": {
+            "n": 3,
+            "p": 2.238404342855968,
+            "l": 5.216691661320164,
+            "netUsd": -0.01191314927385678,
+            "feesUsd": 0.0013200000000000004,
+            "pf": 0.4290850385988704,
+            "state": "finite"
+          },
+          "real": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "sar-af04-dca-v1": {
+          "base": {
+            "n": 273,
+            "p": 81.15378154880467,
+            "l": 74.29946374123978,
+            "netUsd": -0.055858907738238796,
+            "feesUsd": 0.08624000000000001,
+            "pf": 1.0922525878711076,
+            "state": "finite"
+          },
+          "main": {
+            "n": 53,
+            "p": 12.398254843424908,
+            "l": 18.918898189978826,
+            "netUsd": -0.04273500009213689,
+            "feesUsd": 0.018590000000000002,
+            "pf": 0.655337045472984,
+            "state": "finite"
+          },
+          "real": {
+            "n": 5,
+            "p": 1.3882692458937083,
+            "l": 0.6475806865845296,
+            "netUsd": 0.0002716149514478197,
+            "feesUsd": 0.0016500000000000004,
+            "pf": 2.143778025894686,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "sar-af04-dca-v1/parabolic-sar-0.04-0.1/20/12/0.8/fixed": {
+          "base": {
+            "n": 273,
+            "p": 81.15378154880467,
+            "l": 74.29946374123978,
+            "netUsd": -0.055858907738238796,
+            "feesUsd": 0.08624000000000001,
+            "pf": 1.0922525878711076,
+            "state": "finite"
+          },
+          "main": {
+            "n": 53,
+            "p": 12.398254843424908,
+            "l": 18.918898189978826,
+            "netUsd": -0.04273500009213689,
+            "feesUsd": 0.018590000000000002,
+            "pf": 0.655337045472984,
+            "state": "finite"
+          },
+          "real": {
+            "n": 5,
+            "p": 1.3882692458937083,
+            "l": 0.6475806865845296,
+            "netUsd": 0.0002716149514478197,
+            "feesUsd": 0.0016500000000000004,
+            "pf": 2.143778025894686,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "sar-dca-v1": {
+          "base": {
+            "n": 537,
+            "p": 171.72131413449006,
+            "l": 150.30778854173565,
+            "netUsd": -0.059223703458487854,
+            "feesUsd": 0.17226000000000005,
+            "pf": 1.1424645109911158,
+            "state": "finite"
+          },
+          "main": {
+            "n": 125,
+            "p": 63.41831638546336,
+            "l": 26.814710343962155,
+            "netUsd": 0.06742512800676566,
+            "feesUsd": 0.04268000000000001,
+            "pf": 2.365056924798862,
+            "state": "finite"
+          },
+          "real": {
+            "n": 15,
+            "p": 11.099169891190122,
+            "l": 5.32510495789321,
+            "netUsd": 0.012148369246580264,
+            "feesUsd": 0.005610000000000002,
+            "pf": 2.0843100706847526,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "sar-dca-v1/parabolic-sar-0.01-0.15/20/12/1.2/fixed": {
+          "base": {
+            "n": 207,
+            "p": 58.08988892195656,
+            "l": 56.28354129909115,
+            "netUsd": -0.047265954955260675,
+            "feesUsd": 0.06501000000000003,
+            "pf": 1.032093709478344,
+            "state": "finite"
+          },
+          "main": {
+            "n": 34,
+            "p": 16.88526463247174,
+            "l": 7.960156395126703,
+            "netUsd": 0.0154873193713424,
+            "feesUsd": 0.011550000000000005,
+            "pf": 2.1212227240672163,
+            "state": "finite"
+          },
+          "real": {
+            "n": 1,
+            "p": 1.7654290588803907,
+            "l": 0,
+            "netUsd": 0.007061716235521563,
+            "feesUsd": 0.0004400000000000001,
+            "pf": null,
+            "state": "no-losses"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "sar-dca-v1/sar-fast/20/12/1.2/fixed": {
+          "base": {
+            "n": 330,
+            "p": 113.6314252125335,
+            "l": 94.02424724264449,
+            "netUsd": -0.011957748503227159,
+            "feesUsd": 0.10725000000000003,
+            "pf": 1.2085332086657345,
+            "state": "finite"
+          },
+          "main": {
+            "n": 91,
+            "p": 46.533051752991625,
+            "l": 18.85455394883545,
+            "netUsd": 0.05193780863542325,
+            "feesUsd": 0.031130000000000012,
+            "pf": 2.468000668658923,
+            "state": "finite"
+          },
+          "real": {
+            "n": 14,
+            "p": 9.333740832309733,
+            "l": 5.32510495789321,
+            "netUsd": 0.005086653011058701,
+            "feesUsd": 0.005170000000000001,
+            "pf": 1.7527806317647632,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-dca-v1": {
+          "base": {
+            "n": 197,
+            "p": 52.57116347545724,
+            "l": 67.39001595762969,
+            "netUsd": -0.09674484809714545,
+            "feesUsd": 0.06545000000000002,
+            "pf": 0.7801031462659165,
+            "state": "finite"
+          },
+          "main": {
+            "n": 50,
+            "p": 17.956608294737208,
+            "l": 23.52156230591958,
+            "netUsd": -0.04096114219791846,
+            "feesUsd": 0.017600000000000005,
+            "pf": 0.76341052780402,
+            "state": "finite"
+          },
+          "real": {
+            "n": 1,
+            "p": 0,
+            "l": 1.0628061137469944,
+            "netUsd": -0.004251224454987978,
+            "feesUsd": 0.0004400000000000001,
+            "pf": 0,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-dca-v1/Trend/10/12/1.2/fixed": {
+          "base": {
+            "n": 197,
+            "p": 52.57116347545724,
+            "l": 67.39001595762969,
+            "netUsd": -0.09674484809714545,
+            "feesUsd": 0.06545000000000002,
+            "pf": 0.7801031462659165,
+            "state": "finite"
+          },
+          "main": {
+            "n": 50,
+            "p": 17.956608294737208,
+            "l": 23.52156230591958,
+            "netUsd": -0.04096114219791846,
+            "feesUsd": 0.017600000000000005,
+            "pf": 0.76341052780402,
+            "state": "finite"
+          },
+          "real": {
+            "n": 1,
+            "p": 0,
+            "l": 1.0628061137469944,
+            "netUsd": -0.004251224454987978,
+            "feesUsd": 0.0004400000000000001,
+            "pf": 0,
+            "state": "finite"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-recovery-dca-v1": {
+          "base": {
+            "n": 322,
+            "p": 84.01893694559531,
+            "l": 112.40470302991847,
+            "netUsd": -0.1536625644478456,
+            "feesUsd": 0.10207999999999998,
+            "pf": 0.7474681635272166,
+            "state": "finite"
+          },
+          "main": {
+            "n": 60,
+            "p": 19.625564857134844,
+            "l": 27.04812256861775,
+            "netUsd": -0.041255808992507186,
+            "feesUsd": 0.020350000000000004,
+            "pf": 0.7255795594443647,
+            "state": "finite"
+          },
+          "real": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        },
+        "trend-recovery-dca-v1/Trend_Efficiency/10/8/0.8/fixed": {
+          "base": {
+            "n": 322,
+            "p": 84.01893694559531,
+            "l": 112.40470302991847,
+            "netUsd": -0.1536625644478456,
+            "feesUsd": 0.10207999999999998,
+            "pf": 0.7474681635272166,
+            "state": "finite"
+          },
+          "main": {
+            "n": 60,
+            "p": 19.625564857134844,
+            "l": 27.04812256861775,
+            "netUsd": -0.041255808992507186,
+            "feesUsd": 0.020350000000000004,
+            "pf": 0.7255795594443647,
+            "state": "finite"
+          },
+          "real": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "exec": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "unique": {
+            "n": 0,
+            "p": 0,
+            "l": 0,
+            "netUsd": 0,
+            "feesUsd": 0,
+            "pf": null,
+            "state": "empty"
+          },
+          "openAtTapeEnd": 0,
+          "symbolsWithExecutedCloses": []
+        }
+      }
+    }
+  }
+}

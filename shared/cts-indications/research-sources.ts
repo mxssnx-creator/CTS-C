@@ -1,4 +1,4 @@
-import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS } from "./oscillator-sources"
+import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, RSI_CONTINUATION_SOURCES, SAR_CONTINUATION_SOURCES } from "./oscillator-sources"
 
 export const SIGNAL_TIMEFRAMES = [1/6, 1, 5, 15, 30, 60] as const
 
@@ -14,7 +14,8 @@ const classicVariants = [
 /** Existing CTS-X RSI momentum and CTS-A-O quarter-hour candidates, exposed as independent sources. */
 export const RESEARCH_TACTIC_SOURCES: readonly { id:string; label:string; kind:"tactic"; timeframes:readonly number[] }[] = [
   ...classicVariants.map(([id,label])=>({id,label,kind:"tactic" as const,timeframes:SIGNAL_TIMEFRAMES})),
-  ...[...RSI_VARIANTS,...PARABOLIC_SAR_VARIANTS].map(({id,label})=>({id,label,kind:"tactic" as const,timeframes:SIGNAL_TIMEFRAMES})),
+  ...[...RSI_VARIANTS,...PARABOLIC_SAR_VARIANTS,...RSI_CONTINUATION_SOURCES,...SAR_CONTINUATION_SOURCES]
+    .map(({id,label})=>({id,label,kind:"tactic" as const,timeframes:SIGNAL_TIMEFRAMES})),
   {id:"r-qh-flow",kind:"tactic",label:"Quarter-hour order flow · short",timeframes:[1,5,15]},
   {id:"r-qh-flow-m",kind:"tactic",label:"Quarter-hour order flow · medium",timeframes:[1,5,15]},
   {id:"r-qh-rev",kind:"tactic",label:"Quarter-hour burst reversal · short",timeframes:[1,5,15]},

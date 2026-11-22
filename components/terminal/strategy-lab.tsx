@@ -5,7 +5,7 @@ import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/s
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES } from "@/shared/cts-indications/research-sources"
 import { EXEC_PROFILES } from "@/core/exec-profile"
 import execDcaTrendPreset from "@/research-data/exec-dca-trend-preset.json"
-import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, THIN_OSCILLATOR_SOURCE_IDS } from "@/shared/cts-indications/oscillator-sources"
+import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, RSI_CONTINUATION_SOURCES, SAR_CONTINUATION_SOURCES, THIN_OSCILLATOR_SOURCE_IDS } from "@/shared/cts-indications/oscillator-sources"
 import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES,SIGNAL_SOURCES} from '@/shared/cts-indications/signals-catalog'
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_CATALOG } from "@/shared/cts-indications/low-range-catalog"
 import {VolumeRatioSliders} from "../../shared/cts-volume/sliders.tsx";
@@ -31,7 +31,7 @@ const EXIT_LABELS: Record<ExitMode, string> = {
   "trailing-only-fixed": "Fixed-distance trailing-only",
 }
 const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES]
-const OSCILLATOR_FAMILIES = [["RSI configurations",RSI_VARIANTS],["Parabolic SAR configurations",PARABOLIC_SAR_VARIANTS]] as const
+const OSCILLATOR_FAMILIES = [["RSI configurations",[...RSI_VARIANTS,...RSI_CONTINUATION_SOURCES]],["Parabolic SAR configurations",[...PARABOLIC_SAR_VARIANTS,...SAR_CONTINUATION_SOURCES]]] as const
 const OSCILLATOR_IDS = new Set<string>(OSCILLATOR_FAMILIES.flatMap(([,sources])=>sources.map(source=>source.id)))
 
 function MultiChoice({ title, description, values, selected, onChange, format, optional = false }: {
@@ -177,7 +177,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
         <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {STRATEGY_SOURCES.length} available. Conventional and RSI momentum variants also support 60m. Inverse and quarter-hour sources use 1/5/15m.</p>
         <details className="space-y-3 border-t border-[var(--terminal-border)] pt-4">
           <summary className="cursor-pointer text-sm font-semibold">RSI and Parabolic SAR</summary>
-          <p className="terminal-muted text-xs">RSI Reclaim enters on a return through an extreme threshold. RSI Momentum enters on the move into an extreme. Parabolic SAR signals when a direction begins, using the chosen acceleration step and maximum.</p>
+          <p className="terminal-muted text-xs">RSI Reclaim signals on a return through an extreme threshold. RSI Momentum signals on the move into an extreme. Parabolic SAR signals when a direction begins. Continuation sources can signal after a previous position closed while the direction is still confirmed.</p>
           <div className="grid gap-3 sm:grid-cols-2">{OSCILLATOR_FAMILIES.map(([label,sources])=><label key={label} className="text-xs">{label}
             <select multiple size={6} aria-label={label} className="terminal-input mt-2 w-full"
               value={(draft.strategyIndicationSources as string[]).filter(id=>sources.some(source=>source.id===id))}
@@ -187,11 +187,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
           </label>)}</div>
           <button type="button" className="terminal-button" onClick={()=>{
             dirtyRef.current=true; setDirty(true); setError(null)
-            setDraft(current=>({...current,strategyIndicationTypes:["Tactic"],strategyIndicationSources:[...THIN_OSCILLATOR_SOURCE_IDS],
+            setDraft(current=>({...current,stageGateMode:"exec-branches",strategyIndicationTypes:["Tactic"],strategyIndicationSources:[...THIN_OSCILLATOR_SOURCE_IDS],
               strategyEnabledRanges:["Micro","Low-Range","Minimal"],strategyTpSteps:[3,6,8],strategySignalTimeframes:[1],
               strategyPriceDistancesEnabled:true,strategyStopDistancePcts:[.10,.15],strategyTrailDistancePcts:[.05,.10],
               strategyExitModes:["fixed","trailing-fixed"],microMinSlDistancePct:.10,microMinTrailDistancePct:.05}))
-            setMessage("RSI and Parabolic SAR draft ready to replay or save.")
+            setMessage("RSI and Parabolic SAR draft prepared. Save it to use it in the replay.")
           }}>Prepare RSI and SAR thin preset</button>
         </details>
       </section>
@@ -311,8 +311,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             </details>
 
             {execEnabled&&<div className="mt-5 space-y-2">
-              {EXEC_PROFILES.map(profile=><label key={profile.id} className="flex items-center gap-3 text-xs"><input type="checkbox" checked={draft[profile.setting]===true} onChange={e=>change(profile.setting,e.target.checked)}/>{profile.label} execution profile</label>)}
-              <p className="terminal-muted text-xs">Each enabled profile adds independent 1m configurations with fixed exits, their own Auto PF and Exec Short 4, 8 and 12. Active when the DCA coordination is enabled.</p>
+              {EXEC_PROFILES.map(profile=><div key={profile.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <label className="flex items-center gap-3 text-xs"><input type="checkbox" checked={draft[profile.setting]===true} onChange={e=>change(profile.setting,e.target.checked)}/>{profile.label} execution profile</label>
+                <small className="terminal-muted text-[11px]">Base Long {profile.windows.base.long.join(" / ")} · {profile.windows.base.shortOutcomes?.includes("negative") ? "Signed Short and Last" : "Signed Last"}</small>
+              </div>)}
+              <p className="terminal-muted text-xs">Enabled profiles add independent 1m configurations with their own Auto PF and Exec Short 4, 8 and 12. The DCA coordination switch applies to all profiles.</p>
             </div>}
             <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.autoPfEnabled===true} onChange={e=>change('autoPfEnabled',e.target.checked)}/>Auto PF</label>
             {draft.autoPfEnabled === true && <div className="mt-3 space-y-3">
