@@ -150,7 +150,7 @@ try{
  assert.deepEqual(JSON.parse(dca.strategyExecWindows).exec.short,[4,8,12])
  const replay=page.getByRole('region',{name:'Historical replay study'})
  await replay.getByLabel('VST demo market feed',{exact:true}).uncheck()
- await replay.getByLabel('Completed candles',{exact:true}).selectOption('500')
+ await replay.getByLabel('Completed candles').selectOption('500')
  const replayResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/terminal/replay')
  await replay.getByRole('button',{name:'Run replay',exact:true}).click()
  const replayResult=await (await replayResponse).json()
