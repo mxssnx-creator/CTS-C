@@ -27,7 +27,7 @@ export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
   stageGateMode: "exec-branches",
-  ...Object.fromEntries(EXEC_PROFILES.map(profile=>[profile.setting,true])),
+  ...Object.fromEntries(EXEC_PROFILES.map(profile=>[profile.setting,profile.enabledByDefault])),
   stageWindowScope: "context", microStageWindowScope: "inherit",
   stageBlocks: {}, strategyLastNGrid: {}, strategyExecWindows: DEFAULT_EXEC_WINDOWS, strategyStageCoordinations: {},
   liveEntryMode: "independent",

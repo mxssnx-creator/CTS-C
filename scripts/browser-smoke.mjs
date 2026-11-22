@@ -164,6 +164,9 @@ try{
  assert.ok(replayResult.progression.some(row=>row.stage==='exec'&&row.postStage))
  await replay.getByRole('heading',{name:'Saved stage progression on holdout'}).waitFor()
  await replay.getByRole('columnheader',{name:'Post-stage PF / settled',exact:true}).waitFor()
+ assert.ok(replayResult.progression.find(row=>row.stage==='executed').indications.some(row=>row.source==='Trend'))
+ await replay.getByText('Exec orders by indication',{exact:true}).click()
+ await replay.getByRole('columnheader',{name:'Executed PF',exact:true}).waitFor()
  await replay.getByText(/^bingx:public ·/).waitFor()
 
  await page.getByRole('button',{name:'Integrations',exact:true}).click();await page.getByLabel('Search integrations').fill('unmatched');await page.getByText('No integration matches this search.').waitFor()

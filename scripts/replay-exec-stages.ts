@@ -6,7 +6,6 @@ import { createHash } from "node:crypto"
 import { TradingEngine, STAGES } from "../core/engine"
 import { generateEngineCatalog } from "../core/catalog"
 import { EXEC_PROFILES, execProfileEnabled } from "../core/exec-profile"
-import trendDcaPreset from "../research-data/exec-dca-trend-preset.json"
 import { describeProfitFactor } from "../core/metrics"
 import { EXIT_MODES, type Candle, type ClosedTrade, type EngineSettings } from "../core/types"
 import { checkExecWindows } from "../core/last-n-grid"
@@ -67,7 +66,7 @@ function run({file,family,profile,scenario}: Job) {
   const postStages = Object.fromEntries(STAGES.filter(stage=>stage!=="live").map(stage=>[stage,cohort()]))
   const settings = engine.settings
   const execShorts = [...new Set([...checkExecWindows(settings.catalog.strategyExecWindows).exec.short,
-    ...(EXEC_PROFILES.some(profile=>execProfileEnabled(settings,profile))?trendDcaPreset.strategyExecWindows.exec.short:[])])].sort((a,b)=>a-b)
+    ...EXEC_PROFILES.filter(profile=>execProfileEnabled(settings,profile)).flatMap(profile=>profile.windows.exec.short)])].sort((a,b)=>a-b)
   const shortBooks = Object.fromEntries(execShorts.map(count=>[count,cohort()]))
   const shortAccepted = Object.fromEntries(execShorts.map(count=>[count,cohort()]))
   const variants: Record<string, Cohort> = {}

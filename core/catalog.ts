@@ -133,10 +133,12 @@ export function generateEngineCatalog(settings: EngineSettings, fees?: NonNullab
   const createdAt = "1970-01-01T00:00:00.000Z"
   const configs = generateStrategyCatalog(settings.connectionId,catalog,createdAt)
   for (const profile of EXEC_PROFILES) if (execProfileEnabled(settings,profile)) {
-    const geometries = generateStrategyCatalog(settings.connectionId,{
-      ...preset,...profile.catalog,makerFeePct:catalog.makerFeePct,takerFeePct:catalog.takerFeePct,slippagePctOfFees:catalog.slippagePctOfFees,
-    },createdAt)
-    for (const geometry of geometries) configs.push({...geometry,id:`${geometry.id}.${profile.id}`,execProfile:profile.id})
+    for (const variant of profile.catalogs) {
+      const geometries = generateStrategyCatalog(settings.connectionId,{
+        ...preset,...variant,makerFeePct:catalog.makerFeePct,takerFeePct:catalog.takerFeePct,slippagePctOfFees:catalog.slippagePctOfFees,
+      },createdAt)
+      for (const geometry of geometries) configs.push({...geometry,id:`${geometry.id}.${profile.id}`,execProfile:profile.id})
+    }
   }
   return configs
 }

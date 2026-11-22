@@ -3,6 +3,7 @@ import { test } from "node:test"
 import { DEFAULT_ENGINE_SETTINGS, TradingEngine } from "../core/engine"
 import { EXEC_PROFILES, PROFILE_DCA_SIZING } from "../core/exec-profile"
 import { generateEngineCatalog } from "../core/catalog"
+import { ParentBranches } from "../core/stage-branches"
 import { TerminalRuntime } from "../core/runtime"
 import { StateStore } from "../core/store"
 import type { Candle, ClosedTrade } from "../core/types"
@@ -19,6 +20,35 @@ const configured = { ...DEFAULT_ENGINE_SETTINGS, symbols, stageGateMode:"exec-br
   symbolFees:{"DOWN-USDT":{makerFeePct:.02,takerFeePct:.06}},
 }
 
+test("recovery profiles retain signed Last-N branches across saved settings and use their own geometry",()=>{
+  const profile = EXEC_PROFILES.find(profile=>profile.id==="trend-recovery-dca-v1")!
+  const store=new StateStore(":memory:")
+  const runtime=new TerminalRuntime("bingx-x02",store)
+  let restored:TerminalRuntime|undefined
+  try {
+    runtime.saveFlatSettings({[profile.setting]:true})
+    const settings=runtime.engine.settings
+    const geometries=generateEngineCatalog(settings).filter(config=>config.execProfile===profile.id)
+    assert.deepEqual(geometries.map(config=>[config.type,config.position_cost_step,config.tpStep,config.slRatio]),[["Trend_Efficiency",10,8,.8]])
+    const plan=new ParentBranches(settings.catalog,true)
+    const roots=plan.variants(geometries[0],undefined,"base")
+    assert.equal(roots.length,8)
+    assert.deepEqual(new Set(roots.map(config=>config.branch!.windows!.base!.long)),new Set([10,20]))
+    const negative=roots.find(config=>config.branch!.windows!.base!.shortPolarity==="negative")!
+    const main=plan.variants(negative,"dca","main"),real=plan.variants(main[0],"dca","real")
+    const exec=plan.variants(real[0],"dca","exec")
+    assert.equal(exec.length,12)
+    assert.ok(exec.every(branch=>plan.restore(branch,geometries[0],coordination=>coordination==="dca")===branch))
+    const sibling=generateEngineCatalog(settings).find(config=>config.execProfile===trend.id)!
+    assert.ok(exec.every(branch=>plan.restore(branch,sibling,()=>true)===undefined))
+    runtime.shutdown()
+    restored=new TerminalRuntime("bingx-x02",store)
+    assert.equal(restored.engine.settings.catalog[profile.setting],true)
+    restored.saveFlatSettings({[profile.setting]:false})
+    assert.ok(generateEngineCatalog(restored.engine.settings).every(config=>config.execProfile!==profile.id))
+  } finally {restored?.shutdown();runtime.shutdown();store.close()}
+})
+
 function tape(sign:number): Candle[] {
   let price=100
   return Array.from({length:520},(_,index)=>{
@@ -27,14 +57,14 @@ function tape(sign:number): Candle[] {
   })
 }
 
-test("new and old Exec connections enable both profiles and save independent opt-outs",()=>{
+test("new and old Exec connections enable validated profiles and save independent opt-outs",()=>{
   const store=new StateStore(":memory:")
   const fresh=new TerminalRuntime("bingx-x02",store)
-  assert.equal(fresh.snapshot().settings.strategyTrendDcaEnabled,"true")
-  assert.equal(fresh.snapshot().settings.strategySarDcaEnabled,"true")
-  assert.equal(fresh.engine.snapshot({laneLimit:0}).catalogCount,255)
+  const defaults=fresh.snapshot().settings
+  for(const profile of EXEC_PROFILES)assert.equal(defaults[profile.setting],"true")
+  assert.equal(fresh.engine.snapshot({laneLimit:0}).catalogCount,261)
   const sarGeometries=generateEngineCatalog(fresh.engine.settings).filter(config=>config.execProfile===sar.id)
-  assert.deepEqual(sarGeometries.map(config=>config.indicationSourceId),[...sar.catalog.strategyIndicationSources])
+  assert.deepEqual(sarGeometries.map(config=>config.indicationSourceId),[...sar.catalogs[0].strategyIndicationSources])
   assert.equal(new Set(sarGeometries.map(config=>config.id)).size,2)
   assert.equal(fresh.control.running,false)
   fresh.shutdown()
@@ -48,11 +78,11 @@ test("new and old Exec connections enable both profiles and save independent opt
   upgraded.shutdown()
   const reopened=new TerminalRuntime("bingx-x02",store)
   assert.equal(reopened.snapshot().settings.strategyTrendDcaEnabled,"false")
-  assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount+2)
+  assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount+8)
   reopened.saveFlatSettings({strategyTrendDcaEnabled:true,variantDcaEnabled:false})
   assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount)
   reopened.saveFlatSettings({variantDcaEnabled:true})
-  assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount+3)
+  assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount+9)
   reopened.shutdown();store.close()
 })
 

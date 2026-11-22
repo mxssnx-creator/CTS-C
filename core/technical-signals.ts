@@ -5,9 +5,7 @@ export function technicalSignal(state:SignalState,bar:Candle,type:string,period:
   const s=state.technical??={count:0,bars:[],fast:bar.close,slow:bar.close,trSum:0,plusSum:0,minusSum:0,dxSum:0,dxCount:0}
   const prior=s.bars.at(-1),fast=s.fast,slow=s.slow,atr=s.atr
   const channelReady=s.bars.length>=period
-  const channel=s.bars.slice(-period)
-  const upper=channelReady?Math.max(...channel.map(b=>b.high)):Infinity,lower=channelReady?Math.min(...channel.map(b=>b.low)):-Infinity
-  const averageVolume=channelReady?channel.reduce((sum,b)=>sum+b.volume,0)/channel.length:0
+  const channelStart=s.bars.length-period
   if(prior){
     const tr=Math.max(bar.high-bar.low,Math.abs(bar.high-prior.close),Math.abs(bar.low-prior.close))
     const up=bar.high-prior.high,down=prior.low-bar.low,plus=up>down&&up>0?up:0,minus=down>up&&down>0?down:0
@@ -24,12 +22,19 @@ export function technicalSignal(state:SignalState,bar:Candle,type:string,period:
   s.fast+=2/(period+1)*(bar.close-s.fast);s.slow+=2/(2*period+1)*(bar.close-s.slow)
   let signal:Direction|undefined
   if(channelReady&&prior){
+    let upper=-Infinity,lower=Infinity,volume=0
+    if(type.startsWith('Break')&&type!=='Break_ATR')for(let i=channelStart;i<s.bars.length;i++){
+      const previous=s.bars[i]
+      upper=Math.max(upper,previous.high);lower=Math.min(lower,previous.low);volume+=previous.volume
+    }
     const long=s.fast>s.slow&&s.slow>slow&&bar.close>s.fast,short=s.fast<s.slow&&s.slow<slow&&bar.close<s.fast
     if(type==='Trend'){if(long)signal='long';else if(short)signal='short'}
     if(type==='Trend_ADX'&&s.adx!==undefined&&s.adx>=20){if(long&&s.plus!>s.minus!)signal='long';else if(short&&s.minus!>s.plus!)signal='short'}
     if(type==='Trend_Efficiency'){
-      const closes=[...channel.map(b=>b.close),bar.close],distance=closes.slice(1).reduce((sum,c,i)=>sum+Math.abs(c-closes[i]),0)
-      const efficiency=distance?Math.abs(bar.close-closes[0])/distance:0
+      let distance=0
+      for(let i=channelStart+1;i<s.bars.length;i++)distance+=Math.abs(s.bars[i].close-s.bars[i-1].close)
+      distance+=Math.abs(bar.close-prior.close)
+      const efficiency=distance?Math.abs(bar.close-s.bars[channelStart].close)/distance:0
       if(efficiency>=.3){if(long)signal='long';else if(short)signal='short'}
     }
     // Adapted from CTS-G trend fade / reversal-break research. No imported training claims.
@@ -48,6 +53,7 @@ export function technicalSignal(state:SignalState,bar:Candle,type:string,period:
       }
     }
     if(type==='Break'||type==='Break_Volume'){
+      const averageVolume=volume/period
       const volumeReady=type!=='Break_Volume'||(averageVolume>0&&bar.volume>=1.5*averageVolume)
       if(volumeReady){if(bar.close>upper&&long)signal='long';else if(bar.close<lower&&short)signal='short'}
     }
@@ -63,6 +69,14 @@ export function technicalSignal(state:SignalState,bar:Candle,type:string,period:
         if(signal)s.retest=undefined
       }else s.retest=undefined
       if(!s.retest&&!signal){if(bar.close>upper&&long)s.retest={direction:'long',level:upper,expires:s.count+period};else if(bar.close<lower&&short)s.retest={direction:'short',level:lower,expires:s.count+period}}
+    }
+    if(type==='Break_Continuation'){
+      if(bar.close>upper&&long)s.retest={direction:'long',level:upper,expires:s.count+period}
+      else if(bar.close<lower&&short)s.retest={direction:'short',level:lower,expires:s.count+period}
+      const breakout=s.retest
+      if(breakout&&s.count<=breakout.expires&&
+          (breakout.direction==='long'?long&&bar.close>breakout.level:short&&bar.close<breakout.level))signal=breakout.direction
+      else s.retest=undefined
     }
   }
   const retained=type==='Break_Reversal'?Math.max(period+1,60):type==='Trend_Fade'?Math.max(period+1,31):period

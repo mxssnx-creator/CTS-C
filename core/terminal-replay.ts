@@ -1,4 +1,5 @@
-import { generateStrategyCatalog, STRATEGY_RANGES } from "./catalog"
+import { generateEngineCatalog, generateStrategyCatalog, STRATEGY_RANGES } from "./catalog"
+import { EXEC_PROFILES } from "./exec-profile"
 import { replayStrategy,strategySignalTrace } from "./replay"
 import { aggregateCostNormalizedResults, describeProfitFactor } from "./metrics"
 import { STAGES, TradingEngine, windowMetrics } from "./engine"
@@ -92,6 +93,24 @@ export async function runExecProgressionReplay(symbol: string, candles: MarketCa
   const totals = () => ({ closed:0, wins:0, profit:0, loss:0, net:0, cost:0 })
   const books = Object.fromEntries([...STAGES, "executed"].map(stage=>[stage,totals()]))
   const forwarded = new Map(STAGES.filter(stage=>stage!=="live").map(stage=>[stage,totals()]))
+  const labels = new Map(EXEC_PROFILES.map(profile=>[profile.id,profile.label]))
+  const sourceBooks = new Map<string, {source:string; profile?:string; timeframe:number; period?:number; execCloses:number; open:number; accepted:ReturnType<typeof totals>}>()
+  const geometries = new Map<string,NonNullable<ReturnType<typeof sourceBooks.get>>>()
+  for (const config of generateEngineCatalog(engine.settings, settings.symbolFees?.[symbol])) {
+    const timeframe = config.signalTimeframeMinutes ?? 1
+    if (timeframe < 1) continue
+    const source = config.indicationSourceId ?? config.type
+    const period = config.indicationSourceId ? undefined : config.position_cost_step
+    const profile = config.execProfile ? labels.get(config.execProfile) : undefined
+    const key = JSON.stringify([source,config.execProfile,timeframe,period])
+    let book = sourceBooks.get(key)
+    if (!book) {
+      book = {source,profile,timeframe,period,execCloses:0,open:0,accepted:totals()}
+      sourceBooks.set(key,book)
+    }
+    geometries.set(config.id,book)
+  }
+  const sourceBook = (configId:string) => geometries.get(configId.split(".branch2.",1)[0])
   const record = (row: ReturnType<typeof totals>, trade: Readonly<ClosedTrade>) => {
     row.closed++
     row.wins += Number(trade.netReturnPct>0)
@@ -105,6 +124,11 @@ export async function runExecProgressionReplay(symbol: string, candles: MarketCa
     if (trade.openedAt < holdout) return
     record(books[trade.stage],trade)
     if (trade.executed) record(books.executed,trade)
+    if (trade.stage === "exec") {
+      const book = sourceBook(trade.configId)!
+      book.execCloses++
+      if (trade.executed) record(book.accepted,trade)
+    }
     const row = trade.stage === "live" ? undefined : forwarded.get(trade.stage)
     if (row && (trade.progressionProof || trade.executed)) record(row,trade)
   })
@@ -124,9 +148,14 @@ export async function runExecProgressionReplay(symbol: string, candles: MarketCa
       nextYield = performance.now()+20
     }
   }
+  for (const position of engine.snapshot({laneLimit:0,positionStage:"exec"}).positions) {
+    if (position.executed && position.openedAt >= holdout) sourceBook(position.configId)!.open++
+  }
+  const indications = [...sourceBooks.values()].map(({accepted,...source})=>({...source,...summarize(accepted)}))
+    .sort((a,b)=>b.closed-a.closed||b.open-a.open||b.execCloses-a.execCloses||a.source.localeCompare(b.source))
   return ([...STAGES,"executed"] as const).map(stage=>{
     const postStage = stage === "live" || stage === "executed" ? undefined : forwarded.get(stage)
-    return {stage,...summarize(books[stage]),...(postStage&&{postStage:summarize(postStage)})}
+    return {stage,...summarize(books[stage]),...(postStage&&{postStage:summarize(postStage)}),...(stage==="executed"&&{indications})}
   })
 }
 

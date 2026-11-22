@@ -50,6 +50,23 @@ test('breakout references exclude the current high and volume confirmation requi
  assert.equal(advanceSignal(noVolume,103,'Break_Volume',10,bar(103,30,0)),undefined)
 })
 
+test('breakout continuation requires a closed channel break and ends after the closing price loses its level',()=>{
+ for(const side of [1,-1]){
+  const state=newSignalState(),direction=side===1?'long':'short',type='Break_Continuation'
+  for(let i=0;i<30;i++)advanceSignal(state,100+side*i,type,10,bar(100+side*i,i))
+  const close=100+side*30
+  const impulse=bar(close,30)
+  if(side===1)impulse.high+=5;else impulse.low-=5
+  assert.equal(advanceSignal(state,close,type,10,impulse),direction)
+  const continuation=100+side*31
+  assert.equal(advanceSignal(state,continuation,type,10,bar(continuation,31)),direction)
+  const fail=100+side*20
+  assert.equal(advanceSignal(state,fail,type,10,bar(fail,32)),undefined)
+  assert.equal(state.technical!.retest,undefined)
+  assert.equal(advanceSignal(state,continuation,type,10,bar(continuation,33)),undefined)
+ }
+})
+
 test('every new indication is causal, serializable and bounded',()=>{
  const candles=Array.from({length:1000},(_,i)=>bar(100+i*.005+5*Math.sin(i/15),i,i%11===0?4:1))
  for(const type of TECHNICAL_INDICATIONS){
@@ -102,7 +119,7 @@ test('Trend/Break replay and engine exits match over periods, timeframes and all
 
 test('all Trend/Break ranges remain complete and grid configuration does not truncate candidates',()=>{
  const configs=generateStrategyCatalog('grid',{strategyIndicationTypes:[...TECHNICAL_INDICATIONS],strategySignalPeriods:[10,20],strategySignalTimeframes:[1,5]})
- assert.equal(configs.length,9*29*15*3*2*2);assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)
+ assert.equal(configs.length,TECHNICAL_INDICATIONS.length*29*15*3*2*2);assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)
  for(const type of TECHNICAL_INDICATIONS)for(const range of ['Micro','Minimal','Short','Normal','Long','Wide'])for(const exit of ['fixed','trailing','trailing-only'])assert.ok(configs.some(c=>c.type===type&&c.range===range&&c.exitMode===exit))
 })
 

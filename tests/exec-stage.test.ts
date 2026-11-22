@@ -171,6 +171,11 @@ test("terminal holdout reports only the settled positions that fed a child", asy
   assert.equal(byStage.exec.postStage!.closed,byStage.executed.closed)
   assert.equal(byStage.exec.postStage!.profitFactor,byStage.live.profitFactor)
   assert.equal(byStage.live.postStage,undefined)
+  const [trend] = byStage.executed.indications!
+  assert.equal(trend.source,"Trend")
+  assert.equal(trend.execCloses,byStage.exec.closed)
+  assert.equal(trend.closed,byStage.executed.closed)
+  assert.equal(trend.profitFactor,byStage.live.profitFactor)
 })
 
 test("Exec eligibility verifies the complete opening receipt restored with the matching Exec position", () => {

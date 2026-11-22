@@ -1,8 +1,7 @@
 import { checkExecWindows, checkLastNGrid, EXEC_EVALUATION_STAGES, execBlockPolicy, execShortOutcomes, LAST_N_STAGES, POSITIVE_EXEC_OUTCOME, type EvaluationStage, type ExecWindows, type LastNGrid, type LegacyEvaluationStage } from "./last-n-grid"
 import { blockRequired, type BlockPolicy, type Polarity } from "../shared/cts-lastn/blocks.ts"
 import type { Coordination, StrategyConfig } from "./types"
-import preset from "../research-data/exec-dca-trend-preset.json"
-import { PROFILE_BASE_COORDINATIONS, PROFILE_CHILD_COORDINATIONS } from "./exec-profile"
+import { EXEC_PROFILES, PROFILE_BASE_COORDINATIONS, PROFILE_CHILD_COORDINATIONS } from "./exec-profile"
 
 type ChildStage = Exclude<EvaluationStage, "base">
 export type StageCoordinations = Partial<Record<ChildStage, readonly Coordination[]>>
@@ -19,14 +18,13 @@ export function checkStageCoordinations(raw: unknown): StageCoordinations {
   return raw as StageCoordinations
 }
 
-const profileWindows = checkExecWindows(preset.strategyExecWindows)
 function baseRequirements(windows: ExecWindows | undefined): number[] {
   if (!windows) return []
   const {base} = windows
   return base.long.flatMap(long=>base.short.flatMap(short=>execShortOutcomes(base,short)
     .flatMap(()=>base.last.flatMap(last=>(base.lastOutcomes??POSITIVE_EXEC_OUTCOME).map(()=>long+short+last))))).sort((a,b)=>a-b)
 }
-const profileRequirements = baseRequirements(profileWindows)
+const profiles=new Map(EXEC_PROFILES.map(profile=>[profile.id,{windows:profile.windows,required:baseRequirements(profile.windows)}]))
 
 /** Geometry is immutable. Only prefixes requested by an admitted parent get a configuration. */
 export class ParentBranches {
@@ -48,7 +46,7 @@ export class ParentBranches {
   }
 
   baseSampleCounts(config: StrategyConfig): readonly number[] {
-    return config.execProfile ? profileRequirements : this.commonBaseSampleCounts
+    return config.execProfile ? profiles.get(config.execProfile)!.required : this.commonBaseSampleCounts
   }
 
   private policy(long: number, short: number, last: number, shortOutcome:Polarity,lastOutcome:Polarity): BlockPolicy {
@@ -80,7 +78,7 @@ export class ParentBranches {
     const key = parent.id + "/" + (coordination ?? "") + "/" + stage
     let configs = this.children.get(key)
     if (!configs) {
-      const plan = parent.execProfile ? profileWindows : this.windows
+      const plan = parent.execProfile ? profiles.get(parent.execProfile)!.windows : this.windows
       if (plan) {
         const windows = plan[stage]
         const longs = stage === "base" ? plan.base.long : plan[stage].long.map(mode => mode === "none" ? 0 : parent.branch!.windows!.base!.long)
@@ -114,7 +112,7 @@ export class ParentBranches {
     const branch = saved.branch
     if (!geometry || !branch || branch.geometryId !== geometry.id || !Array.isArray(branch.ancestors) ||
         branch.ancestors.length >= this.evaluationStages.length || Boolean(branch.windows) !== this.exec) return
-    const plan = geometry.execProfile ? profileWindows : this.windows
+    const plan = geometry.execProfile ? profiles.get(geometry.execProfile)!.windows : this.windows
     let parent = geometry
     for (let index = 0; index <= branch.ancestors.length; index++) {
       const stage = this.evaluationStages[index]
