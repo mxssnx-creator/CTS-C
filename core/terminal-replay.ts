@@ -108,11 +108,18 @@ export async function runExecProgressionReplay(symbol: string, candles: MarketCa
     const row = trade.stage === "live" ? undefined : forwarded.get(trade.stage)
     if (row && (trade.progressionProof || trade.executed)) record(row,trade)
   })
-  let nextYield = performance.now()+20
-  for (const bar of candles) {
+  const closedBars = candles.map(bar=>({...bar,timestamp:(bar.time+60)*1000}))
+  let batchSize = 8, nextYield = performance.now()+20
+  for (let start=0; start<closedBars.length;) {
     signal?.throwIfAborted()
-    engine.processCandles(symbol,[{ ...bar,timestamp:(bar.time+60)*1000 }],{eventLimit:0})
-    if (performance.now()>=nextYield) {
+    const batch = closedBars.slice(start,start+batchSize)
+    const began = performance.now()
+    engine.processCandles(symbol,batch,{eventLimit:0})
+    const finished = performance.now()
+    start += batch.length
+    const msPerBar = Math.max(1,finished-began)/batch.length
+    batchSize = Math.max(1,Math.min(64,batchSize*2,Math.floor(10/msPerBar)))
+    if (finished>=nextYield) {
       await new Promise<void>(resolve=>setImmediate(resolve))
       nextYield = performance.now()+20
     }
