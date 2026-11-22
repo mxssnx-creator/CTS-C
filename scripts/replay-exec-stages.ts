@@ -10,14 +10,17 @@ import { describeProfitFactor } from "../core/metrics"
 import { EXIT_MODES, type Candle, type ClosedTrade, type EngineSettings } from "../core/types"
 import { checkExecWindows } from "../core/last-n-grid"
 
-type Scenario = { tapeMinutes?: number; warmupMinutes?: number; fitMinutes?: number; groupSources?: boolean; settings?: Partial<EngineSettings> }
-type Job = { file: string; family: "ordinary" | "signals"; profile: "short" | "mixed" | "full"; scenario: Scenario }
-type Totals = { closes:number; wins:number; profit:number; loss:number; fees:number; pnl:number }
-const empty = (): Totals => ({ closes:0,wins:0,profit:0,loss:0,fees:0,pnl:0 })
+type Scenario = { tapeMinutes?: number; warmupMinutes?: number; fitMinutes?: number; groupSources?: boolean; market?: boolean; settings?: Partial<EngineSettings> }
+type Job = { files: string[]; family: "ordinary" | "signals"; profile: "short" | "mixed" | "full"; scenario: Scenario }
+type Totals = { closes:number; wins:number; profit:number; loss:number; fees:number; pnl:number; cashProfit:number; cashLoss:number }
+const empty = (): Totals => ({ closes:0,wins:0,profit:0,loss:0,fees:0,pnl:0,cashProfit:0,cashLoss:0 })
 type Cohort = { fit: Totals; holdout: Totals }
 const cohort = (): Cohort => ({ fit:empty(),holdout:empty() })
 const periods = ["fit","holdout"] as const
-const score = (row:Totals) => ({...row,...describeProfitFactor(row.profit,row.loss,row.closes)})
+const score = (row:Totals) => {
+  const cash=describeProfitFactor(row.cashProfit,row.cashLoss,row.closes)
+  return {...row,...describeProfitFactor(row.profit,row.loss,row.closes),cashProfitFactor:cash.profitFactor,cashPfState:cash.pfState}
+}
 const scoredCohorts = (rows:Record<string,Cohort>) => Object.fromEntries(Object.entries(rows)
   .map(([key,row])=>[key,{fit:score(row.fit),holdout:score(row.holdout)}]))
 function merge(target:Record<string,Cohort>, source:Record<string,Cohort>) {
@@ -34,14 +37,19 @@ function shortWidth(configId:string):string {
   return short
 }
 
-function run({file,family,profile,scenario}: Job) {
+function run({files,family,profile,scenario}: Job) {
   const start = performance.now()
-  const symbol = file.split("/").at(-1)!.replace(".json","")
-  const bytes = readFileSync(file)
-  const bars = JSON.parse(bytes.toString()) as Candle[]
   const tapeMinutes = scenario.tapeMinutes ?? 5760
-  if (bars.length !== tapeMinutes) throw new Error(`Expected ${tapeMinutes} minute bars for ${symbol}`)
-  if (bars.some((bar,index) => bar.timestamp !== bars[0].timestamp + index * 60_000 || bar.timestamp % 60_000 !== 0)) throw new Error(`Incomplete minute tape for ${symbol}`)
+  const inputs=files.map(file=>{
+    const symbol=file.split("/").at(-1)!.replace(".json",""), bytes=readFileSync(file)
+    const bars=JSON.parse(bytes.toString()) as Candle[]
+    if(bars.length!==tapeMinutes)throw new Error(`Expected ${tapeMinutes} minute bars for ${symbol}`)
+    if(bars.some((bar,index)=>bar.timestamp!==bars[0].timestamp+index*60_000||bar.timestamp%60_000!==0))throw new Error(`Incomplete minute tape for ${symbol}`)
+    return {symbol,bars,tape:{firstClose:bars[0].timestamp,lastClose:bars.at(-1)!.timestamp,sha256:createHash("sha256").update(bytes).digest("hex")}}
+  })
+  const [{bars,tape}]=inputs, symbols=inputs.map(input=>input.symbol)
+  const symbol=symbols.length===1?symbols[0]:"market"
+  if(inputs.some(input=>input.tape.firstClose!==tape.firstClose))throw new Error("Market replay tapes need the same starting close")
   const warmupMinutes = scenario.warmupMinutes ?? 4320
   const fitMinutes = scenario.fitMinutes ?? 720
   const from = bars[warmupMinutes].timestamp, split = from + fitMinutes * 60_000
@@ -52,7 +60,7 @@ function run({file,family,profile,scenario}: Job) {
     main:profile==="mixed"?mixed:short, real:profile==="mixed"?mixed:short, exec:profile==="mixed"?mixed:short,
   })
   const engine = new TradingEngine({
-    stageGateMode:"exec-branches", ...scenario.settings, symbols:[symbol],
+    stageGateMode:"exec-branches", ...scenario.settings, symbols,
     catalog: {
       strategyEnabledRanges:profile==="full"?["Micro"]:["Micro","Low-Range","Minimal","Short","Normal","Long","Wide"],
       strategyTpSteps:profile==="full"?[2]:Array.from({length:29},(_,index)=>index+2), strategySlRatios:[1],
@@ -71,14 +79,18 @@ function run({file,family,profile,scenario}: Job) {
   const shortAccepted = Object.fromEntries(execShorts.map(count=>[count,cohort()]))
   const variants: Record<string, Cohort> = {}
   const groups: Record<string, Cohort> = {}
-  const sources = scenario.groupSources ? new Map(generateEngineCatalog(settings,settings.symbolFees?.[symbol])
-    .map(config=>[config.id,config.execProfile??config.indicationSourceId??config.type])) : undefined
+  const sources = scenario.groupSources ? new Map(symbols.flatMap(symbol=>generateEngineCatalog(settings,settings.symbolFees?.[symbol])
+    .map(config=>[config.id,config.execProfile??config.indicationSourceId??config.type] as const))) : undefined
   const distinct = {fit:new Map<string,{n:number;returns:number}>(),holdout:new Map<string,{n:number;returns:number}>()}
   const shortPaths = Object.fromEntries(execShorts.map(count=>[count,{fit:new Set<string>(),holdout:new Set<string>()}]))
   const awaitingMirror = new Map<string,Readonly<ClosedTrade>>()
   let crossingCloses = 0
   engine.observeStageCloses(trade=>{
-    if (trade.executed) awaitingMirror.set(trade.id,trade)
+    if (trade.executed) {
+      const proof=[...(trade.admission??[]),trade.executionProof]
+      if(proof.length!==4||proof.some((gate,i)=>!gate||gate.stage!==STAGES[i]||!gate.qualified||gate.checkedAt!==trade.openedAt||gate.count!==gate.required||gate.profitFactor===null||gate.profitFactor<gate.minPF))throw new Error(`Invalid Exec admission for ${trade.id}`)
+      awaitingMirror.set(trade.id,trade)
+    }
     if (trade.stage==="live") {
       const parent = awaitingMirror.get(trade.parentPositionId??"")
       if (!parent||parent.openedAt!==trade.openedAt||parent.closedAt!==trade.closedAt||parent.direction!==trade.direction||
@@ -99,6 +111,8 @@ function run({file,family,profile,scenario}: Job) {
       row.loss += Math.max(0,-trade.netReturnPct)
       row.fees += trade.cost
       row.pnl += trade.netPnl
+      row.cashProfit += Math.max(0,trade.netPnl)
+      row.cashLoss += Math.max(0,-trade.netPnl)
     }
     record(stages[trade.stage][period])
     if (trade.progressionProof || trade.executed) record(postStages[trade.stage][period])
@@ -126,7 +140,7 @@ function run({file,family,profile,scenario}: Job) {
       for (const group of [type, range?.split("_")[0], trade.coordination, trade.executionProof?.autoPf?.mode ?? "static"].filter(Boolean)) {
         record((groups[group]??=cohort())[period])
       }
-      const path = [trade.direction,trade.openedAt,trade.closedAt,trade.entryPrice,trade.exitPrice].join("/")
+      const path = [trade.symbol,trade.direction,trade.openedAt,trade.closedAt,trade.entryPrice,trade.exitPrice].join("/")
       const outcome = distinct[period].get(path) ?? {n:0,returns:0}
       outcome.n++
       outcome.returns += trade.netReturnPct
@@ -134,7 +148,8 @@ function run({file,family,profile,scenario}: Job) {
       shortPaths[shortWidth(trade.configId)][period].add(path)
     }
   })
-  engine.processCandles(symbol,bars,{eventLimit:0})
+  if(scenario.market)engine.processMarketCandles(Object.fromEntries(inputs.map(input=>[input.symbol,input.bars])))
+  else engine.processCandles(symbol,bars,{eventLimit:0})
   const snapshot = engine.snapshot({laneStage:"exec",positionStage:"exec"})
   const executed = snapshot.stages.find(row=>row.stage==="exec")!.executed!
   if (awaitingMirror.size || executed.closed !== snapshot.stages.find(row=>row.stage==="live")!.closed ||
@@ -158,7 +173,7 @@ function run({file,family,profile,scenario}: Job) {
     return [period,{closed:unique[period],profit,loss}]
   }))
   return { symbol, ms:performance.now()-start, heapMiB:process.memoryUsage().heapUsed/2**20,
-    tape:{firstClose:bars[0].timestamp,lastClose:bars.at(-1)!.timestamp,sha256:createHash("sha256").update(bytes).digest("hex")},
+    tape,...(scenario.market&&{tapes:Object.fromEntries(inputs.map(input=>[input.symbol,input.tape]))}),
     lanes:Object.fromEntries(snapshot.stages.map(row=>[row.stage,row.currentLanes])),
     enoughSamples:Object.fromEntries(snapshot.stages.map(row=>[row.stage,row.currentEnoughSamples])),
     baseCandidates:snapshot.stages[0].baseCandidates,
@@ -180,7 +195,9 @@ async function main() {
   const tapeMinutes = scenario.tapeMinutes ?? 5760, warmupMinutes = scenario.warmupMinutes ?? 4320, fitMinutes = scenario.fitMinutes ?? 720
   if (!Number.isSafeInteger(tapeMinutes) || !Number.isSafeInteger(warmupMinutes) || warmupMinutes < 1 || warmupMinutes >= tapeMinutes ||
       !Number.isSafeInteger(fitMinutes) || fitMinutes < 0 || warmupMinutes + fitMinutes > tapeMinutes) throw new Error("Invalid chronological replay slices")
-  const jobs = files.map(file=>({file:join(directory,file),family:familyText as Job["family"],profile:profileText as Job["profile"],scenario}))
+  if(scenario.market!==undefined&&typeof scenario.market!=="boolean")throw new Error("Invalid market replay mode")
+  const paths=files.map(file=>join(directory,file))
+  const jobs = (scenario.market?[paths]:paths.map(file=>[file])).map(files=>({files,family:familyText as Job["family"],profile:profileText as Job["profile"],scenario}))
   const fullDuration = performance.now()
   const results: ReturnType<typeof run>[] = []
   writeFileSync(output+".ndjson","")
@@ -232,7 +249,7 @@ async function main() {
     .sort(([,a],[,b])=>score(b.fit).profitFactor-score(a.fit).profitFactor).slice(0,10)
     .map(([config,row])=>({config,fit:score(row.fit),holdout:score(row.holdout)}))
   writeFileSync(output,JSON.stringify({
-    profile:profileText,family:familyText, symbols:results.length,workers,durationMs:performance.now()-fullDuration,
+    profile:profileText,family:familyText, symbols:files.length,workers,durationMs:performance.now()-fullDuration,
     warmupMinutes, fitMinutes, holdoutMinutes:tapeMinutes-warmupMinutes-fitMinutes, settings:scenario.settings,
     stages:scoredCohorts(stages),postStages:scoredCohorts(postStages),groups:scoredCohorts(groups),
     execShort:{coverage:shortCoverage,book:scoredCohorts(shortBooks),accepted:scoredCohorts(shortAccepted),unique:shortUnique},

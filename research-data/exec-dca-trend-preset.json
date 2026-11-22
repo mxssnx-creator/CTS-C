@@ -7,6 +7,8 @@
   "strategyTrendRecoveryDcaEnabled": false,
   "strategyBreakoutRecoveryDcaEnabled": false,
   "strategySar04DcaEnabled": false,
+  "strategyInverseRecoveryDcaEnabled": false,
+  "strategyActivityMomentumDcaEnabled": false,
   "historyCandles": 14400,
   "strategyEnabledRanges": ["Short"],
   "strategyIndicationTypes": ["Trend"],

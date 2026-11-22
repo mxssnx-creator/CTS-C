@@ -135,12 +135,15 @@ export class TerminalRuntime {
     validateObservedCandles(candles)
     const latest=Math.floor(Date.now()/60000)*60000
     if(candles.some((bar,i)=>bar.timestamp>latest||bar.timestamp%60000!==0||(i>0&&bar.timestamp-candles[i-1].timestamp!==60000)))throw new Error('Warmup requires complete contiguous one-minute observations')
-    let batchSize=1
+    // This path is offline. Reuse each ported signal vector across a useful
+    // batch while still yielding and renewing ownership between chunks.
+    let batchSize=64
     for(let offset=0;offset<candles.length;){
       this.ensureLease()
       const chunk=candles.slice(offset,offset+batchSize), began=performance.now()
       this.engine.processCandles(symbol,chunk,{allowExecution:false,eventLimit:0})
-      batchSize=historyBatchSize(chunk.length,performance.now()-began)
+      const elapsed=Math.max(1,performance.now()-began)
+      batchSize=Math.max(1,Math.min(512,chunk.length*2,Math.floor(200*chunk.length/elapsed)))
       offset+=chunk.length
       await new Promise<void>(resolve=>setImmediate(resolve))
     }

@@ -9,6 +9,10 @@ const classicVariants = [
   ["srsi-14-10","Stochastic RSI 14 · 10/90"],
   ["srsi-14-20","Stochastic RSI 14 · 20/80"], ["obv-20","OBV vs EMA 20"], ["obv-50","OBV vs EMA 50"],
   ["mfi-14-10","Money Flow Index 14 · 10/90"], ["mfi-14-20","Money Flow Index 14 · 20/80"],
+  ["act-burst-1.5","Range burst · 1.5×"], ["act-burst","Range burst · 1.8×"], ["act-burst-2.5","Range burst · 2.5×"],
+  ["act-hf","ATR momentum · 3 bars"], ["act-hf-5","ATR momentum · 5 bars"], ["act-hf-8","ATR momentum · 8 bars"],
+  ["act-shift","Range shift · 20/60"], ["act-chop","Low-ADX RSI fade"],
+  ["move-impulse-4-1.2","Price impulse · 4 bars / 1.2 ATR"], ["move-impulse","Price impulse · 6 bars / 1.5 ATR"],
 ] as const
 
 /** Existing CTS-X RSI momentum and CTS-A-O quarter-hour candidates, exposed as independent sources. */

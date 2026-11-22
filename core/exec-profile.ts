@@ -31,6 +31,14 @@ export const EXEC_PROFILES = [
   {id:"sar-af04-dca-v1", setting:"strategySar04DcaEnabled", label:"Parabolic SAR 0.04/0.10 + DCA", enabledByDefault:true, windows:referenceWindows, catalogs:[{
     strategyIndicationTypes:["Tactic"], strategyIndicationSources:["parabolic-sar-0.04-0.1"], strategySlRatios:[.8],
   }]},
+  {id:"inverse-recovery-dca-v1", setting:"strategyInverseRecoveryDcaEnabled", label:"Inverse RSI turn and SAR + DCA", enabledByDefault:false, windows:recoveryWindows, catalogs:[{
+    strategyIndicationTypes:["Inverse"], strategyIndicationSources:["inverse-rsi2-turn-10","inverse-follow-sar-std"],
+    strategyEnabledRanges:["Minimal","Low-Range"], strategyTpSteps:[7], strategySlRatios:[1.2],
+  }]},
+  {id:"activity-momentum-dca-v1", setting:"strategyActivityMomentumDcaEnabled", label:"Activity ATR Momentum + DCA", enabledByDefault:false, windows:recoveryWindows, catalogs:[{
+    strategyIndicationTypes:["Tactic"], strategyIndicationSources:["act-hf-8"],
+    strategyEnabledRanges:["Minimal"], strategyTpSteps:[8], strategySlRatios:[.8],
+  }]},
 ] as const
 export type ExecProfile = typeof EXEC_PROFILES[number]
 export const PROFILE_BASE_COORDINATIONS: readonly Coordination[] = ["normal", "dca"]

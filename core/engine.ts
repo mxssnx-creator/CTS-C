@@ -11,7 +11,7 @@ import { generateEngineCatalog } from "./catalog"
 import { EXEC_PROFILES, PROFILE_BASE_COORDINATIONS, PROFILE_DCA_SIZING, execProfileEnabled } from "./exec-profile"
 import { BRANCH_COORDINATIONS as COORDINATIONS, ParentBranches, checkStageCoordinations } from "./stage-branches"
 import { checkExecWindows, checkLastNGrid, DEFAULT_EXEC_MIN_PF, EXEC_EVALUATION_STAGES, LAST_N_STAGES, lastNVariantCount, type EvaluationStage } from "./last-n-grid"
-import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals, newSignalState } from "./replay"
+import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals, marketReferenceBars, newSignalState } from "./replay"
 import { describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { isFixedTrailing, observedExit } from "./exits"
 import { ConfigStageWindows, type WindowEvidence } from "./config-stage-windows"
@@ -31,6 +31,8 @@ type PortedSignalGroup = {minutes: number; ids: string[]; routes: SignalRoute[];
 type SignalFrame = {routes: SignalRoute[]; ordinary: SignalRoute[]; ported: PortedSignalGroup[]}
 type CatalogSignals = {configIds:Set<string>; minute:SignalFrame; micro:SignalFrame; keys:unknown[][]}
 type SymbolSignals = {catalog:CatalogSignals; keys:string[]; portedKeys:Map<number,string>}
+type CandleProcessing = {allowExecution?:boolean;eventLimit?:number;barSeconds?:10|60}
+type PortedHistory = Map<number,ReturnType<typeof historicalPortedSignals>>
 
 /** Share geometry routing across symbols with the same catalog. Indicator state remains per symbol. */
 function catalogSignals(configs: readonly StrategyConfig[]): CatalogSignals {
@@ -1010,7 +1012,11 @@ export class TradingEngine {
     }
   }
 
-  processCandles(symbolInput: string, candles: Candle[], options: { allowExecution?: boolean;eventLimit?:number;barSeconds?:10|60 } = {}): EngineEvent[] {
+  processCandles(symbolInput: string, candles: Candle[], options: CandleProcessing = {}): EngineEvent[] {
+    return this.processObservedCandles(symbolInput,candles,options)
+  }
+
+  private processObservedCandles(symbolInput:string,candles:Candle[],options:CandleProcessing,prepared?:PortedHistory):EngineEvent[] {
     const symbol = normalizeSymbol(symbolInput), s = this.state.settings
     const symbolSignals = this.signalsBySymbol.get(symbol)
     const micro=options.barSeconds===10,cursors=micro?(this.state.lastMicroTimestamp??={}):this.state.lastTimestamp
@@ -1024,8 +1030,8 @@ export class TradingEngine {
     const coordinations = COORDINATIONS.filter(coordination => coordination === "normal" || s.coordinations[coordination]?.enabled)
     // Validate the complete batch before any mutation, so rejected input is atomic.
     validateObservedCandles(candles)
-    const historicalSignals=new Map<number,ReturnType<typeof historicalPortedSignals>>()
-    if(frame?.ported.length&&!micro&&!options.allowExecution&&candles.length>1){
+    const historicalSignals=prepared??new Map<number,ReturnType<typeof historicalPortedSignals>>()
+    if(!prepared&&frame?.ported.length&&!micro&&!options.allowExecution&&candles.length>1){
       const unseen=candles.filter(c=>c.timestamp>(this.state.lastTimestamp[symbol]??0))
       if(unseen.length>1)for(const group of frame.ported)if(!group.usesReferences){
         const state=this.state.signals[symbolSignals!.portedKeys.get(group.minutes)!]??=newSignalState()
@@ -1057,7 +1063,7 @@ export class TradingEngine {
       for(const group of frame?.ported ?? []){
         const state=this.state.signals[symbolSignals!.portedKeys.get(group.minutes)!]??=newSignalState()
         const history = historicalSignals.get(group.minutes)
-        const peers=group.usesReferences?s.symbols.filter(peer=>peer!==symbol).flatMap(peer=>{const rows=this.state.signals[portedStateKey(peer,group.minutes)]?.portedBars;return rows?[{symbol:peer,bars:rows}]:[]}):[]
+        const peers=!history&&group.usesReferences?s.symbols.filter(peer=>peer!==symbol).flatMap(peer=>{const rows=this.state.signals[portedStateKey(peer,group.minutes)]?.portedBars;return rows?[{symbol:peer,bars:rows}]:[]}):[]
         const output=history ? history.get(candle.timestamp) : advancePortedSources(state,candle,group.minutes,group.ids,{symbol,peers})
         for(const {config,slot} of group.routes){
           const signal=output?.get(config.indicationSourceId!)
@@ -1110,19 +1116,53 @@ export class TradingEngine {
   processMarketCandles(series: Readonly<Record<string, readonly Candle[]>>): void {
     const entries=Object.entries(series).map(([symbol,bars])=>({symbol:normalizeSymbol(symbol),bars,index:0}))
     const allowed=new Set(this.managedSymbols()), seen=new Set<string>()
-    for(const {symbol,bars} of entries){
+    for(const entry of entries){
+      const {symbol,bars}=entry
       if(!allowed.has(symbol)||seen.has(symbol))throw new Error("Invalid market candle symbol")
       seen.add(symbol);validateObservedCandles(bars)
       const cursor=this.state.lastTimestamp[symbol]??0
-      const firstNew=bars.find(bar=>bar.timestamp>cursor)
-      if(firstNew&&firstNew.timestamp<=this.state.updatedAt)throw new Error("Market candle batch overlaps the decision clock")
+      const index=bars.findIndex(bar=>bar.timestamp>cursor)
+      if(index>=0&&bars[index].timestamp<=this.state.updatedAt)throw new Error("Market candle batch overlaps the decision clock")
+      entry.index=index<0?bars.length:index
     }
     entries.sort((a,b)=>a.symbol<b.symbol?-1:a.symbol>b.symbol?1:0)
+    const drain=(batch:typeof entries,signals?:ReadonlyMap<string,PortedHistory>)=>{
+      for(;;){
+        let first:typeof entries[number]|undefined
+        for(const entry of batch)if(entry.index<entry.bars.length&&(!first||entry.bars[entry.index].timestamp<first.bars[first.index].timestamp))first=entry
+        if(!first)return
+        const bars=[first.bars[first.index++]],prepared=signals?.get(first.symbol)
+        if(prepared)this.processObservedCandles(first.symbol,bars,{eventLimit:0},prepared)
+        else this.processCandles(first.symbol,bars,{eventLimit:0})
+      }
+    }
+    const referenceFrames=new Set(entries.flatMap(({symbol})=>this.signalsBySymbol.get(symbol)?.catalog.minute.ported
+      .filter(group=>group.usesReferences).map(group=>group.minutes)??[]))
+    if(!referenceFrames.size){drain(entries);return}
     for(;;){
-      let first:typeof entries[number]|undefined
-      for(const entry of entries)if(entry.index<entry.bars.length&&(!first||entry.bars[entry.index].timestamp<first.bars[first.index].timestamp))first=entry
-      if(!first)return
-      this.processCandles(first.symbol,[first.bars[first.index++]],{eventLimit:0})
+      const oldest=Math.min(...entries.map(entry=>entry.bars[entry.index]?.timestamp??Infinity))
+      if(oldest===Infinity)return
+      const cutoff=oldest+512*60_000
+      const batch=entries.flatMap(entry=>{
+        const start=entry.index
+        while(entry.index<entry.bars.length&&entry.bars[entry.index].timestamp<cutoff)entry.index++
+        return entry.index===start?[]:[{symbol:entry.symbol,bars:entry.bars.slice(start,entry.index),index:0}]
+      })
+      const native=new Map(batch.map(entry=>[entry.symbol,entry.bars]))
+      const references=new Map([...referenceFrames].map(minutes=>[minutes,this.state.settings.symbols.map(symbol=>({symbol,
+        bars:marketReferenceBars(this.state.signals[portedStateKey(symbol,minutes)],native.get(symbol)??[],minutes),
+      }))]))
+      const prepared=new Map<string,PortedHistory>()
+      for(const {symbol,bars} of batch){
+        const sources=this.signalsBySymbol.get(symbol)
+        for(const group of sources?.catalog.minute.ported??[])if(group.usesReferences){
+          const state=this.state.signals[sources!.portedKeys.get(group.minutes)!]??=newSignalState()
+          const history=prepared.get(symbol)??new Map()
+          history.set(group.minutes,historicalPortedSignals(state,bars,group.minutes,group.ids,symbol,references.get(group.minutes)))
+          prepared.set(symbol,history)
+        }
+      }
+      drain(batch,prepared)
     }
   }
   /** Manage existing positions on observed quote ticks; signals remain closed-bar only. */

@@ -3,6 +3,7 @@ import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES } from "@/shared/cts-indications/research-sources"
+import { INVERSE_CONTINUATION_SOURCES } from "@/shared/cts-indications/inverse-sources"
 import { EXEC_PROFILES } from "@/core/exec-profile"
 import execDcaTrendPreset from "@/research-data/exec-dca-trend-preset.json"
 import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, RSI_CONTINUATION_SOURCES, SAR_CONTINUATION_SOURCES, THIN_OSCILLATOR_SOURCE_IDS } from "@/shared/cts-indications/oscillator-sources"
@@ -30,7 +31,7 @@ const EXIT_LABELS: Record<ExitMode, string> = {
   "trailing-fixed": "Fixed-distance trailing",
   "trailing-only-fixed": "Fixed-distance trailing-only",
 }
-const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES]
+const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES]
 const OSCILLATOR_FAMILIES = [["RSI configurations",[...RSI_VARIANTS,...RSI_CONTINUATION_SOURCES]],["Parabolic SAR configurations",[...PARABOLIC_SAR_VARIANTS,...SAR_CONTINUATION_SOURCES]]] as const
 const OSCILLATOR_IDS = new Set<string>(OSCILLATOR_FAMILIES.flatMap(([,sources])=>sources.map(source=>source.id)))
 

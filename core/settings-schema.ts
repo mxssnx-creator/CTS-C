@@ -15,6 +15,7 @@ import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
 import { MAX_WARMUP_CANDLES } from "./history"
 import { EXEC_PROFILES } from "./exec-profile"
+import { INVERSE_CONTINUATION_SOURCES } from "../shared/cts-indications/inverse-sources"
 
 export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"]
 export const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
@@ -117,7 +118,7 @@ const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
   strategyStopDistancePcts: SELECTABLE_STOP_DISTANCE_PCTS, strategyTrailDistancePcts: SELECTABLE_TRAIL_DISTANCE_PCTS,
   strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
-  strategyIndicationSources:[...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES].map(s=>s.id),
+  strategyIndicationSources:[...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES].map(s=>s.id),
   strategyLowRangeSources:LOW_RANGE_IDS,
   strategySignalsSources:SIGNALS_CATALOG.map(s=>s.id),
   strategySignalPeriods:[10,14,20,40,60],strategyCoreSignalPeriods:CORE_SIGNAL_PERIODS,strategySignalTimeframes:SIGNAL_TIMEFRAMES,
@@ -139,7 +140,7 @@ export const FACTOR_FIELDS = [
 ]
 export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, EXEC_PF_FIELD, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
 
-const sourceKinds=new Map([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES].map(s=>[s.id,s.kind]))
+const sourceKinds=new Map([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES].map(s=>[s.id,s.kind]))
 export function configurationCount(values: Record<string, unknown>) {
   const ranges = values.strategyEnabledRanges as string[]
   const types=values.strategyIndicationTypes as string[]

@@ -13,6 +13,7 @@ import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
 import preset from "../research-data/exec-dca-trend-preset.json"
 import { EXEC_PROFILES, execProfileEnabled } from "./exec-profile"
+import { INVERSE_CONTINUATION_SOURCES } from "../shared/cts-indications/inverse-sources"
 
 export const STRATEGY_RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"] as const
 export const STRATEGY_TYPES = INDICATIONS
@@ -69,7 +70,7 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   const microDistance=(key:string,fallback:number)=>{const value=Number(settings[key]??fallback);if(!Number.isFinite(value)||value<0||value>10)throw new Error(`Invalid ${key}`);return value}
   const microMinSl=microDistance('microMinSlDistancePct',.1)/100,microMinTrail=microDistance('microMinTrailDistancePct',.05)
   const selectedSources=values(settings,'strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES]).map(String)
-  const sourceKinds=new Map<string,string>([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES].map(s=>[s.id,s.kind]))
+  const sourceKinds=new Map<string,string>([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES].map(s=>[s.id,s.kind]))
   if(selectedSources.some(id=>!sourceKinds.has(id)))throw new Error('Unknown Tactic / Inverse source')
   const signalsSources=checkedSignalsSources(settings.strategySignalsSources)
   const lowRangeSources = selected(settings, "strategyLowRangeSources", LOW_RANGE_IDS, DEFAULT_LOW_RANGE_SOURCES)

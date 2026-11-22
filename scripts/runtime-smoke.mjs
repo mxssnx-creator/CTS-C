@@ -26,6 +26,8 @@ try{
  const snapshot=await fetch(origin+'/api/terminal',{headers:{Cookie:cookie}});assert.equal(snapshot.status,200)
  const state=await snapshot.json();assert.equal(state.readiness.x02Configured,false);assert.equal(state.equity,null);assert.equal(state.openPositions.length,0);assert.equal(state.engine.catalogCount,261)
  for(const key of ['strategyTrendDcaEnabled','strategySarDcaEnabled','strategyRsiContinuationDcaEnabled','strategyBreakoutContinuationDcaEnabled','strategyTrendRecoveryDcaEnabled','strategyBreakoutRecoveryDcaEnabled','strategySar04DcaEnabled'])assert.equal(state.settings[key],'true')
+ assert.equal(state.settings.strategyInverseRecoveryDcaEnabled,'false')
+ assert.equal(state.settings.strategyActivityMomentumDcaEnabled,'false')
  assert.equal((await action(cookie,{action:'save-settings',settings:{mainEvalPosCount:7,volumeFactor:.01,symbolCount:100,stageWindowScope:'config',microStageWindowScope:'both',blockAutoEnabled:true,blockAutoLastN:12,blockAutoMinSamples:6,blockAutoMinPF:1.2}})).status,200)
  assert.equal((await action(cookie,{action:'save-settings',settings:{mainEvalPosCount:0}})).status,400)
  assert.equal((await action(cookie,{action:'save-settings',settings:{stageWindowScope:'mixed'}})).status,400)

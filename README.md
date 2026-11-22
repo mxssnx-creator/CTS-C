@@ -101,7 +101,8 @@ New runtimes use **Base → Main → Real → Exec → Live**. Existing settings
 | Stage | Long | Short | Last |
 |---|---|---|---|
 | Base | 10, 20, 30, 40, 50 | 4, 8, 12, 16 | 1–5 |
-| Main, Real, Exec | Omitted or the originating Base Set's Long count | 4, 8, 12, 16 | 1–5 |
+| Main, Real | Omitted or the originating Base Set's Long count | 4, 8, 12, 16 | 1–5 |
+| Exec | Omitted or the originating Base Set's Long count | 4, 8, 12, 16, 20, 24, 28, 30 | 1–5 |
 | Live | Mirrors an accepted Exec entry | | |
 
 Each block requires its full sample count. Positive blocks check the stage PF floor. The Strategy Lab can add independent negative Last outcomes and negative Short outcomes for 4, 8 and 12 positions. Signed windows must still reach the overall PF floor. A close at the entry clock is excluded from the decision. Base candidates with identical signal and order rules share observations until qualification. Main, Real and Exec retain their own completed histories and receive fresh entries only from their currently qualified parent. Live copies the position that passes Exec with its allocation, protection and exact acceptance proof. Open positions continue through their recorded exits.
@@ -111,6 +112,8 @@ New runtimes use Set-history Auto PF. It reads up to 40 dated closes of the same
 Common MA, RSI, MACD and Bollinger lookbacks can be selected independently. The source picker includes conventional indicator variants, CTS-X RSI momentum, quarter-hour order-flow and reversal tactics, and CTS-A-O Low-Range candidates. Their timeframe and protection choices produce separate Sets. The original indicator periods and source picks remain available.
 
 The RSI and Parabolic SAR section exposes 50 RSI variants and 20 SAR variants. RSI supports 5, 8, 10, 14 and 21 bars, five symmetric threshold pairs and separate Reclaim and Momentum signals. SAR uses five acceleration steps from 0.005 to 0.04 and four maxima from 0.10 to 0.30. The thin preset selects 0.10% and 0.15% initial stops with 0.05% and 0.10% fixed-distance trailing gaps. See the [Auto PF and indicator replay](docs/EXEC-AUTO-PF-20261122.md).
+
+The source picker also includes Inverse continuations and direct Activity variants. The configurable Inverse RSI turn and SAR + DCA profile supplies a small 1m Minimal and Low-Range grid. The Activity ATR Momentum + DCA profile supplies one 1m Minimal geometry. The [five-day replay and x02 report](docs/EXEC-INVERSE-20261122.md) records their stage and execution results.
 
 The exchange dispatch timer targets 250ms. Market reads and exchange writes use separate paced clients. A late or absent quote falls back to paper history after a short wait. Venue requests, fills, and reconciliation determine end-to-end latency. The dashboard counts owned exchange positions by symbol and direction and counts individual exchange orders by confirmed venue ID.
 
