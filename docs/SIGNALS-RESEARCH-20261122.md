@@ -25,6 +25,18 @@ The same scenario was replayed against main commit `ccd815b132d03ffb78c5fd840078
 
 All seven accepted closes came from NEAR and the existing EMA-cross source. The high PF is a small, concentrated paper sample. The newly available Short-30 alternatives did not mature, so this comparison does **not** establish that they improve profitability or order count. Holdout post-Base, post-Main and post-Real return PFs were 0.892, 1.181 and 1.340 respectively; post-Exec matches the seven accepted closes. The cash drawdown uses the small modeled position budgets and groups closes at the same clock; it excludes open marks and is not an account drawdown. The code retains all observed losses and does not lower the stage thresholds to create trades.
 
+The same matched configuration was also replayed on the existing 50-symbol historical tape from **8 November 02:08 through 12 November 02:07 UTC**, using two days of prehistory and two scored days. There was no separate fit period. The candles had already been examined in previous work, so this is a broader regression comparison, not untouched forward validation. Per-symbol candle hashes, configurations and results for both revisions are in [the 50-symbol evidence file](../research-data/ctsc-signals-50-matched-20261122.json).
+
+| Scored metric | Previous revision | Changed revision |
+| --- | ---: | ---: |
+| Post-Base Set closes / return PF | 1,645 / 0.703 | 1,645 / 0.703 |
+| Post-Main Set closes / return PF | 169 / 0.755 | 169 / 0.755 |
+| Post-Real Set closes / return PF | 15 / 4.321 | 15 / 4.321 |
+| Accepted Exec closes | 0 | 0 |
+| Short-30 Exec Sets / complete windows | 10 / 0 | 20 / 0 |
+
+The added Short-30 paths did not reach a complete window. Set closes may share a price path; they are not independent observations. The post-Base and post-Main results are below one, and there were no accepted Exec closes from which to calculate an executed PF. This study does not demonstrate the requested stable profitability or order volume.
+
 The bounded grid tested three existing short sources and their three continuation variants, TP steps 3/8/12/18, SL-to-TP ratios 0.4/1.2, and fixed, dynamic-trailing and fixed-distance-trailing exits. It used the same seven tapes and time partition. Only the existing EMA-cross source produced accepted holdout trades: the same seven closes above. The other five sources, including all tested continuations, produced no accepted holdout closes. None had accepted fit closes, so no source or new parameter default was promoted.
 
 A separate EMA-cross + DCA run used TP step 12, a 0.4% initial stop and trailing gaps of 2.6%, 3%, 4%, 5%, 6% and 8% under both trailing bases. Its holdout Base return PF was 0.581 over 9,180 Set closes and no Set reached Real or Exec. The wide gaps therefore remain optional rather than promoted as better defaults.
@@ -47,7 +59,7 @@ Two 30-symbol attempts each completed their 72-hour warm-up and observed all 30 
 
 Other positions and protective orders were present on the shared VST account and its inventory changed during the observation; none appears in this test's isolated journal. They were not operated on by the test. With no accepted strategy fill, live-versus-model PF, actual strategy slippage, partial fills and control-order behavior were not measured in this run. HTTP 429 responses were observed during setup and refresh.
 
-The unit suite, TypeScript and isolated runtime smoke passed. An earlier production build passed; after the final optional trailing choices were added, two build retries were terminated with SIGKILL, so the final revision's production build is not verified. Browser smoke could not start Chromium because the environment rejected a required socket, so interactive browser verification remains outstanding.
+Local unit tests, TypeScript and isolated runtime smoke passed. Two final local production build retries were terminated with SIGKILL, and local browser smoke could not start Chromium because the environment rejected a required socket. GitHub Actions subsequently passed the production build, full check, browser smoke and Docker checks on code commit `a9d9804d7b4dd6d955ee69864077c154c4078070`: [independent verification](https://github.com/mxssnx-creator/CTS-C/actions/runs/45028565708), [strategy feature verification](https://github.com/mxssnx-creator/CTS-C/actions/runs/45028565645) and [million-parent-Set capacity](https://github.com/mxssnx-creator/CTS-C/actions/runs/45028565624).
 
 ## Research context
 
