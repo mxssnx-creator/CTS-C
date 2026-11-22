@@ -1,6 +1,7 @@
 import type {BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 import type { ConfigLastN, EvaluationStage } from "./last-n-grid"
 import type { AutoPfEvidence, AutoPfPolicy } from "./auto-pf"
+import type { ExecProfile } from "./exec-profile"
 export type Direction = "long" | "short"
 export type Stage = EvaluationStage | "live"
 export type Coordination = "normal" | "axis" | "block" | "dca" | "relate"
@@ -18,6 +19,7 @@ export interface StrategyConfig {
   indicationSourceId?:string
   autoPfFloor?:number
   autoPfPolicy?: AutoPfPolicy
+  execProfile?: ExecProfile["id"]
   branch?: { geometryId: string; ancestors: readonly { configId: string; coordination: Coordination }[]; windows?: Partial<Record<EvaluationStage, BlockPolicy>> }
   stageLastN?: ConfigLastN
   /** Maximum peak-to-trough sum of net-return percentage points in this lane's gate window. Not account drawdown. */
@@ -172,6 +174,7 @@ export interface StageMetrics { stage: Stage; lanes: number; open: number; close
   admittedForward?:{closes:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;unprovenCloses:number}
   postStage?: ForwardMetrics
   executed?: ForwardMetrics
+  execProfiles?: Partial<Record<ExecProfile["id"],ForwardMetrics>>
 }
 export interface EngineSnapshot {
   settings: EngineSettings; catalogCount: number; symbolCount: number; processedCandles: number; updatedAt: number

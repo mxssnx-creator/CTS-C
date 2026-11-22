@@ -14,6 +14,7 @@ import { DEFAULT_RELATE } from "./relate"
 import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
 import { MAX_WARMUP_CANDLES } from "./history"
+import { EXEC_PROFILES } from "./exec-profile"
 
 export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"]
 export const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
@@ -26,6 +27,7 @@ export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
   stageGateMode: "exec-branches",
+  ...Object.fromEntries(EXEC_PROFILES.map(profile=>[profile.setting,true])),
   stageWindowScope: "context", microStageWindowScope: "inherit",
   stageBlocks: {}, strategyLastNGrid: {}, strategyExecWindows: DEFAULT_EXEC_WINDOWS, strategyStageCoordinations: {},
   liveEntryMode: "independent",
@@ -182,7 +184,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if (!Object.prototype.hasOwnProperty.call(values, key)) {
       if (partial) continue
       if (key === "strategyStageCoordinations") { output[key] = {}; continue }
-      if (key === "strategyExecWindows" || key === "execMinPF" || key === "strategyCoreSignalPeriods") { output[key] = structuredClone(DEFAULTS[key]); continue }
+      if (key === "strategyExecWindows" || key === "execMinPF" || key === "strategyCoreSignalPeriods" || EXEC_PROFILES.some(profile=>profile.setting===key)) { output[key] = structuredClone(DEFAULTS[key]); continue }
       if (Object.hasOwn(AUTO_PF_DEFAULTS,key)) {
         output[key] = key === "autoPfMode" && values.autoPfEnabled === true ? "tp-distance" : DEFAULTS[key]
         continue

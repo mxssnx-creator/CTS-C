@@ -12,6 +12,7 @@ import {flatEngineSettings,validateConfiguration} from './settings-schema'
 import { DEFAULT_STEP_AUTO } from './step-evidence'
 import { DEFAULT_RELATE } from './relate'
 import { AUTO_PF_DEFAULTS } from './auto-pf'
+import { EXEC_PROFILES, withDefaultExecProfile } from './exec-profile'
 
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
@@ -71,7 +72,8 @@ export class TerminalRuntime {
     this.executor=new DemoExecutor(this.store,this.createClient(connectionId),{connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:intent=>this.validateLiveIntent(intent)})
     const restored = this.store.loadEngineState()
     this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
-    this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId,stageGateMode:"exec-branches"})
+    if (restored) restored.settings = withDefaultExecProfile(restored.settings)
+    this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine(withDefaultExecProfile({...DEFAULT_ENGINE_SETTINGS,connectionId,stageGateMode:"exec-branches"}))
     this.engine.observeLiveCloses(trade=>this.executor.recordSimulatedClose(this.connectionId,trade))
     if(this.engine.settings.connectionId!==connectionId)throw new Error('Engine checkpoint belongs to another connection')
     this.control = { ...DEFAULT_CONTROL, ...this.store.get<Control>('control'), warmed: [] }
@@ -97,7 +99,7 @@ export class TerminalRuntime {
       // Hydration can take longer than a lease on a large journal. Do it unowned, then
       // verify the exact checkpoint generation after reacquiring before any mutation.
       const restored=this.store.loadEngineState()
-      if(restored){if(restored.settings.connectionId!==this.connectionId)throw new Error('Engine checkpoint belongs to another connection');this.engine=TradingEngine.fromOwnedCheckpoint(restored);this.engine.observeLiveCloses(trade=>this.executor.recordSimulatedClose(this.connectionId,trade))}
+      if(restored){if(restored.settings.connectionId!==this.connectionId)throw new Error('Engine checkpoint belongs to another connection');restored.settings=withDefaultExecProfile(restored.settings);this.engine=TradingEngine.fromOwnedCheckpoint(restored);this.engine.observeLiveCloses(trade=>this.executor.recordSimulatedClose(this.connectionId,trade))}
       this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
     }
     if(!acquired)throw new Error('Checkpoint changed repeatedly before execution ownership')
@@ -421,7 +423,7 @@ export class TerminalRuntime {
       if(key==='stageWindowScope'){next.stageWindowScope=value as EngineSettings['stageWindowScope'];continue}
       if(key==='microStageWindowScope'){next.microStageWindowScope=value as EngineSettings['microStageWindowScope'];continue}
       if(key==='liveEntryMode'){next.liveEntryMode=value as EngineSettings['liveEntryMode'];continue}
-      if(catalogKeys.includes(key)){next.catalog[key]=value;continue}
+      if(EXEC_PROFILES.some(profile=>profile.setting===key)||catalogKeys.includes(key)){next.catalog[key]=value;continue}
       if(gateMap[key]){const[group,stage]=gateMap[key];next[group][stage]=Number(value);continue}
       if(key==='historyCandles')continue
       if(key==='symbolCount'){if(!Number.isInteger(value)||Number(value)<1||Number(value)>500)throw new Error('Symbol count must be1..500');continue}
@@ -480,7 +482,7 @@ export class TerminalRuntime {
       const candidates = stage.baseCandidates
       const eligibleForSampling = candidates?.observed ?? stage.currentLanes
       const enoughSamples = candidates?.enoughSamples ?? stage.currentEnoughSamples
-      return [stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:mirror?null:enoughSamples,sampleSetCount:eligibleForSampling,samplesPercent:!mirror&&eligibleForSampling?100*enoughSamples/eligibleForSampling:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:mirror?null:stage.currentProfitFactor,windowPfState:mirror?undefined:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,validatedWindow:mirror?undefined:stage.validatedWindow,admittedForward:stage.admittedForward,postStage:stage.postStage,executed:stage.executed,autoPf:stage.autoPf,...sampleSizes}]
+      return [stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:mirror?null:enoughSamples,sampleSetCount:eligibleForSampling,samplesPercent:!mirror&&eligibleForSampling?100*enoughSamples/eligibleForSampling:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:mirror?null:stage.currentProfitFactor,windowPfState:mirror?undefined:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,validatedWindow:mirror?undefined:stage.validatedWindow,admittedForward:stage.admittedForward,postStage:stage.postStage,executed:stage.executed,execProfiles:stage.execProfiles,autoPf:stage.autoPf,...sampleSizes}]
     }))
     const settings=Object.fromEntries(Object.entries(flatEngineSettings(s.settings,this.control)).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)]))
     const positions=s.positions.filter(p=>p.stage==='live')

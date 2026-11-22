@@ -20,6 +20,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:strategy-features
       - run: npm run test:lastn-blocks
+      - run: npm run test:exec-performance
       - run: node --import tsx --test tests/project-order-identity.test.ts
       - run: node --import tsx --test tests/disjoint-last-n.test.ts tests/processed-stages.test.ts
       - run: npm run build

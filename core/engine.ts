@@ -7,7 +7,8 @@ import { dcaStepVerdict, observeDcaStep, settleDcaSteps, validateDcaAuto } from 
 import {normalizedVolumeFactor,relationalVolumeSettings,SYSTEM_VOLUME_DIVISOR} from "../shared/cts-volume/ratios";
 import { strategyProcessing } from "./strategy-processing"
 import { createHash } from "node:crypto"
-import { generateStrategyCatalog } from "./catalog"
+import { generateEngineCatalog } from "./catalog"
+import { EXEC_PROFILES, PROFILE_BASE_COORDINATIONS, PROFILE_DCA_SIZING, execProfileEnabled } from "./exec-profile"
 import { BRANCH_COORDINATIONS as COORDINATIONS, ParentBranches, checkStageCoordinations } from "./stage-branches"
 import { checkExecWindows, checkLastNGrid, DEFAULT_EXEC_MIN_PF, EXEC_EVALUATION_STAGES, LAST_N_STAGES, lastNVariantCount, type EvaluationStage } from "./last-n-grid"
 import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals, newSignalState } from "./replay"
@@ -25,7 +26,48 @@ const COORDINATION_INDEX:Record<Coordination,number>={normal:0,axis:1,block:2,dc
 type LaneContext=(LaneState|undefined)[]
 const contextIndex=(direction:Direction,coordination:Coordination,stage:Stage)=>
   2*(COORDINATION_INDEX[coordination]*STAGES.length+STAGE_INDEX[stage])+(direction==="short"?1:0)
-type ConfigStream={config:StrategyConfig;key:string}
+type SignalRoute = {config: StrategyConfig; slot: number}
+type PortedSignalGroup = {minutes: number; ids: string[]; routes: SignalRoute[]; usesReferences: boolean}
+type SignalFrame = {routes: SignalRoute[]; ordinary: SignalRoute[]; ported: PortedSignalGroup[]}
+type CatalogSignals = {configIds:Set<string>; minute:SignalFrame; micro:SignalFrame; keys:unknown[][]}
+type SymbolSignals = {catalog:CatalogSignals; keys:string[]; portedKeys:Map<number,string>}
+
+/** Share geometry routing across symbols with the same catalog. Indicator state remains per symbol. */
+function catalogSignals(configs: readonly StrategyConfig[]): CatalogSignals {
+  const minute: SignalFrame = {routes:[],ordinary:[],ported:[]}
+  const micro: SignalFrame = {routes:[],ordinary:[],ported:[]}
+  const slots = new Map<string,number>(), groups = new Map<number,SignalRoute[]>()
+  const configIds = new Set<string>(), keys:unknown[][] = []
+  for (const config of configs) {
+    configIds.add(config.id)
+    const minutes = config.signalTimeframeMinutes ?? 1
+    const frame = minutes < 1 ? micro : minute
+    const parts = [config.type,config.position_cost_step,...(config.indicationSourceId?[config.indicationSourceId]:[]),...(minutes!==1?[minutes]:[])]
+    const key = JSON.stringify(parts)
+    let slot = slots.get(key)
+    if (slot === undefined) {
+      slot = slots.size
+      slots.set(key,slot)
+      if (config.indicationSourceId) {
+        const group = groups.get(minutes) ?? []
+        group.push({config,slot})
+        groups.set(minutes,group)
+      } else {
+        frame.ordinary.push({config,slot})
+        keys[slot] = parts
+      }
+    }
+    frame.routes.push({config,slot})
+  }
+  for (const [minutes,routes] of groups) {
+    const ids = [...new Set(routes.map(route=>route.config.indicationSourceId!))]
+    const frame = minutes < 1 ? micro : minute
+    frame.ported.push({minutes,ids,routes,usesReferences:ids.some(id=>/pair-|market-/.test(id))})
+  }
+  return {configIds,minute,micro,keys}
+}
+
+const portedStateKey = (symbol:string, minutes:number) => JSON.stringify([symbol,'ported-sources-v1',minutes])
 const OWN_PARSED_STATE = Symbol("engine-owned JSON state")
 export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   connectionId: "bingx-x02", symbols: ["BTC-USDT", "ETH-USDT", "SOL-USDT"], initialEquity: 10_000,
@@ -65,6 +107,10 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   finite(settings.initialEquity, "initialEquity", .01, 1e12); finite(settings.baseNotional, "baseNotional", .000001, 1e9)
   finite(settings.volumeFactor, "volumeFactor", .000001, 100); finite(settings.maxSamples, "maxSamples", 1, 1000, true)
   checkStageCoordinations(settings.catalog.strategyStageCoordinations)
+  for (const profile of EXEC_PROFILES) {
+    const enabled = settings.catalog[profile.setting]
+    if (enabled !== undefined && typeof enabled !== "boolean") throw new Error(`${profile.label} profile must be enabled or disabled`)
+  }
   checkLastNGrid(settings.catalog.strategyLastNGrid, Math.min(250, settings.maxSamples))
   if (settings.stageGateMode === "exec-branches") {
     checkExecWindows(settings.catalog.strategyExecWindows, settings.maxSamples)
@@ -102,20 +148,15 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   finite(relate.maxSlRatio, "Relate maximum SL-to-TP ratio", .01, .5)
   if (relate.enabled && relate.lastN > settings.maxSamples) throw new Error("Relate window exceeds retained samples")
   for (const enabled of [axis.enabled, block.enabled, dca.enabled, relate.enabled]) if (typeof enabled !== "boolean") throw new Error("Coordination enabled must be boolean")
-  generateStrategyCatalog(settings.connectionId, executionCatalog(settings))
+  generateEngineCatalog(settings)
   const checkedFees=new Set<string>()
   for(const [symbol,fees] of Object.entries(settings.symbolFees??{})){
     if(!/^[A-Z0-9]{1,30}-USDT$/.test(symbol))throw new Error('Invalid fee symbol')
     finite(fees.makerFeePct,'symbol maker fee',0,20);finite(fees.takerFeePct,'symbol taker fee',0,20)
     const identity=JSON.stringify(fees)
-    if(!checkedFees.has(identity)){generateStrategyCatalog(settings.connectionId,{...executionCatalog(settings),...fees});checkedFees.add(identity)}
+    if(!checkedFees.has(identity)){generateEngineCatalog(settings,fees);checkedFees.add(identity)}
   }
   return settings
-}
-/** Running a parent-driven graph needs only economic geometries at startup. */
-function executionCatalog(settings: EngineSettings) {
-  return settings.stageGateMode === "parent-branches" || settings.stageGateMode === "exec-branches"
-    ? { ...settings.catalog, strategyLastNGrid: undefined } : settings.catalog
 }
 function laneKey(connectionId: string, symbol: string, config: StrategyConfig, direction: Direction, coordination: Coordination, stage: Stage, identity: string): string {
   // JSON identities cannot collide when a user changes delimiters in a label.
@@ -210,14 +251,9 @@ export class TradingEngine {
   private childrenByLane = new Map<string, LaneState[]>()
   private groupKeys = new WeakMap<LaneState, string>()
   private economicsIds = {} as Record<Coordination, string>
+  private profileDcaEconomicsId = ""
   private configs: StrategyConfig[]
-  private symbolConfigs=new Map<string,StrategyConfig[]>()
-  private symbolConfigIds=new Map<string,Set<string>>()
-  private streams=new Map<string,ConfigStream[]>()
-  private signalStreams=new Map<string,ConfigStream[]>()
-  private portedStreams=new Map<string,{minutes:number;stateKey:string;ids:string[];streams:ConfigStream[];usesReferences:boolean}[]>()
-  private microStreams=new Map<string,ConfigStream[]>()
-  private minuteStreams=new Map<string,ConfigStream[]>()
+  private signalsBySymbol = new Map<string,SymbolSignals>()
   private coordinationIds = {} as Record<Coordination, string>
   private processedCoordinationIds={} as Record<Coordination,string>
   private active = new Map<string, Set<string>>()
@@ -230,7 +266,6 @@ export class TradingEngine {
   private settledIntentCount = 0
   private sampleAppendClock = 0
   private sampleAppends = new WeakMap<number[], Map<string, { samples: number[]; times: number[]; previousTimes?: number[] }>>()
-  private configIds = new Set<string>()
   private contexts=new Map<string,Map<string,LaneContext>>()
   private configWindows=new ConfigStageWindows()
   private validLineages=new Set<string>()
@@ -290,7 +325,7 @@ export class TradingEngine {
       else this.settledIntentCount++
     }
     this.internLineageProofs()
-    this.configs = generateStrategyCatalog(validated.connectionId, executionCatalog(validated), "1970-01-01T00:00:00.000Z")
+    this.configs = generateEngineCatalog(validated)
     this.refreshSymbolCatalogs()
     this.state.recentLiveTrades??=this.state.recentTrades.filter(trade=>trade.stage==="live")
     this.refreshCoordinationIds()
@@ -325,7 +360,7 @@ export class TradingEngine {
       coordinations: { axis: { ...previous.coordinations.axis, ...input.coordinations?.axis }, block: { ...previous.coordinations.block, ...input.coordinations?.block }, dca: { ...previous.coordinations.dca, ...input.coordinations?.dca }, relate: { ...previous.coordinations.relate!, ...input.coordinations?.relate } },
     })
     if(JSON.stringify(previous)===JSON.stringify(this.state.settings))return
-    this.configs = generateStrategyCatalog(this.state.settings.connectionId, executionCatalog(this.state.settings), "1970-01-01T00:00:00.000Z")
+    this.configs = generateEngineCatalog(this.state.settings)
     this.refreshSymbolCatalogs()
     this.refreshCoordinationIds()
     this.refreshCurrentLaneIds()
@@ -338,25 +373,20 @@ export class TradingEngine {
     const mode = this.state.settings.stageGateMode
     this.branches = mode === "parent-branches" || mode === "exec-branches" ? new ParentBranches(this.state.settings.catalog, mode === "exec-branches") : undefined
     this.geometry.clear()
-    this.symbolConfigs.clear();this.symbolConfigIds.clear();this.configIds.clear();this.streams.clear();this.signalStreams.clear();this.portedStreams.clear();this.microStreams.clear();this.minuteStreams.clear()
-    const cache=new Map<string,{configs:StrategyConfig[];ids:Set<string>}>()
+    this.signalsBySymbol.clear()
+    const cache = new Map<string,CatalogSignals>()
     for(const symbol of this.state.settings.symbols){
       const fees=this.state.settings.symbolFees?.[symbol],identity=JSON.stringify(fees??null)
       let cached=cache.get(identity)
-      if(!cached){const configs=fees?generateStrategyCatalog(this.state.settings.connectionId,{...executionCatalog(this.state.settings),...fees},'1970-01-01T00:00:00.000Z'):this.configs;cached={configs,ids:new Set(configs.map(c=>c.id))};cache.set(identity,cached)}
-      const {configs,ids}=cached
-      this.symbolConfigs.set(symbol,configs);this.symbolConfigIds.set(symbol,ids)
-      this.streams.set(symbol,configs.map(config=>({config,key:JSON.stringify([symbol,config.type,config.position_cost_step,...(config.indicationSourceId?[config.indicationSourceId]:[]),...((config.signalTimeframeMinutes??1)!==1?[config.signalTimeframeMinutes]:[])])})))
-      const ordinary=new Map<string,ConfigStream>(),groups=new Map<number,Map<string,ConfigStream>>()
-      for(const stream of this.streams.get(symbol)!){
-        if(!stream.config.indicationSourceId){ordinary.set(stream.key,stream);continue}
-        const tf=stream.config.signalTimeframeMinutes??1,group=groups.get(tf)??new Map<string,ConfigStream>();group.set(stream.key,stream);groups.set(tf,group)
+      if (!cached) {
+        const configs = fees ? generateEngineCatalog(this.state.settings,fees) : this.configs
+        cached = catalogSignals(configs)
+        cache.set(identity,cached)
+        for (const config of configs) this.geometry.set(config.id,config)
       }
-      this.signalStreams.set(symbol,[...ordinary.values()])
-      this.portedStreams.set(symbol,[...groups].map(([minutes,unique])=>{const streams=[...unique.values()],ids=[...new Set(streams.map(s=>s.config.indicationSourceId!))];return {minutes,stateKey:JSON.stringify([symbol,'ported-sources-v1',minutes]),ids,streams,usesReferences:ids.some(id=>/pair-|market-/.test(id))}}))
-      this.microStreams.set(symbol,this.streams.get(symbol)!.filter(({config})=>(config.signalTimeframeMinutes??1)<1))
-      this.minuteStreams.set(symbol,this.streams.get(symbol)!.filter(({config})=>(config.signalTimeframeMinutes??1)>=1))
-      for(const config of configs){this.configIds.add(config.id);this.geometry.set(config.id,config)}
+      const keys = cached.keys.map(parts=>JSON.stringify([symbol,...parts]))
+      const portedKeys = new Map([...cached.minute.ported,...cached.micro.ported].map(({minutes})=>[minutes,portedStateKey(symbol,minutes)]))
+      this.signalsBySymbol.set(symbol,{catalog:cached,keys,portedKeys})
     }
   }
   serializeState(): string { return JSON.stringify(this.state) }
@@ -388,19 +418,20 @@ export class TradingEngine {
     this.childrenByLane.clear()
     this.groupKeys = new WeakMap()
     for (const lane of Object.values(this.state.lanes)) {
-      if (!symbols.has(lane.symbol) || !this.coordinationEnabled(lane.coordination)) continue
+      if (!symbols.has(lane.symbol) || !this.coordinationEnabled(lane.coordination) ||
+          (lane.config.execProfile && !PROFILE_BASE_COORDINATIONS.includes(lane.coordination))) continue
       if (lane.baseObservation) {
-        if (!this.branches?.exec || lane.stage !== "base" || !this.symbolConfigIds.get(lane.symbol)?.has(lane.configId)) continue
+        if (!this.branches?.exec || lane.stage !== "base" || !this.signalsBySymbol.get(lane.symbol)?.catalog.configIds.has(lane.configId)) continue
       } else if (this.branches) {
         const canonical = this.branches.restore(lane.config, this.geometry.get(lane.config.branch?.geometryId ?? ""), c => this.coordinationEnabled(c))
-        if (!canonical || !this.symbolConfigIds.get(lane.symbol)?.has(canonical.branch!.geometryId)) continue
+        if (!canonical || !this.signalsBySymbol.get(lane.symbol)?.catalog.configIds.has(canonical.branch!.geometryId)) continue
         const depth = canonical.branch!.ancestors.length
         if (lane.stage === "exec" && !this.branches.exec || depth !== Math.min(STAGE_INDEX[lane.stage], this.branches.evaluationStages.length - 1)) continue
         const previous = canonical.branch!.ancestors.at(-1)
-        if (previous && !this.branches.choices(this.branches.evaluationStages[depth] as "main" | "real" | "exec", previous.coordination).includes(lane.coordination) && !this.axisReferenceOnly(canonical,lane.coordination,lane.stage)) continue
+        if (previous && !this.branches.choices(this.branches.evaluationStages[depth] as "main" | "real" | "exec", previous.coordination,canonical).includes(lane.coordination) && !this.axisReferenceOnly(canonical,lane.coordination,lane.stage)) continue
         if (lane.configId !== canonical.id || Boolean(lane.calculationOnly) !== this.calculationOnly(canonical,lane.coordination,lane.stage)) continue
         lane.config = canonical
-      } else if (!this.symbolConfigIds.get(lane.symbol)?.has(lane.configId)) continue
+      } else if (!this.signalsBySymbol.get(lane.symbol)?.catalog.configIds.has(lane.configId)) continue
       if (lane.id !== laneKey(s.connectionId,lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage,this.coordinationIdentity(lane.coordination,lane.stage,lane.config,lane.symbol))) continue
       this.cacheLane(lane)
       if (this.branches && !this.branches.exec && lane.parentProof && lane.stage !== "live") this.registerChild(lane)
@@ -432,13 +463,15 @@ export class TradingEngine {
   private refreshCoordinationIds(): void {
     const s = this.state.settings
     this.volumeWeights=relationalVolumeSettings(s.catalog.relationalVolumeRatios,true)
+    const budgetKey = (coordination: Coordination, parameters: unknown) => [s.baseNotional,s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0,parameters]
+    this.profileDcaEconomicsId = hashId(JSON.stringify(budgetKey("dca",PROFILE_DCA_SIZING)))
     for (const coordination of COORDINATIONS) {
       let parameters = coordination === "normal" ? null : s.coordinations[coordination]
       if (parameters && "auto" in parameters && !parameters.auto?.enabled) {
         const { auto: _auto, ...manual } = parameters
         parameters = manual
       }
-      this.economicsIds[coordination] = hashId(JSON.stringify([s.baseNotional,s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0,parameters]))
+      this.economicsIds[coordination] = hashId(JSON.stringify(budgetKey(coordination,parameters)))
       this.coordinationIds[coordination] = hashId(JSON.stringify([s.baseNotional, s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0, parameters, s.stageLastN, s.stageMinPF,...(s.stageBlocks&&Object.keys(s.stageBlocks).length?[s.stageBlocks]:[])]))
       this.processedCoordinationIds[coordination]=hashId(this.coordinationIds[coordination]+':processed-sets-v1')
     }
@@ -463,15 +496,18 @@ export class TradingEngine {
   private laneVolumeFactor(coordination:Coordination,config:StrategyConfig,symbol:string):number{
     return normalizedVolumeFactor(this.volumeWeights,{indicationType:config.type,indication:config.indicationSourceId??config.type,strategy:coordination,range:config.range,symbol})
   }
+  private economicsId(coordination: Coordination, config: StrategyConfig): string {
+    return coordination === "dca" && config.execProfile ? this.profileDcaEconomicsId : this.economicsIds[coordination]
+  }
   private coordinationIdentity(coordination: Coordination,stage:Stage='base',config?:StrategyConfig,symbol?:string): string {
     if (this.branches && config?.branch && symbol) {
       const path = [...config.branch.ancestors.map(p => p.coordination), coordination]
-      const parts = path.map((c,i) => [this.economicsIds[c],this.laneVolumeFactor(c,config,symbol),this.stageWindowPolicy(config,STAGES[i] as EvaluationStage)])
+      const parts = path.map((c,i) => [this.economicsId(c,config),this.laneVolumeFactor(c,config,symbol),this.stageWindowPolicy(config,STAGES[i] as EvaluationStage)])
       return hashId(JSON.stringify([this.branches.exec ? "exec-branches-v2" : "parent-branches-v1",parts,stage==="base"?null:this.stageScope(config),
         this.calculationOnly(config,coordination,stage)]))
     }
     if (this.branches?.exec && config && symbol && stage === "base") {
-      return hashId(JSON.stringify(["base-observations",this.economicsIds[coordination],this.laneVolumeFactor(coordination,config,symbol),
+      return hashId(JSON.stringify(["base-observations",this.economicsId(coordination,config),this.laneVolumeFactor(coordination,config,symbol),
         coordination === "axis" ? this.state.settings.stageMinPF.base : null]))
     }
     let identity=this.processedSets&&stage!=='base'?this.processedCoordinationIds[coordination]:this.coordinationIds[coordination]
@@ -486,9 +522,9 @@ export class TradingEngine {
     if (lane.stage === "live" && lane.config.branch?.windows) return 0
     const source=lane.stage === "live" ? "real" : lane.stage
     const { required, blocks } = this.stageWindowPolicy(lane.config, source)
-    const gateWindow = lane.baseObservation && this.branches?.exec ? this.branches.baseSampleCounts.at(-1)!
+    const gateWindow = lane.baseObservation && this.branches?.exec ? this.branches.baseSampleCounts(lane.config).at(-1)!
       : blocks ? blockRequired(blocks) : required
-    const axisWindow = lane.coordination === "normal" && s.coordinations.axis.enabled&&(s.coordinations.axis.reference!=='base'||lane.stage==='base')
+    const axisWindow = !lane.config.execProfile && lane.coordination === "normal" && s.coordinations.axis.enabled&&(s.coordinations.axis.reference!=='base'||lane.stage==='base')
       ? s.coordinations.axis.previous + s.coordinations.axis.last : 0
     const relateWindow = lane.coordination === "relate" && lane.stage !== "base" ? s.coordinations.relate?.lastN ?? 0 : 0
     const retained = Math.max(gateWindow, axisWindow, relateWindow) + (lane.config.autoPfPolicy?.history ?? 0)
@@ -692,11 +728,12 @@ export class TradingEngine {
       relateEvidence.timedSampleCount ?? relateEvidence.sampleTimes?.length) : 1
     const notional = lane.coordination !== "block" ? total * relate : block.behavior==="rounds" ? total*blockRoundBudget(lane,block) : block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
     const quantity = notional / candle.close
+    const dca = lane.config.execProfile ? PROFILE_DCA_SIZING : s.coordinations.dca
     const exitMode = lane.config.exitMode ?? (lane.config.trailing ? "trailing" : "fixed")
     const position: PaperPosition = {
       id: `${lane.id}@${candle.timestamp}`, activationOrder:++this.state.nextActivationOrder!,openedAt: candle.timestamp, direction: lane.direction,...(admission?{admission}:{}),
       fills: [{ price: candle.close, quantity, timestamp: candle.timestamp, kind: "entry" }], quantity,
-      sizing: { baseBudget: total, block: s.coordinations.block, dca: s.coordinations.dca },
+      sizing: { baseBudget: total, block: s.coordinations.block, dca },
       entryPrice: candle.close, peak: candle.close, lastAddPrice: candle.close, addedSteps: 0,
       costPct: lane.config.roundTripCostPct ?? POSITION_COST_PCT_DEFAULT,
       takeProfitPct: lane.config.takeprofit * 100, stopLossPct: lane.config.stoploss * 100,
@@ -705,7 +742,7 @@ export class TradingEngine {
       ...(isFixedTrailing(exitMode) ? { trailingReferencePrice: candle.close } : {}),
       trailDistancePct:lane.config.trailDistancePct,exitPolicyVersion:lane.config.catalogVersion??2,maxOrderNotional:s.maxOrderNotional,
     }
-    if (lane.coordination === "dca" && s.coordinations.dca.auto?.enabled && !mirror) position.dcaProbePrices = []
+    if (lane.coordination === "dca" && dca.auto?.enabled && !mirror) position.dcaProbePrices = []
     if (lane.coordination === "block" && block.auto?.enabled && !mirror) {
       if (block.behavior === "rounds") position.blockRoundLevel = lane.blockRound?.level ?? 0
       else position.blockProbePrices = []
@@ -781,7 +818,7 @@ export class TradingEngine {
     if((open.exitPolicyVersion??3)>=4){open.trailingActive=exit.trailingActive;if(exit.trailingActive)open.trailingStopPrice=exit.stop}
     const reason=exit.reason
     if (reason) return { type: "closed", laneId: lane.id, timestamp: candle.timestamp, stage: lane.stage, trade: this.close(lane, candle, reason) }
-    if(!(this.branches ? this.currentLane(lane) : this.symbolConfigIds.get(lane.symbol)?.has(lane.configId))||(lane.coordination!=="normal"&&!this.state.settings.coordinations[lane.coordination]?.enabled)||(lane.stage==="live"&&(!this.currentLane(lane)||!this.processingAllows(lane))))return
+    if(!(this.branches ? this.currentLane(lane) : this.signalsBySymbol.get(lane.symbol)?.catalog.configIds.has(lane.configId))||(lane.coordination!=="normal"&&!this.state.settings.coordinations[lane.coordination]?.enabled)||(lane.stage==="live"&&(!this.currentLane(lane)||!this.processingAllows(lane))))return
     if(lane.stage==="live"&&open.parentPositionId&&(lane.coordination==="block"||lane.coordination==="dca")){
       const parent=this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,lane.config.branch?.windows?"exec":"real")?.open
       const fill=parent?.fills[open.addedSteps+1]
@@ -840,7 +877,7 @@ export class TradingEngine {
   private axisReferenceOnly(config: StrategyConfig, coordination: Coordination, stage: Stage): boolean {
     if (!this.branches || coordination !== "normal" || stage === "base" || stage === "live") return false
     const previous = config.branch?.ancestors.at(-1)
-    return previous !== undefined && this.needsAxisReference(this.branches.choices(stage,previous.coordination))
+    return previous !== undefined && this.needsAxisReference(this.branches.choices(stage,previous.coordination,config))
   }
 
   private needsAxisReference(choices: readonly Coordination[]): boolean {
@@ -866,8 +903,9 @@ export class TradingEngine {
 
   /** One observed parent entry can feed every eligible child once. Child books own their trades and exits. */
   private processBranches(symbol: string, geometry: StrategyConfig, direction: Direction, candle: Candle,
-    enabled: readonly Coordination[], allowExecution: boolean, emit: (event: EngineEvent) => void): void {
+    coordinations: readonly Coordination[], allowExecution: boolean, emit: (event: EngineEvent) => void): void {
     const plan = this.branches!, s = this.state.settings
+    const enabled = geometry.execProfile ? PROFILE_BASE_COORDINATIONS : coordinations
     const visit = (config: StrategyConfig, coordination: Coordination, stage: Stage, parent?: PaperPosition, entryProof?: GateProof[], baseGate?:WindowResult) => {
       let lane = this.cachedLane(symbol,config.id,direction,coordination,stage)
       if (lane?.open || lane && (lane.lastTimestamp >= candle.timestamp || !this.validLineage(lane))) return
@@ -908,7 +946,7 @@ export class TradingEngine {
       }
       const next = stage === "base" ? "main" : stage === "main" ? "real" : "exec"
       if (qualified) {
-        const choices = plan.choices(next,coordination)
+        const choices = plan.choices(next,coordination,config)
         // Same-stage Axis may consult the Normal child of this exact parent.
         const reference = this.needsAxisReference(choices)
         const targets = choices === COORDINATIONS ? enabled : enabled.filter(c=>choices.includes(c) || (reference && c === "normal"))
@@ -927,6 +965,7 @@ export class TradingEngine {
       for (const base of plan.variants(geometry,undefined,"base")) for (const c of enabled) visit(base,c,"base")
       return
     }
+    const baseSampleCounts = plan.baseSampleCounts(geometry)
     for (const coordination of enabled) {
       if (coordination === "axis" && !this.axisAllows(symbol,geometry,direction,"base",candle.timestamp)) continue
       const observation = this.lane(symbol,geometry,direction,coordination,"base",true)
@@ -943,10 +982,10 @@ export class TradingEngine {
       }
       const evidence = this.contextEvidence(observation,candle.timestamp)
       this.open(observation,candle)
-      if (evidence.samples.length < plan.baseSampleCounts[0]) continue
+      if (evidence.samples.length < baseSampleCounts[0]) continue
       // A Base observation can feed different window sizes at this exact clock.
       // Auto PF's older history stays out of the much smaller gate prefix.
-      gatePrefix(evidence.samples,plan.baseSampleCounts.at(-1)!)
+      gatePrefix(evidence.samples,baseSampleCounts.at(-1)!)
       for (const base of plan.variants(geometry,undefined,"base")) {
         const {blocks,required,minPF} = this.stageWindowPolicy(base,"base")
         if (this.cachedLane(symbol,base.id,direction,coordination,"base")) {
@@ -972,9 +1011,10 @@ export class TradingEngine {
 
   processCandles(symbolInput: string, candles: Candle[], options: { allowExecution?: boolean;eventLimit?:number;barSeconds?:10|60 } = {}): EngineEvent[] {
     const symbol = normalizeSymbol(symbolInput), s = this.state.settings
-    const configured=s.symbols.includes(symbol)
+    const symbolSignals = this.signalsBySymbol.get(symbol)
     const micro=options.barSeconds===10,cursors=micro?(this.state.lastMicroTimestamp??={}):this.state.lastTimestamp
-    if (!configured&&!this.active.get(symbol)?.size) throw new Error(`Symbol ${symbol} is not configured`)
+    const frame = micro ? symbolSignals?.catalog.micro : symbolSignals?.catalog.minute
+    if (!symbolSignals&&!this.active.get(symbol)?.size) throw new Error(`Symbol ${symbol} is not configured`)
     const events: EngineEvent[] = []
     const eventLimit=options.eventLimit??Infinity
     if(eventLimit!==Infinity&&(!Number.isInteger(eventLimit)||eventLimit<0))throw new Error('Invalid event limit')
@@ -983,12 +1023,12 @@ export class TradingEngine {
     const coordinations = COORDINATIONS.filter(coordination => coordination === "normal" || s.coordinations[coordination]?.enabled)
     // Validate the complete batch before any mutation, so rejected input is atomic.
     validateObservedCandles(candles)
-    const historicalSignals=new Map<string,ReturnType<typeof historicalPortedSignals>>()
-    if(configured&&!micro&&!options.allowExecution&&candles.length>1){
+    const historicalSignals=new Map<number,ReturnType<typeof historicalPortedSignals>>()
+    if(frame?.ported.length&&!micro&&!options.allowExecution&&candles.length>1){
       const unseen=candles.filter(c=>c.timestamp>(this.state.lastTimestamp[symbol]??0))
-      if(unseen.length>1)for(const group of this.portedStreams.get(symbol)??[])if(group.minutes>=1&&!group.usesReferences){
-        const state=this.state.signals[group.stateKey]??=newSignalState()
-        historicalSignals.set(group.stateKey,historicalPortedSignals(state,unseen,group.minutes,group.ids,symbol))
+      if(unseen.length>1)for(const group of frame.ported)if(!group.usesReferences){
+        const state=this.state.signals[symbolSignals!.portedKeys.get(group.minutes)!]??=newSignalState()
+        historicalSignals.set(group.minutes,historicalPortedSignals(state,unseen,group.minutes,group.ids,symbol))
       }
     }
     for (const candle of candles) {
@@ -1007,24 +1047,24 @@ export class TradingEngine {
           }
         }
       }
-      if(!configured){cursors[symbol]=candle.timestamp;this.state.updatedAt=Math.max(this.state.updatedAt,candle.timestamp);this.state.processedCandles++;continue}
-      const signals = new Map<string, Direction | undefined>()
-      const streams=(micro?this.microStreams:this.minuteStreams).get(symbol)??[]
-      for (const {config,key} of (this.signalStreams.get(symbol)??[]).filter(({config})=>((config.signalTimeframeMinutes??1)<1)===micro)) {
-        if (!signals.has(key)) {
-          const state = this.state.signals[key] ??= newSignalState()
-          signals.set(key, advanceConfiguredSignal(state,candle,config))
+      const signals: Direction[] = []
+      for (const {config,slot} of frame?.ordinary ?? []) {
+        const state = this.state.signals[symbolSignals!.keys[slot]] ??= newSignalState()
+        const signal = advanceConfiguredSignal(state,candle,config)
+        if (signal) signals[slot] = signal
+      }
+      for(const group of frame?.ported ?? []){
+        const state=this.state.signals[symbolSignals!.portedKeys.get(group.minutes)!]??=newSignalState()
+        const history = historicalSignals.get(group.minutes)
+        const peers=group.usesReferences?s.symbols.filter(peer=>peer!==symbol).flatMap(peer=>{const rows=this.state.signals[portedStateKey(peer,group.minutes)]?.portedBars;return rows?[{symbol:peer,bars:rows}]:[]}):[]
+        const output=history ? history.get(candle.timestamp) : advancePortedSources(state,candle,group.minutes,group.ids,{symbol,peers})
+        for(const {config,slot} of group.routes){
+          const signal=output?.get(config.indicationSourceId!)
+          if (signal) signals[slot]=signal
         }
       }
-      for(const group of this.portedStreams.get(symbol)??[]){
-        if((group.minutes<1)!==micro)continue
-        const state=this.state.signals[group.stateKey]??=newSignalState()
-        const peers=group.usesReferences?s.symbols.filter(peer=>peer!==symbol).flatMap(peer=>{const rows=this.state.signals[JSON.stringify([peer,'ported-sources-v1',group.minutes])]?.portedBars;return rows?[{symbol:peer,bars:rows.filter(row=>row.timestamp<=candle.timestamp)}]:[]}):[]
-        const output=historicalSignals.has(group.stateKey)?historicalSignals.get(group.stateKey)!.get(candle.timestamp)??new Map<string,Direction|undefined>():advancePortedSources(state,candle,group.minutes,group.ids,{symbol,peers})
-        for(const {config,key} of group.streams)signals.set(key,output.get(config.indicationSourceId!))
-      }
-      for (const {config,key} of streams) {
-        const signal = signals.get(key)
+      if (signals.length) for (const {config,slot} of frame!.routes) {
+        const signal = signals[slot]
         if (!signal) continue
         if (this.branches) {
           this.processBranches(symbol,config,signal,candle,coordinations,options.allowExecution === true,emit)
@@ -1162,6 +1202,8 @@ export class TradingEngine {
     const lanes: EngineSnapshot["lanes"] = [], positions: EngineSnapshot["positions"] = []
     const stageStats = Object.fromEntries(STAGES.map(stage => [stage, { stage, lanes: 0, open: 0, closed: 0, enoughSamples: 0, enoughSamplesPct: 0, qualified: 0, profitFactor: 1, netPnl: 0, profit: 0, loss: 0,wins:0,fees:0 as number|null,longOpen:0,shortOpen:0,currentLanes:0,currentEnoughSamples:0,currentQualified:0,admissionReady:0,blockedByParent:0,currentProfit:0,currentLoss:0,currentCount:0,currentUnknown:0,validatedProfit:0,validatedLoss:0,validatedCount:0,validatedSets:0,admittedCount:0,admittedProfit:0,admittedLoss:0,admittedNet:0 }])) as Record<Stage,StageMetricsAccumulator>
     const forwarded = STAGES.map(()=>({open:0,closed:0,profit:0,loss:0,netPnl:0}))
+    const profileTotals = new Map<NonNullable<StrategyConfig["execProfile"]>,typeof forwarded[number]>()
+    for (const profile of EXEC_PROFILES) if (execProfileEnabled(s,profile)) profileTotals.set(profile.id,{open:0,closed:0,profit:0,loss:0,netPnl:0})
     let baseObserved = 0, baseEnough = 0
     const currentWindows=new Set<string>(), validatedWindows=new Set<string>()
     const feedableParents = new Map<string,boolean>()
@@ -1176,7 +1218,7 @@ export class TradingEngine {
     for (const lane of Object.values(this.state.lanes)) {
       if (lane.calculationOnly) {
         if (lane.baseObservation && this.branches?.exec && this.currentLane(lane)) {
-          const counts = this.branches.baseSampleCounts
+          const counts = this.branches.baseSampleCounts(lane.config)
           baseObserved += counts.length
           let count = 0
           while (count < counts.length && counts[count] <= lane.samples.length) count++
@@ -1205,6 +1247,18 @@ export class TradingEngine {
         post.profit += accepted.profit
         post.loss += accepted.loss
         post.netPnl += accepted.netPnl
+      }
+      if (lane.stage==="exec" && lane.config.execProfile) {
+        const id = lane.config.execProfile
+        let totals = profileTotals.get(id)
+        if (!totals) profileTotals.set(id,totals={open:0,closed:0,profit:0,loss:0,netPnl:0})
+        totals.open += Number(Boolean(acceptedOpen))
+        if (accepted) {
+          totals.closed += accepted.closed
+          totals.profit += accepted.profit
+          totals.loss += accepted.loss
+          totals.netPnl += accepted.netPnl
+        }
       }
       stats.admittedCount+=lane.admittedClosed??0;stats.admittedProfit+=lane.admittedProfit??0;stats.admittedLoss+=lane.admittedLoss??0;stats.admittedNet+=lane.admittedNetPnl??0
       if(stats.fees!==null){if(lane.closedCount&&lane.costTotal===undefined)stats.fees=null;else stats.fees+=lane.costTotal??0}
@@ -1247,7 +1301,9 @@ export class TradingEngine {
       return { ...stats, ...describeProfitFactor(profit, loss, stats.closed),currentProfitFactor:current.profitFactor,currentPfState:current.pfState,validatedWindow:{samples:validatedCount,sets:validatedSets,profit:validatedProfit,loss:validatedLoss,...describeProfitFactor(validatedProfit,validatedLoss,validatedCount)},admittedForward:{closes:admittedCount,...describeProfitFactor(admittedProfit,admittedLoss,admittedCount),netPnl:admittedNet,unprovenCloses:stats.closed-admittedCount},
         ...(stage === "base" && this.branches?.exec && {baseCandidates:{observed:baseObserved,enoughSamples:baseEnough}}),
         ...(stage !== "live" && (this.branches?.exec || forward.open || forward.closed) && {postStage:post}),
-        ...(stage === "exec" && {executed:post}) }
+        ...(stage === "exec" && {executed:post}),
+        ...(stage === "exec" && profileTotals.size && {execProfiles:Object.fromEntries([...profileTotals].map(([id,{profit,loss,...totals}])=>
+          [id,{...totals,...describeProfitFactor(profit,loss,totals.closed)}]))}) }
     })
     return structuredClone({ settings: s, catalogCount: this.configs.length * (this.branches && !this.branches.exec ? lastNVariantCount(checkLastNGrid(s.catalog.strategyLastNGrid)) : 1), symbolCount: s.symbols.length, processedCandles: this.state.processedCandles, updatedAt: this.state.updatedAt,
       equity: this.state.equity, peakEquity: this.state.peakEquity, maxDrawdownPct: this.state.maxDrawdownPct, stages,

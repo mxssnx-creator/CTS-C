@@ -3,7 +3,7 @@ import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TI
 import {checkedSignalsSources} from '../shared/cts-indications/signals-catalog'
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
 import { relationalVolumeSettings } from "../shared/cts-volume/ratios"
-import { DEFAULT_EXIT_MODES, EXIT_MODES, type StrategyConfig } from "./types"
+import { DEFAULT_EXIT_MODES, EXIT_MODES, type EngineSettings, type StrategyConfig } from "./types"
 import { createHash } from "node:crypto"
 import { resolveTradingCostPct } from "./metrics"
 import { CORE_INDICATIONS, CORE_SIGNAL_PERIODS, INDICATIONS,TECHNICAL_INDICATIONS, indicationPeriods } from "./indications"
@@ -11,6 +11,8 @@ import { EXPANDED_CATALOG_MAX, priceProtection, protectionVariants } from "./pro
 import { checkLastNGrid, lastNVariants } from "./last-n-grid"
 import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
+import preset from "../research-data/exec-dca-trend-preset.json"
+import { EXEC_PROFILES, execProfileEnabled } from "./exec-profile"
 
 export const STRATEGY_RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"] as const
 export const STRATEGY_TYPES = INDICATIONS
@@ -120,6 +122,21 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
       })
      }
     }
+  }
+  return configs
+}
+
+/** Reference profiles use independent geometries with the connection's fee and slippage inputs. */
+export function generateEngineCatalog(settings: EngineSettings, fees?: NonNullable<EngineSettings["symbolFees"]>[string]): StrategyConfig[] {
+  const catalog: Record<string,unknown> = {...settings.catalog,...fees}
+  if (settings.stageGateMode === "parent-branches" || settings.stageGateMode === "exec-branches") catalog.strategyLastNGrid = undefined
+  const createdAt = "1970-01-01T00:00:00.000Z"
+  const configs = generateStrategyCatalog(settings.connectionId,catalog,createdAt)
+  for (const profile of EXEC_PROFILES) if (execProfileEnabled(settings,profile)) {
+    const geometries = generateStrategyCatalog(settings.connectionId,{
+      ...preset,...profile.catalog,makerFeePct:catalog.makerFeePct,takerFeePct:catalog.takerFeePct,slippagePctOfFees:catalog.slippagePctOfFees,
+    },createdAt)
+    for (const geometry of geometries) configs.push({...geometry,id:`${geometry.id}.${profile.id}`,execProfile:profile.id})
   }
   return configs
 }

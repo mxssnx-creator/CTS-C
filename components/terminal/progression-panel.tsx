@@ -2,7 +2,8 @@
 
 import { formatProfitFactor, type ProfitFactorState } from "./profit-factor"
 import type { StageMetrics } from "@/core/types"
-export interface StageTelemetry {autoPf?:StageMetrics["autoPf"];validatedWindow?:StageMetrics["validatedWindow"];admittedForward?:StageMetrics["admittedForward"];postStage?:StageMetrics["postStage"];executed?:StageMetrics["executed"];directMirror?:boolean;sampleSetCount?:number;sets:number;allSets?:number;retiredSets?:number;eligible:number;enoughSamples:number|null;samplesPercent:number|null;pf:number|null;pfState?:ProfitFactorState;windowPF?:number|null;windowPfState?:ProfitFactorState;open?:number;closed?:number;blockedByParent?:number;admissionReady?:number;required?:number }
+import { EXEC_PROFILES } from "@/core/exec-profile"
+export interface StageTelemetry {autoPf?:StageMetrics["autoPf"];validatedWindow?:StageMetrics["validatedWindow"];admittedForward?:StageMetrics["admittedForward"];postStage?:StageMetrics["postStage"];executed?:StageMetrics["executed"];execProfiles?:StageMetrics["execProfiles"];directMirror?:boolean;sampleSetCount?:number;sets:number;allSets?:number;retiredSets?:number;eligible:number;enoughSamples:number|null;samplesPercent:number|null;pf:number|null;pfState?:ProfitFactorState;windowPF?:number|null;windowPfState?:ProfitFactorState;open?:number;closed?:number;blockedByParent?:number;admissionReady?:number;required?:number }
 export const STAGE_NAMES = ["base","main","real","exec","live"] as const
 
 export function ProgressionDetails({stages}:{stages:Record<string,StageTelemetry>}){
@@ -21,7 +22,8 @@ export function ProgressionDetails({stages}:{stages:Record<string,StageTelemetry
           <td>{formatProfitFactor(s.validatedWindow?.profitFactor,s.validatedWindow?.pfState)}{s.validatedWindow&&<small>{s.validatedWindow.sets.toLocaleString()} Sets · {s.validatedWindow.samples.toLocaleString()} samples</small>}</td>
           <td>{name==="base"?"—":formatProfitFactor(s.admittedForward?.profitFactor,s.admittedForward?.pfState)}{name!=="base"&&s.admittedForward&&<small>{s.admittedForward.closes.toLocaleString()} closes · {s.admittedForward.unprovenCloses.toLocaleString()} unproven</small>}</td>
           <td>{formatProfitFactor(s.postStage?.profitFactor,s.postStage?.pfState)}{s.postStage&&<small>{s.postStage.closed.toLocaleString()} settled · {s.postStage.open.toLocaleString()} active</small>}</td>
-          <td>{formatProfitFactor(s.executed?.profitFactor,s.executed?.pfState)}{s.executed&&<small>{s.executed.open.toLocaleString()} active · {s.executed.closed.toLocaleString()} settled</small>}</td>
+          <td>{formatProfitFactor(s.executed?.profitFactor,s.executed?.pfState)}{s.executed&&<small>{s.executed.open.toLocaleString()} active · {s.executed.closed.toLocaleString()} settled</small>}
+            {EXEC_PROFILES.map(profile=>{const row=s.execProfiles?.[profile.id];return row&&<small key={profile.id}>{profile.label} {formatProfitFactor(row.profitFactor,row.pfState)} · {row.closed.toLocaleString()} settled</small>})}</td>
           <td>{formatProfitFactor(s.pf,s.pfState)}</td>
           <td>{s.directMirror?"—":(s.blockedByParent??0).toLocaleString()}</td>
           <td>{(s.open??0).toLocaleString()} / {(s.closed??0).toLocaleString()}</td>

@@ -112,6 +112,9 @@ try{
  assert.deepEqual([lowRange.relateEnabled,lowRange.relateSteps],['true','10'])
 
  await page.getByLabel('Stage progression',{exact:true}).selectOption('exec-branches')
+ const trendDca=page.getByRole('checkbox',{name:'Trend + DCA execution profile',exact:true})
+ assert.ok(await trendDca.isChecked())
+ assert.ok(await page.getByRole('checkbox',{name:'Parabolic SAR + DCA execution profile',exact:true}).isChecked())
  await page.getByLabel('Exec → Live minimum PF',{exact:true}).fill('1.15')
  await page.getByText('Independent Last-N Sets',{exact:true}).click()
  const execLong=page.getByRole('group',{name:/^Exec Long/})
@@ -129,6 +132,7 @@ try{
  assert.deepEqual(JSON.parse(signals.strategySignalsSources),['sig-ema-cross-s','sig-coord-v2-r80-n3-i3-bzikk5k'])
  assert.equal(signals.signalsMaxWindowDrawdownPct,'2.5');assert.equal(signals.stageGateMode,'exec-branches');assert.equal(signals.execMinPF,'1.15');assert.deepEqual(JSON.parse(signals.strategyExecWindows).exec.long,['inherit'])
  assert.deepEqual(JSON.parse(signals.strategyExecWindows).exec.short,[4,8,12,16,30])
+ assert.deepEqual([signals.strategyTrendDcaEnabled,signals.strategySarDcaEnabled],['true','true'])
  await page.getByLabel('Filter Signals sources',{exact:true}).fill('unmatched-no-source')
  assert.equal(await page.getByLabel('Signals source configurations',{exact:true}).locator('option').count(),2)
 
@@ -147,6 +151,7 @@ try{
  await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
  const dca=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
  assert.deepEqual([dca.historyCandles,dca.dcaDistancePct,dca.dcaMultiplier],['14400','0.25','0.5'])
+ assert.deepEqual([dca.strategyTrendDcaEnabled,dca.strategySarDcaEnabled],['false','false'])
  assert.deepEqual(JSON.parse(dca.strategyExecWindows).exec.short,[4,8,12])
  const replay=page.getByRole('region',{name:'Historical replay study'})
  await replay.getByLabel('VST demo market feed',{exact:true}).uncheck()

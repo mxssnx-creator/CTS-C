@@ -1,5 +1,7 @@
 {
   "stageGateMode": "exec-branches",
+  "strategyTrendDcaEnabled": false,
+  "strategySarDcaEnabled": false,
   "historyCandles": 14400,
   "strategyEnabledRanges": ["Short"],
   "strategyIndicationTypes": ["Trend"],

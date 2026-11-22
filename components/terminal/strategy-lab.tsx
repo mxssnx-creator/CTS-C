@@ -3,6 +3,7 @@ import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES } from "@/shared/cts-indications/research-sources"
+import { EXEC_PROFILES } from "@/core/exec-profile"
 import execDcaTrendPreset from "@/research-data/exec-dca-trend-preset.json"
 import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, THIN_OSCILLATOR_SOURCE_IDS } from "@/shared/cts-indications/oscillator-sources"
 import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES,SIGNAL_SOURCES} from '@/shared/cts-indications/signals-catalog'
@@ -309,6 +310,10 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
               })}
             </details>
 
+            {execEnabled&&<div className="mt-5 space-y-2">
+              {EXEC_PROFILES.map(profile=><label key={profile.id} className="flex items-center gap-3 text-xs"><input type="checkbox" checked={draft[profile.setting]===true} onChange={e=>change(profile.setting,e.target.checked)}/>{profile.label} execution profile</label>)}
+              <p className="terminal-muted text-xs">Each enabled profile adds independent 1m configurations with fixed exits, their own Auto PF and Exec Short 4, 8 and 12. Active when the DCA coordination is enabled.</p>
+            </div>}
             <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.autoPfEnabled===true} onChange={e=>change('autoPfEnabled',e.target.checked)}/>Auto PF</label>
             {draft.autoPfEnabled === true && <div className="mt-3 space-y-3">
               {enumField("autoPfMode", "Auto PF method", [{value:"set-history",label:"Independent Set history"},{value:"tp-distance",label:"Legacy TP distance"}])}

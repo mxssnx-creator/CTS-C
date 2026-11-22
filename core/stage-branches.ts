@@ -1,6 +1,8 @@
 import { checkExecWindows, checkLastNGrid, EXEC_EVALUATION_STAGES, execBlockPolicy, execShortOutcomes, LAST_N_STAGES, POSITIVE_EXEC_OUTCOME, type EvaluationStage, type ExecWindows, type LastNGrid, type LegacyEvaluationStage } from "./last-n-grid"
 import { blockRequired, type BlockPolicy, type Polarity } from "../shared/cts-lastn/blocks.ts"
 import type { Coordination, StrategyConfig } from "./types"
+import preset from "../research-data/exec-dca-trend-preset.json"
+import { PROFILE_BASE_COORDINATIONS, PROFILE_CHILD_COORDINATIONS } from "./exec-profile"
 
 type ChildStage = Exclude<EvaluationStage, "base">
 export type StageCoordinations = Partial<Record<ChildStage, readonly Coordination[]>>
@@ -17,12 +19,21 @@ export function checkStageCoordinations(raw: unknown): StageCoordinations {
   return raw as StageCoordinations
 }
 
+const profileWindows = checkExecWindows(preset.strategyExecWindows)
+function baseRequirements(windows: ExecWindows | undefined): number[] {
+  if (!windows) return []
+  const {base} = windows
+  return base.long.flatMap(long=>base.short.flatMap(short=>execShortOutcomes(base,short)
+    .flatMap(()=>base.last.flatMap(last=>(base.lastOutcomes??POSITIVE_EXEC_OUTCOME).map(()=>long+short+last))))).sort((a,b)=>a-b)
+}
+const profileRequirements = baseRequirements(profileWindows)
+
 /** Geometry is immutable. Only prefixes requested by an admitted parent get a configuration. */
 export class ParentBranches {
   private readonly grid: LastNGrid
   private readonly windows?: ExecWindows
   readonly evaluationStages: readonly EvaluationStage[]
-  readonly baseSampleCounts: readonly number[]
+  private readonly commonBaseSampleCounts: readonly number[]
   readonly coordinations: StageCoordinations
   private readonly configs = new Map<string, StrategyConfig>()
   private readonly children = new Map<string, StrategyConfig[]>()
@@ -31,11 +42,13 @@ export class ParentBranches {
   constructor(catalog: Record<string, unknown>, readonly exec = false) {
     this.grid = checkLastNGrid(catalog.strategyLastNGrid)
     this.windows = exec ? checkExecWindows(catalog.strategyExecWindows) : undefined
-    const base = this.windows?.base
-    this.baseSampleCounts = base ? base.long.flatMap(long => base.short.flatMap(short => execShortOutcomes(base,short)
-      .flatMap(()=>base.last.flatMap(last=>(base.lastOutcomes??POSITIVE_EXEC_OUTCOME).map(()=>long+short+last))))).sort((a,b)=>a-b) : []
+    this.commonBaseSampleCounts = baseRequirements(this.windows)
     this.evaluationStages = exec ? EXEC_EVALUATION_STAGES : LAST_N_STAGES
     this.coordinations = checkStageCoordinations(catalog.strategyStageCoordinations)
+  }
+
+  baseSampleCounts(config: StrategyConfig): readonly number[] {
+    return config.execProfile ? profileRequirements : this.commonBaseSampleCounts
   }
 
   private policy(long: number, short: number, last: number, shortOutcome:Polarity,lastOutcome:Polarity): BlockPolicy {
@@ -67,9 +80,10 @@ export class ParentBranches {
     const key = parent.id + "/" + (coordination ?? "") + "/" + stage
     let configs = this.children.get(key)
     if (!configs) {
-      if (this.windows) {
-        const windows = this.windows[stage]
-        const longs = stage === "base" ? this.windows.base.long : this.windows[stage].long.map(mode => mode === "none" ? 0 : parent.branch!.windows!.base!.long)
+      const plan = parent.execProfile ? profileWindows : this.windows
+      if (plan) {
+        const windows = plan[stage]
+        const longs = stage === "base" ? plan.base.long : plan[stage].long.map(mode => mode === "none" ? 0 : parent.branch!.windows!.base!.long)
         configs = []
         for (const long of longs) for (const s of windows.short) for (const l of windows.last) {
           for (const shortOutcome of execShortOutcomes(windows,s)) for (const lastOutcome of windows.lastOutcomes??POSITIVE_EXEC_OUTCOME) {
@@ -86,7 +100,8 @@ export class ParentBranches {
     return configs
   }
 
-  choices(stage: ChildStage, previous: Coordination): readonly Coordination[] {
+  choices(stage: ChildStage, previous: Coordination, config?: StrategyConfig): readonly Coordination[] {
+    if (config?.execProfile) return PROFILE_CHILD_COORDINATIONS
     const choices = this.coordinations[stage]
     if (choices?.length) return choices
     return this.exec ? BRANCH_COORDINATIONS : [previous]
@@ -99,19 +114,21 @@ export class ParentBranches {
     const branch = saved.branch
     if (!geometry || !branch || branch.geometryId !== geometry.id || !Array.isArray(branch.ancestors) ||
         branch.ancestors.length >= this.evaluationStages.length || Boolean(branch.windows) !== this.exec) return
+    const plan = geometry.execProfile ? profileWindows : this.windows
     let parent = geometry
     for (let index = 0; index <= branch.ancestors.length; index++) {
       const stage = this.evaluationStages[index]
       const previous = branch.ancestors[index - 1], before = branch.ancestors[index - 2]
       if (previous && (previous.configId !== parent.id || !enabled(previous.coordination) ||
-          before && !this.choices(this.evaluationStages[index - 1] as ChildStage, before.coordination).includes(previous.coordination))) return
-      if (this.windows) {
-        const policy = branch.windows?.[stage], windows = this.windows[stage]
+          (before ? !this.choices(this.evaluationStages[index - 1] as ChildStage,before.coordination,geometry).includes(previous.coordination)
+            : geometry.execProfile && !PROFILE_BASE_COORDINATIONS.includes(previous.coordination)))) return
+      if (plan) {
+        const policy = branch.windows?.[stage], windows = plan[stage]
         if (!policy || !windows.short.includes(policy.short) || !windows.last.includes(policy.minimal) ||
             !execShortOutcomes(windows,policy.short).includes(policy.shortPolarity) || !(windows.lastOutcomes??POSITIVE_EXEC_OUTCOME).includes(policy.minimalPolarity)) return
-        const allowedLong = stage === "base" ? this.windows.base.long.includes(policy.long)
-          : policy.long === 0 ? this.windows[stage].long.includes("none")
-          : policy.long === parent.branch!.windows!.base!.long && this.windows[stage].long.includes("inherit")
+        const allowedLong = stage === "base" ? plan.base.long.includes(policy.long)
+          : policy.long === 0 ? plan[stage].long.includes("none")
+          : policy.long === parent.branch!.windows!.base!.long && plan[stage].long.includes("inherit")
         if (!allowedLong) return
         parent = this.make(parent, previous?.coordination, stage, undefined, this.policy(policy.long,policy.short,policy.minimal,policy.shortPolarity,policy.minimalPolarity))
       } else {

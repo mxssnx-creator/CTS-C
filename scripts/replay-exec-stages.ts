@@ -4,7 +4,9 @@ import { join } from "node:path"
 import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads"
 import { createHash } from "node:crypto"
 import { TradingEngine, STAGES } from "../core/engine"
-import { generateStrategyCatalog } from "../core/catalog"
+import { generateEngineCatalog } from "../core/catalog"
+import { EXEC_PROFILES, execProfileEnabled } from "../core/exec-profile"
+import trendDcaPreset from "../research-data/exec-dca-trend-preset.json"
 import { describeProfitFactor } from "../core/metrics"
 import { EXIT_MODES, type Candle, type ClosedTrade, type EngineSettings } from "../core/types"
 import { checkExecWindows } from "../core/last-n-grid"
@@ -63,14 +65,15 @@ function run({file,family,profile,scenario}: Job) {
   })
   const stages = Object.fromEntries([...STAGES,"executed"].map(stage=>[stage,cohort()]))
   const postStages = Object.fromEntries(STAGES.filter(stage=>stage!=="live").map(stage=>[stage,cohort()]))
-  const execShorts = checkExecWindows(engine.settings.catalog.strategyExecWindows).exec.short
+  const settings = engine.settings
+  const execShorts = [...new Set([...checkExecWindows(settings.catalog.strategyExecWindows).exec.short,
+    ...(EXEC_PROFILES.some(profile=>execProfileEnabled(settings,profile))?trendDcaPreset.strategyExecWindows.exec.short:[])])].sort((a,b)=>a-b)
   const shortBooks = Object.fromEntries(execShorts.map(count=>[count,cohort()]))
   const shortAccepted = Object.fromEntries(execShorts.map(count=>[count,cohort()]))
   const variants: Record<string, Cohort> = {}
   const groups: Record<string, Cohort> = {}
-  const sources = scenario.groupSources ? new Map(generateStrategyCatalog(engine.settings.connectionId,{
-    ...engine.settings.catalog,...engine.settings.symbolFees?.[symbol],strategyLastNGrid:undefined,
-  }).map(config=>[config.id,config.indicationSourceId??config.type])) : undefined
+  const sources = scenario.groupSources ? new Map(generateEngineCatalog(settings,settings.symbolFees?.[symbol])
+    .map(config=>[config.id,config.execProfile??config.indicationSourceId??config.type])) : undefined
   const distinct = {fit:new Map<string,{n:number;returns:number}>(),holdout:new Map<string,{n:number;returns:number}>()}
   const shortPaths = Object.fromEntries(execShorts.map(count=>[count,{fit:new Set<string>(),holdout:new Set<string>()}]))
   const awaitingMirror = new Map<string,Readonly<ClosedTrade>>()

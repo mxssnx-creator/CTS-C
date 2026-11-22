@@ -5,6 +5,8 @@ import { runExecProgressionReplay, runTerminalReplayAsync } from '@/core/termina
 import { getStore } from '@/core/store'
 import {connectionInfo} from '@/core/connections'
 import {TECHNICAL_INDICATIONS} from '@/core/indications'
+import { DEFAULT_ENGINE_SETTINGS } from '@/core/engine'
+import { withDefaultExecProfile } from '@/core/exec-profile'
 export const runtime='nodejs'
 export const dynamic='force-dynamic'
 let inFlight=false
@@ -22,7 +24,7 @@ export async function POST(request: NextRequest) {
     const limit=body.candles??1000
     if(!Number.isInteger(limit)||limit<100||limit>MAX_RESEARCH_CANDLES)return NextResponse.json({success:false,error:`Choose 100..${MAX_RESEARCH_CANDLES} research candles`},{status:400})
     const connection=connectionInfo(body.connectionId??undefined)
-    const settings=getStore(connection.id).engineSettings()
+    const settings=withDefaultExecProfile(getStore(connection.id).engineSettings()??{...DEFAULT_ENGINE_SETTINGS,connectionId:connection.id,stageGateMode:'exec-branches'})
     if(interval!=='1m'&&Array.isArray(settings?.catalog.strategyIndicationTypes)&&settings.catalog.strategyIndicationTypes.some(t=>(TECHNICAL_INDICATIONS as readonly unknown[]).includes(t)))return NextResponse.json({success:false,error:'Trend and Break timeframe grids require one-minute source candles. Select 1m.'},{status:400})
     const demo=typeof body.demo==='boolean'?body.demo:connection.demo
     const candles=await getResearchCandles(venue,symbol,interval,demo,limit,undefined,request.signal)
