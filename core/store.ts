@@ -27,6 +27,7 @@ export class StateStore {
       CREATE TABLE IF NOT EXISTS engine_lanes(id TEXT PRIMARY KEY,data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runtime_lease(name TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL, fence INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS intents_status_created ON intents(status,created);
+      CREATE INDEX IF NOT EXISTS intents_engine_id ON intents(json_extract(payload,'$.intent.connectionId'),json_extract(payload,'$.intent.id')) WHERE json_extract(payload,'$.role') IS NULL;
     `)
   }
   saveTradeBar(symbol:string,bar:import('./trade-stream').TradeBar):void{

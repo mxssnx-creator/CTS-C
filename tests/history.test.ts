@@ -19,8 +19,9 @@ test('initial history requires its full requested span while incremental recover
 test('restart history uses retained cursors without dropping the unseen closed tail',async()=>{
   const start=1700000040000,now=start+1600*60000
   assert.deepEqual(planHistory(1440,null,now),{count:1440,cutoff:now,cursor:null})
-  assert.equal(planHistory(1440,now-3*60000,now).count,100)
-  assert.equal(planHistory(1440,now-200*60000,now).count,201)
+  assert.equal(planHistory(1440,now-3*60000,now).count,3)
+  assert.equal(planHistory(1440,now-60000,now).count,1)
+  assert.equal(planHistory(1440,now-200*60000,now).count,200)
   assert.equal(planHistory(1440,now-2000*60000,now).cutoff,now-560*60000)
   assert.equal(planHistory(100,now-200*60000,now).cutoff,now-100*60000)
   const cursor=now-200*60000

@@ -1,7 +1,7 @@
 import {BingxTradeStream,TradeBarBuilder} from './trade-stream'
 import { randomUUID } from 'node:crypto'
 import { normalizeSymbol, TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings,validateObservedCandles } from './engine'
-import { connectionClient, connectionCredentials,type BingxClient } from './bingx'
+import { connectionClient, connectionCredentials,type BingxClient,type ClientOptions } from './bingx'
 import {CONNECTIONS,connectionInfo,type ConnectionId} from './connections'
 import { planExecutionIntents } from './runtime-policy'
 import { closedHistory, planHistory, validateHistory, type HistoryPlan } from './history'
@@ -14,8 +14,12 @@ import { DEFAULT_RELATE } from './relate'
 
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
-interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null}
+interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null;readyAt?:number}
 const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:4320,lastTick:null,lastError:null,feeReadFailures:[],feeCheckedAt:null }
+const EXECUTION_INTERVAL_MS = 250
+const RECONCILIATION_INTERVAL_MS = 1000
+const MARKET_INTERVAL_MS = 45
+const HISTORY_QUOTE_WAIT_MS = 2_000
 function retainEvents(target:EngineEvent[],source:readonly EngineEvent[],limit=5000){
   if(source.length>=limit)target.length=0
   for(let i=Math.max(0,source.length-limit);i<source.length;i++)target.push(source[i])
@@ -31,6 +35,8 @@ export class TerminalRuntime {
   private tradeSerialPending=false
   private tradeBarsRecorded=0
   private timer?: ReturnType<typeof setTimeout>
+  private executionTimer?: ReturnType<typeof setTimeout>
+  private reconciledAt = 0
   private readonly owner=randomUUID()
   private leased=false
   private leaseRenewedAt=0
@@ -38,6 +44,7 @@ export class TerminalRuntime {
   private hydratedCheckpointToken:string|null=null
   private heartbeat?:ReturnType<typeof setInterval>
   private checkpointAt=0
+  private checkpointIntentRevision=-1
   private bufferedEvents:EngineEvent[]=[]
   private sequence: Promise<unknown> = Promise.resolve()
   private executionTask?:Promise<void>
@@ -55,13 +62,13 @@ export class TerminalRuntime {
   private marks = new Map<string,{price:number;timestamp:number}>()
   private client:BingxClient
   private executor:DemoExecutor
-  constructor(readonly connectionId:ConnectionId='bingx-x02',readonly store:StateStore=getStore(connectionId),private readonly createClient:(id:ConnectionId)=>BingxClient=connectionClient) {
+  constructor(readonly connectionId:ConnectionId='bingx-x02',readonly store:StateStore=getStore(connectionId),private readonly createClient:(id:ConnectionId,options?:ClientOptions)=>BingxClient=connectionClient) {
     connectionInfo(connectionId)
-    this.client=this.createClient(connectionId)
-    this.executor=new DemoExecutor(this.store,this.client,{connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:intent=>this.validateLiveIntent(intent)})
+    this.client=this.createClient(connectionId,{minRequestIntervalMs:MARKET_INTERVAL_MS})
+    this.executor=new DemoExecutor(this.store,this.createClient(connectionId),{connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:intent=>this.validateLiveIntent(intent)})
     const restored = this.store.loadEngineState()
     this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
-    this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId,stageGateMode:"parent-branches"})
+    this.engine = restored ? TradingEngine.fromOwnedCheckpoint(restored) : new TradingEngine({...DEFAULT_ENGINE_SETTINGS,connectionId,stageGateMode:"exec-branches"})
     this.engine.observeLiveCloses(trade=>this.executor.recordSimulatedClose(this.connectionId,trade))
     if(this.engine.settings.connectionId!==connectionId)throw new Error('Engine checkpoint belongs to another connection')
     this.control = { ...DEFAULT_CONTROL, ...this.store.get<Control>('control'), warmed: [] }
@@ -74,7 +81,7 @@ export class TerminalRuntime {
     if(this.leased){
       const now=Date.now(),renew=now-this.leaseRenewedAt>=1000
       if(renew?this.store.renewLease(this.owner):this.store.ownsLease(this.owner)){if(renew)this.leaseRenewedAt=now;return}
-      this.leaseLost=true;this.control.running=false;clearTimeout(this.timer);throw new Error('Another runtime owns execution or this runtime lease expired')
+      this.leaseLost=true;this.control.running=false;clearTimeout(this.timer);clearTimeout(this.executionTimer);throw new Error('Another runtime owns execution or this runtime lease expired')
     }
     let acquired=false
     for(let attempt=0;attempt<3;attempt++){
@@ -127,19 +134,19 @@ export class TerminalRuntime {
     }
     this.persist()
   }
-  shutdown(){this.tradeStream?.stop();clearTimeout(this.tradeTimer);clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);this.leased=false;this.leaseLost=true;this.control.running=false}
+  shutdown(){this.tradeStream?.stop();clearTimeout(this.tradeTimer);clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);clearTimeout(this.executionTimer);this.leased=false;this.leaseLost=true;this.control.running=false}
   serial<T>(operation:()=>Promise<T>): Promise<T> { const next=this.sequence.catch(()=>{}).then(operation); this.sequence=next; return next }
   private persist(events: EngineEvent[] = [],force=true) {
     this.ensureLease();retainEvents(this.bufferedEvents,events)
     const cold=this.control.warmed.length<this.engine.managedSymbols().length
     const exposed=this.executor.lots?.().some(lot=>lot.quantity>1e-10)??false
     const interval=cold&&!exposed?30000:5000
-    if(!force&&Date.now()-this.checkpointAt<interval&&!this.engine.pendingIntents().length)return
+    if(!force&&Date.now()-this.checkpointAt<interval&&this.engine.intentRevision===this.checkpointIntentRevision)return
     const metadata=this.engine.checkpointMetadata(),settings=this.engine.settings
     if(this.store.hasLaneCheckpoint())this.store.saveLaneCheckpoint(metadata,this.engine.checkpointLanes(),this.bufferedEvents,settings,()=>this.ensureLease())
     else this.store.migrateLaneCheckpoint(metadata,this.engine.checkpointLanes(true),this.bufferedEvents,settings,()=>this.ensureLease())
     this.engine.checkpointSaved();this.store.set('control',this.control)
-    this.bufferedEvents=[];this.checkpointAt=Date.now()
+    this.bufferedEvents=[];this.checkpointAt=Date.now();this.checkpointIntentRevision=this.engine.intentRevision
   }
   async start(options:{symbols?:string[]}={}) {
     this.ensureLease()
@@ -148,8 +155,8 @@ export class TerminalRuntime {
     if(!connectionCredentials(this.connectionId))throw new Error(`Dedicated ${connectionInfo(this.connectionId).name} credentials are unavailable on the server.`)
     this.quoteGeneration++;this.quoteResult=undefined;this.quoteError=null
     this.accountGeneration++;this.accountError=null;this.accountRetryAt=0
-    this.client = this.createClient(this.connectionId)
-    this.executor = new DemoExecutor(this.store,this.client,{connectionId:this.connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
+    this.client = this.createClient(this.connectionId,{minRequestIntervalMs:MARKET_INTERVAL_MS})
+    this.executor = new DemoExecutor(this.store,this.createClient(this.connectionId),{connectionId:this.connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
     const [balance,contracts,quotes] = await Promise.all([this.client.balance(),this.client.contracts(),this.client.quotes()])
     this.ensureLease()
     this.store.set('account',{...balance,updatedAt:Date.now(),source:connectionInfo(this.connectionId).environment})
@@ -157,7 +164,7 @@ export class TerminalRuntime {
     const priority=['BTC-USDT','ETH-USDT','SOL-USDT','XRP-USDT','BCH-USDT','DOGE-USDT']
     const supported=new Set(contracts.map(c=>c.symbol))
     if(requested?.some(symbol=>!supported.has(symbol)||!available.has(symbol)))throw new Error('Explicit symbols require current contract metadata and quotes for every symbol')
-    const symbols=requested??[...priority,...contracts.map(c=>c.symbol)].filter((s,i,a)=>a.indexOf(s)===i&&available.has(s)).slice(0,this.control.symbolCount)
+    const symbols=requested??[...new Set([...priority,...contracts.map(c=>c.symbol)])].filter(s=>supported.has(s)&&available.has(s)).slice(0,this.control.symbolCount)
     if(!symbols.length)throw new Error('No tradable contracts returned for this connection')
     this.ensureLease()
     const settings=this.engine.settings
@@ -173,11 +180,12 @@ export class TerminalRuntime {
     this.control={...this.control,running:true,exchangeExecution:true,lastError:null,feeReadFailures,feeCheckedAt:Date.now()}
     this.persist()
     this.startTradeStream()
+    this.scheduleExecution()
     this.schedule()
   }
   pause() { this.ensureLease();this.control.exchangeExecution=false; this.persist() }
-  stop() { this.ensureLease();this.tradeStream?.stop();clearTimeout(this.tradeTimer);this.control.running=false;this.control.exchangeExecution=false;clearTimeout(this.timer);this.timer=undefined;this.persist() }
-  resume() { if(this.control.running){try{this.ensureLease();if(connectionCredentials(this.connectionId)){this.startTradeStream();this.schedule();}else{this.control.running=false;this.control.lastError=`${connectionInfo(this.connectionId).name} credentials unavailable after restart`;this.persist()}}catch(error){this.control.running=false;this.control.lastError=error instanceof Error?error.message:'Runtime ownership unavailable'}} }
+  stop() { this.ensureLease();this.tradeStream?.stop();clearTimeout(this.tradeTimer);this.control.running=false;this.control.exchangeExecution=false;clearTimeout(this.timer);this.timer=undefined;clearTimeout(this.executionTimer);this.executionTimer=undefined;this.persist() }
+  resume() { if(this.control.running){try{this.ensureLease();if(connectionCredentials(this.connectionId)){this.startTradeStream();this.scheduleExecution();this.schedule();}else{this.control.running=false;this.control.lastError=`${connectionInfo(this.connectionId).name} credentials unavailable after restart`;this.persist()}}catch(error){this.control.running=false;this.control.lastError=error instanceof Error?error.message:'Runtime ownership unavailable'}} }
   private startTradeStream(){
     this.tradeStream?.stop();clearTimeout(this.tradeTimer)
     if(this.engine.settings.catalog.microTradeStream!==true)return
@@ -200,7 +208,7 @@ export class TerminalRuntime {
     this.ensureLease()
     if(this.tradeGeneration!==this.tradeStream.status.generation){this.tradeGeneration=this.tradeStream.status.generation;this.tradeBars.reset()}
     const events:EngineEvent[]=[]
-    for(const trade of this.tradeStream.drain()){
+    for(const trade of this.tradeStream.drain(1000)){
       const observed=this.tradeBars.ingest(trade)
       if(!observed.accepted)continue
       if(observed.bar){
@@ -218,7 +226,17 @@ export class TerminalRuntime {
     if(events.length)this.persist(events,false)
     this.pumpExecution()
   }
-  /** Wake execution on stream ticks without waiting for the quote/history cycle.
+  private scheduleExecution() {
+    if (this.executionTimer || !this.control.running) return
+    this.executionTimer = setTimeout(() => {
+      this.executionTimer = undefined
+      try { this.pumpExecution(Date.now() - this.reconciledAt >= RECONCILIATION_INTERVAL_MS) }
+      catch (error) { this.control.lastError=error instanceof Error?error.message:"Executor unavailable" }
+      finally { this.scheduleExecution() }
+    }, EXECUTION_INTERVAL_MS)
+    this.executionTimer.unref?.()
+  }
+  /** Wake execution on its own cadence and on market ticks.
    * One in-flight cycle; venue pacing and durable intent claims still apply. */
   private pumpExecution(reconcile=false){
     if(!this.control.running)return
@@ -228,10 +246,13 @@ export class TerminalRuntime {
         const pending=this.engine.pendingIntents().filter(i=>this.control.exchangeExecution||i.kind==='close')
         if(!reconcile&&!pending.length)return
         const submittedIntentIds=new Set(pending.filter(i=>this.store.hasExecutionIntent(i.connectionId,i.id)).map(i=>i.id))
-        const plan=planExecutionIntents(pending,{activePositionIds:this.engine.activePositionIds(),submittedIntentIds,now:Date.now(),limit:1})
+        const plan=planExecutionIntents(pending,{activePositionIds:this.engine.activeLivePositionIds(),submittedIntentIds,now:Date.now(),limit:1})
         for(const rejection of plan.rejected){this.engine.markExecution(rejection.id,{status:'rejected',error:rejection.error});const intent=pending.find(i=>i.id===rejection.id)!;events.push({type:'execution',laneId:intent.laneId,stage:'live',timestamp:Date.now(),status:'rejected',reason:rejection.error})}
         if(plan.rejected.length)this.persist(events.splice(0))
-        this.executionTask=this.executor.process(plan.ready).then(updates=>this.serial(async()=>{
+        const maintenance = reconcile || plan.ready.some(intent => submittedIntentIds.has(intent.id))
+        if (maintenance) this.reconciledAt = Date.now()
+        if (!maintenance && !plan.ready.length) return
+        this.executionTask=this.executor.process(plan.ready, maintenance).then(updates=>this.serial(async()=>{
           const pendingById=new Map(this.engine.pendingIntents().map(i=>[i.id,i])),audit:EngineEvent[]=[]
           for(const update of updates)if(update.status!=='unknown'&&pendingById.has(update.id)){this.engine.markExecution(update.id,{...update,status:update.status});audit.push({type:'execution',laneId:pendingById.get(update.id)!.laneId,stage:'live',timestamp:Date.now(),status:update.status,reason:update.error})}
           if(audit.length)this.persist(audit)
@@ -241,14 +262,21 @@ export class TerminalRuntime {
   private prefetchHistory() {
     if(!this.control.running)return
     const latest=Math.floor(Date.now()/60000)*60000
-    const needed=this.engine.managedSymbols().filter(symbol=>(!this.control.warmed.includes(symbol)||(this.engine.lastProcessedAt(symbol)??latest)<latest)&&!this.warmJobs.has(symbol)&&(this.warmRetryAt.get(symbol)??0)<=Date.now())
-    for(const symbol of needed.slice(0,Math.max(0,8-this.warmJobs.size))){
+    const warmed = new Set(this.control.warmed)
+    const needed=this.engine.managedSymbols().filter(symbol=>(!warmed.has(symbol)||(this.engine.lastProcessedAt(symbol)??latest)<latest)&&!this.warmJobs.has(symbol)&&(this.warmRetryAt.get(symbol)??0)<=Date.now())
+    const capacity = Math.max(0,8-this.warmJobs.size)
+    const cold = needed.filter(symbol=>!warmed.has(symbol)).slice(0,Math.ceil(capacity/2))
+    const available = [...new Set([...cold,...needed])].slice(0,capacity)
+    for(const symbol of available){
       const job:HistoryJob={};this.warmJobs.set(symbol,job)
       try {
         const plan=job.plan=planHistory(this.control.historyCandles,this.engine.lastProcessedAt(symbol))
         job.live=this.control.warmed.includes(symbol)&&plan.cursor===latest-60000
         if(plan.cursor===plan.cutoff)job.data=[]
-        else void closedHistory(this.client,symbol,plan.count,plan.cutoff).then(data=>{job.data=data}).catch(error=>{job.error=error instanceof Error?error.message:'History unavailable'})
+        else void closedHistory(this.client,symbol,plan.count,plan.cutoff).then(data=>{
+          job.data=data
+          job.readyAt=Date.now()
+        }).catch(error=>{job.error=error instanceof Error?error.message:'History unavailable'})
       } catch(error){job.error=error instanceof Error?error.message:'History unavailable'}
     }
   }
@@ -270,7 +298,13 @@ export class TerminalRuntime {
     return cutoff!==undefined&&Boolean(mark&&mark.timestamp>=cutoff&&mark.timestamp<=now+5000&&now-mark.timestamp<=15000)
   }
   private consumeHistory(events:EngineEvent[],overlapOnly=false){
-      const warmed=[...this.warmJobs.entries()].filter(([symbol,job])=>(job.data||job.error)&&(!job.live||this.verifiedQuote(symbol,job.plan?.cutoff))).slice(0,overlapOnly?3:8)
+      const now = Date.now()
+      const warmed=[...this.warmJobs.entries()].filter(([symbol,job])=>{
+        if (job.error) return true
+        if (!job.data) return false
+        job.readyAt ??= now
+        return !job.live || now-job.readyAt>=HISTORY_QUOTE_WAIT_MS || this.verifiedQuote(symbol,job.plan?.cutoff)
+      }).slice(0,overlapOnly?3:8)
       const batchBegan=performance.now()
       for(const [symbol,job] of warmed){
         if(performance.now()-batchBegan>=100)break
@@ -307,7 +341,7 @@ export class TerminalRuntime {
       }
       if(warmed.length)this.persist(events.splice(0),false)
   }
-  private schedule() { if(this.timer||!this.control.running)return; const warming=this.control.warmed.length<this.engine.managedSymbols().length;this.timer=setTimeout(()=>{this.timer=undefined;void this.serial(()=>this.tick()).finally(()=>this.schedule())},warming?100:1000);this.timer.unref?.() }
+  private schedule() { if(this.timer||!this.control.running)return; const warming=this.control.warmed.length<this.engine.managedSymbols().length;this.timer=setTimeout(()=>{this.timer=undefined;void this.serial(()=>this.tick()).finally(()=>this.schedule())},warming?100:250);this.timer.unref?.() }
   private async tick() {
     if(!this.control.running)return
     try {
@@ -351,9 +385,10 @@ export class TerminalRuntime {
       }
       if(quotes.length)this.control.lastTick=now;if(!dataGap)this.control.lastError=this.quoteError?.message??null
       this.persist(events.splice(0),false)
-      this.pumpExecution(true)
+      if (!this.executionTimer) this.pumpExecution(true)
       this.prefetchHistory()
       this.consumeHistory(events)
+      this.pumpExecution()
       this.refreshAccount()
     } catch(error) {this.control.lastError=error instanceof Error?error.message:'Exchange processing unavailable';if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner))this.store.set('control',this.control)}
   }
@@ -362,7 +397,7 @@ export class TerminalRuntime {
     input=validateConfiguration(input,{partial:true})
     validateConfiguration({...flatEngineSettings(this.engine.settings,this.control),...input})
     const current=this.engine.settings, next=structuredClone(current)
-    const catalogKeys=['strategySignalsSources','strategyLowRangeSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyPriceDistancesEnabled','strategyStopDistancePcts','strategyTrailDistancePcts','strategyLastNGrid','strategyStageCoordinations','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
+    const catalogKeys=['strategySignalsSources','strategyLowRangeSources','signalsMaxWindowDrawdownPct','microMinSlDistancePct','microMinTrailDistancePct','microTrailRatio','autoPfEnabled','autoPfRatio','autoPfMax','microTradeStream','relationalVolumeRatios','strategyIndicationSources','strategyNormalEnabled','strategyTrailingEnabled','strategyProcessingByRange','strategyEnabledRanges','strategyTpSteps','strategySlRatios','strategyPriceDistancesEnabled','strategyStopDistancePcts','strategyTrailDistancePcts','strategyLastNGrid','strategyExecWindows','strategyStageCoordinations','strategyExitModes','strategyIndicationTypes','strategySignalPeriods','strategySignalTimeframes','strategyTpFactor','strategySlFactor','strategyTrailRatio','holdTimeFactor','makerFeePct','takerFeePct','slippagePctOfFees']
     const gateMap:Record<string,['stageLastN'|'stageMinPF','base'|'main'|'real']>={prevPosWindow:['stageLastN','base'],mainEvalPosCount:['stageLastN','main'],realEvalPosCount:['stageLastN','real'],baseProfitFactor:['stageMinPF','base'],mainProfitFactor:['stageMinPF','main'],realProfitFactor:['stageMinPF','real']}
     const autoFields = {
       blockAutoEnabled: ["block", "enabled"], blockAutoLastN: ["block", "lastN"],
@@ -377,6 +412,7 @@ export class TerminalRuntime {
     for(const [key,value] of Object.entries(input)) {
       if(key==='stageBlocks'){next.stageBlocks=structuredClone(value) as EngineSettings['stageBlocks'];continue}
       if(key==='stageGateMode'){next.stageGateMode=value as EngineSettings['stageGateMode'];continue}
+      if(key==='execMinPF'){next.execMinPF=Number(value);continue}
       if(key==='stageWindowScope'){next.stageWindowScope=value as EngineSettings['stageWindowScope'];continue}
       if(key==='microStageWindowScope'){next.microStageWindowScope=value as EngineSettings['microStageWindowScope'];continue}
       if(key==='liveEntryMode'){next.liveEntryMode=value as EngineSettings['liveEntryMode'];continue}
@@ -431,7 +467,15 @@ export class TerminalRuntime {
   marketDataStatus(){return {...this.tradeStream?.status,barsRecorded:this.tradeBarsRecorded,duplicates:this.tradeBars.duplicates,lateTrades:this.tradeBars.late,gaps:this.tradeBars.gaps,barSeconds:10}}
   snapshot() {
     const s=this.engine.snapshot({laneLimit:500,positionLimit:1000,positionStage:'live'}), account=this.store.get<{equity:number;updatedAt:number}>('account')
-    const stages=Object.fromEntries(s.stages.map(stage=>[stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:stage.currentEnoughSamples,samplesPercent:stage.currentLanes?100*stage.currentEnoughSamples/stage.currentLanes:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:stage.currentProfitFactor,windowPfState:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,validatedWindow:stage.validatedWindow,admittedForward:stage.admittedForward,required:s.settings.stageLastN[stage.stage==='live'?'real':stage.stage]}]))
+    const exec = s.settings.stageGateMode === "exec-branches"
+    const stages=Object.fromEntries(s.stages.filter(stage=>stage.stage!=="exec"||exec||stage.lanes).map(stage=>{
+      const mirror = exec && stage.stage === "live"
+      const sampleSizes = exec ? { ...(mirror && { directMirror: true }) } : { required: stage.stage === "exec" ? undefined : s.settings.stageLastN[stage.stage === "live" ? "real" : stage.stage] }
+      const candidates = stage.baseCandidates
+      const eligibleForSampling = candidates?.observed ?? stage.currentLanes
+      const enoughSamples = candidates?.enoughSamples ?? stage.currentEnoughSamples
+      return [stage.stage,{sets:stage.currentLanes,allSets:stage.lanes,retiredSets:stage.lanes-stage.currentLanes,eligible:stage.stage==='live'?stage.admissionReady:stage.currentQualified,enoughSamples:mirror?null:enoughSamples,sampleSetCount:eligibleForSampling,samplesPercent:!mirror&&eligibleForSampling?100*enoughSamples/eligibleForSampling:null,pf:stage.closed?stage.profitFactor:null,pfState:stage.pfState,windowPF:mirror?null:stage.currentProfitFactor,windowPfState:mirror?undefined:stage.currentPfState,open:stage.open,closed:stage.closed,blockedByParent:stage.blockedByParent,admissionReady:stage.admissionReady,validatedWindow:mirror?undefined:stage.validatedWindow,admittedForward:stage.admittedForward,executed:stage.executed,...sampleSizes}]
+    }))
     const settings=Object.fromEntries(Object.entries(flatEngineSettings(s.settings,this.control)).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)]))
     const positions=s.positions.filter(p=>p.stage==='live')
     const trades=s.liveTrades, live=s.stages.find(stage=>stage.stage==='live')!,ownedLots=this.executor.lots()
@@ -447,7 +491,7 @@ export class TerminalRuntime {
       positionCount:live.open,positionDisplayLimit:1000,microMarketData:this.marketDataStatus(),metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
       coordinationStats:this.engine.coordinationStats(),
       engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory,symbolFees:s.settings.symbolFees??{},feeReadFailures:this.control.feeReadFailures,feeCheckedAt:this.control.feeCheckedAt,feeFallbackSymbols:s.settings.symbols.filter(symbol=>!s.settings.symbolFees?.[symbol])},
-      execution:{lots:ownedLots,intents:this.store.intents(100),summary:this.executor.summary(ownedLots),comparison:this.executor.comparison(ownedLots)},lastReplay:this.store.get('lastReplay')}
+      execution:{lots:ownedLots,intents:this.store.intents(100),summary:{...this.executor.summary(ownedLots),dispatchIntervalMs:EXECUTION_INTERVAL_MS},comparison:this.executor.comparison(ownedLots)},lastReplay:this.store.get('lastReplay')}
   }
 }
 const shared=globalThis as typeof globalThis&{__ctscRuntimes?:Map<ConnectionId,TerminalRuntime>}

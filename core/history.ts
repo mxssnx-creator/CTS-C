@@ -11,7 +11,7 @@ export function planHistory(configuredCount:number,cursor:number|null,now=Date.n
   if(cursor===null)return {count:configuredCount,cutoff:latest,cursor}
   if(!Number.isSafeInteger(cursor)||cursor<=0||cursor%MINUTE!==0||cursor>latest)throw new Error('Invalid or future history cursor')
   const cutoff=Math.min(latest,cursor+configuredCount*MINUTE)
-  return {count:Math.min(configuredCount,Math.max(100,Math.ceil((cutoff-cursor)/MINUTE)+1)),cutoff,cursor}
+  return {count:(cutoff-cursor)/MINUTE,cutoff,cursor}
 }
 /** Reject gaps before mutating the indicator, stage or position ledger. */
 export function validateHistory(symbol:string,candles:Candle[],plan:HistoryPlan):void {
@@ -27,7 +27,7 @@ export function validateHistory(symbol:string,candles:Candle[],plan:HistoryPlan)
 }
 /** Backfill observed closed minutes; BingX VST may cap a page at 1,000. */
 export async function closedHistory(source:HistorySource,symbol:string,count:number,cutoff=Date.now()):Promise<Candle[]> {
-  if(!Number.isInteger(count)||count<100||count>4320)throw new Error('History count must be 100..4320')
+  if(!Number.isInteger(count)||count<1||count>4320)throw new Error('History page count must be 1..4320')
   const rows=new Map<number,VenueCandle>()
   let endTime=Math.floor(cutoff/60_000)*60_000-1
   for(let page=0;page<Math.ceil(count/1000)+1&&rows.size<count;page++){
@@ -41,6 +41,6 @@ export async function closedHistory(source:HistorySource,symbol:string,count:num
     endTime=oldest-1
   }
   const result=[...rows.values()].sort((a,b)=>a.time-b.time).slice(-count)
-  if(result.length<2)throw new Error(`Insufficient observed history for ${symbol}`)
+  if(result.length<Math.min(2,count))throw new Error(`Insufficient observed history for ${symbol}`)
   return result.map(c=>({timestamp:c.time+60_000,open:c.open,high:c.high,low:c.low,close:c.close,volume:c.volume}))
 }

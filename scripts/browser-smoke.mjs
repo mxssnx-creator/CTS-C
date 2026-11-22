@@ -109,6 +109,11 @@ try{
  assert.ok(JSON.parse(lowRange.strategyExitModes).includes('trailing-fixed'))
  assert.deepEqual([lowRange.relateEnabled,lowRange.relateSteps],['true','10'])
 
+ await page.getByLabel('Stage progression',{exact:true}).selectOption('exec-branches')
+ await page.getByLabel('Exec → Live minimum PF',{exact:true}).fill('1.15')
+ await page.getByText('Independent Last-N Sets',{exact:true}).click()
+ const execLong=page.getByRole('group',{name:/^Exec Long/})
+ await execLong.getByRole('button',{name:'No Long',exact:true}).click()
  await page.getByRole('button',{name:'Prepare Signals preset',exact:true}).click()
  await page.getByLabel('Signals source configurations',{exact:true}).selectOption(['sig-ema-cross-s','sig-coord-v2-r80-n3-i3-bzikk5k'])
  await page.getByLabel('Signals gate return drawdown limit (pp; 0 = disabled)',{exact:true}).fill('2.5')
@@ -117,13 +122,14 @@ try{
  const signals=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
  assert.deepEqual(JSON.parse(signals.strategyIndicationTypes),['Signals'])
  assert.deepEqual(JSON.parse(signals.strategySignalsSources),['sig-ema-cross-s','sig-coord-v2-r80-n3-i3-bzikk5k'])
- assert.equal(signals.signalsMaxWindowDrawdownPct,'2.5');assert.equal(signals.stageGateMode,'processed-sets');assert.equal(signals.liveEntryMode,'real-mirror')
+ assert.equal(signals.signalsMaxWindowDrawdownPct,'2.5');assert.equal(signals.stageGateMode,'exec-branches');assert.equal(signals.execMinPF,'1.15');assert.deepEqual(JSON.parse(signals.strategyExecWindows).exec.long,['inherit'])
  await page.getByLabel('Filter Signals sources',{exact:true}).fill('unmatched-no-source')
  assert.equal(await page.getByLabel('Signals source configurations',{exact:true}).locator('option').count(),2)
 
  await page.getByRole('button',{name:'Integrations',exact:true}).click();await page.getByLabel('Search integrations').fill('unmatched');await page.getByText('No integration matches this search.').waitFor()
  await page.getByRole('button',{name:'Command center',exact:true}).click()
  await page.getByRole('heading',{name:'Execution comparison',exact:true}).waitFor()
+ await page.getByRole('rowheader',{name:'exec',exact:true}).waitFor()
  assert.equal(await page.getByLabel('Public market quotes',{exact:true}).count(),1,'view, settings and connection changes must retain exactly one market tape')
  if(process.env.CTS_UI_OUTPUT){await mkdir(process.env.CTS_UI_OUTPUT,{recursive:true});await page.screenshot({path:join(process.env.CTS_UI_OUTPUT,'desktop.png'),fullPage:true})}
  await page.setViewportSize({width:390,height:844})

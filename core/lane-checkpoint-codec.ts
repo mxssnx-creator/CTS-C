@@ -3,11 +3,12 @@ import type { GateProof, LaneState, StrategyConfig } from "./types"
 type JsonRecord=Record<string,unknown>
 
 const LANE_KEYS:Record<string,string>={
-  calculationOnly:"z",blockRound:"b",dcaStepReturns:"j",blockStepReturns:"v",
+  calculationOnly:"z",baseObservation:"bc",blockRound:"b",dcaStepReturns:"j",blockStepReturns:"v",
   symbol:"s",direction:"d",stage:"g",coordination:"o",samples:"a",closedCount:"n",wins:"w",
   netPnl:"p",grossProfit:"f",grossLoss:"l",sampleTimes:"m",untimedSamplesThrough:"u",
   open:"x",admittedAt:"h",lastTimestamp:"t",admissionCount:"q",costTotal:"k",
   admittedClosed:"ec",admittedProfit:"ep",admittedLoss:"el",admittedNetPnl:"en",
+  executed:"ex",
 }
 const PROOF_KEYS:Record<string,string>={
   stage:"g",laneId:"i",count:"n",required:"r",minPF:"m",profitFactor:"p",pfState:"s",

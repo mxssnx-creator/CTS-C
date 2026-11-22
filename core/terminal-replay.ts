@@ -1,8 +1,9 @@
 import { generateStrategyCatalog, STRATEGY_RANGES } from "./catalog"
 import { replayStrategy,strategySignalTrace } from "./replay"
-import { aggregateCostNormalizedResults } from "./metrics"
+import { aggregateCostNormalizedResults, describeProfitFactor } from "./metrics"
+import { STAGES, TradingEngine } from "./engine"
 import type { MarketCandle } from "./market"
-import type { StrategyConfig, PseudoPosition } from "./types"
+import type { StrategyConfig, PseudoPosition, EngineSettings } from "./types"
 
 function metrics(positions: PseudoPosition[]) {
   const closed = positions.filter(p => p.status === "closed")
@@ -22,7 +23,8 @@ function* replaySteps(symbol: string, candles: MarketCandle[], settings: Record<
   if(!Number.isFinite(barSeconds)||barSeconds<0)throw new Error("Invalid replay interval")
   const train = candles.slice(0, split).map(c => ({ ...c, timestamp: (c.time+barSeconds) * 1000 }))
   const test = candles.slice(split).map(c => ({ ...c, timestamp: (c.time+barSeconds) * 1000 }))
-  const configs = generateStrategyCatalog("terminal-research", settings.stageGateMode === "parent-branches" ? { ...settings, strategyLastNGrid: undefined } : settings).filter(c=>barSeconds===10?(c.signalTimeframeMinutes??1)<1:(c.signalTimeframeMinutes??1)>=1)
+  const branches = settings.stageGateMode === "parent-branches" || settings.stageGateMode === "exec-branches"
+  const configs = generateStrategyCatalog("terminal-research", branches ? { ...settings, strategyLastNGrid: undefined } : settings).filter(c=>barSeconds===10?(c.signalTimeframeMinutes??1)<1:(c.signalTimeframeMinutes??1)>=1)
   const minSamples = Math.max(1, Math.min(200, Number(settings.prevPosWindow??settings.mainEvalPosCount) || 20))
   const minPf = Math.max(1, Number(settings.baseProfitFactor) || 1.05)
   const evaluated = [] as {config:StrategyConfig;score:ReturnType<typeof metrics>;enough:boolean;passed:boolean}[]
@@ -69,4 +71,34 @@ export async function runTerminalReplayAsync(symbol:string,candles:MarketCandle[
     const next=steps.next();if(next.done)return next.value
     if(count%4===0)await new Promise<void>(resolve=>setImmediate(resolve))
   }
+}
+
+/** Run the saved Exec pipeline through the same closed minute bars as the research view. */
+export async function runExecProgressionReplay(symbol: string, candles: MarketCandle[], settings: EngineSettings, signal?: AbortSignal) {
+  const split = Math.floor(candles.length * .65)
+  const holdout = (candles[split].time + 60) * 1000
+  const engine = new TradingEngine({ ...settings, symbols: [symbol] })
+  const totals = Object.fromEntries([...STAGES, "executed"].map(stage=>[stage,{ closed:0, wins:0, profit:0, loss:0, net:0, cost:0 }]))
+  engine.observeStageCloses(trade=>{
+    if (trade.openedAt < holdout) return
+    for (const stage of trade.executed ? [trade.stage,"executed"] : [trade.stage]) {
+      const row = totals[stage]
+      row.closed++
+      row.wins += Number(trade.netReturnPct>0)
+      row.profit += Math.max(0,trade.netReturnPct)
+      row.loss += Math.max(0,-trade.netReturnPct)
+      row.net += trade.netPnl
+      row.cost += trade.cost
+    }
+  })
+  let nextYield = performance.now()+20
+  for (const bar of candles) {
+    signal?.throwIfAborted()
+    engine.processCandles(symbol,[{ ...bar,timestamp:(bar.time+60)*1000 }],{eventLimit:0})
+    if (performance.now()>=nextYield) {
+      await new Promise<void>(resolve=>setImmediate(resolve))
+      nextYield = performance.now()+20
+    }
+  }
+  return Object.entries(totals).map(([stage,{profit,loss,...row}])=>({stage,...row,...describeProfitFactor(profit,loss,row.closed)}))
 }

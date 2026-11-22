@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { BingxVstClient, BINGX_VST_HOST, demoCredentials } from "../core/bingx"
-import { DEFAULT_ENGINE_SETTINGS, STAGES, TradingEngine } from "../core/engine"
+import { DEFAULT_ENGINE_SETTINGS, STAGES as ALL_STAGES, TradingEngine } from "../core/engine"
 import { generateStrategyCatalog, STRATEGY_RANGES } from "../core/catalog"
 import type { Candle, Coordination, LaneState, Stage } from "../core/types"
 
@@ -10,12 +10,13 @@ import type { Candle, Coordination, LaneState, Stage } from "../core/types"
 // never creates an executor and deliberately cannot submit exchange orders.
 const SYMBOLS = ["BTC", "ETH", "SOL", "XRP", "BCH", "DOGE", "ADA", "LTC", "LINK", "AVAX", "TRX", "DOT"].map(s => `${s}-USDT`)
 const COORDINATIONS: Coordination[] = ["normal", "axis", "block", "dca"]
+const STAGES = ALL_STAGES.filter(stage => stage !== "exec")
 const BAR_MS = 60_000, REQUESTED_BARS = 1440
 function option(name: string): string | undefined {
   const index = process.argv.indexOf(name)
   return index >= 0 ? process.argv[index + 1] : undefined
 }
-function aggregate(lanes: LaneState[], stage: Stage) {
+function aggregate(lanes: LaneState[], stage: Exclude<Stage,"exec">) {
   const required = DEFAULT_ENGINE_SETTINGS.stageLastN[stage === "live" ? "real" : stage]
   const threshold = DEFAULT_ENGINE_SETTINGS.stageMinPF[stage === "live" ? "real" : stage]
   let positive = 0, negative = 0, enoughSamples = 0, qualified = 0

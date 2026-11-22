@@ -7,7 +7,7 @@ import { strategyProcessing, validateProcessingByRange } from "./strategy-proces
 import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import { DEFAULT_EXIT_MODES, EXIT_MODES, type EngineSettings, type ExitMode, type StrategyRange } from "./types"
 import { EXPANDED_CATALOG_MAX, STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS, protectionVariants } from "./protection-grid"
-import { LAST_N_STAGES, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
+import { LAST_N_STAGES, DEFAULT_EXEC_MIN_PF, DEFAULT_EXEC_WINDOWS, checkExecWindows, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TIMEFRAMES } from "../shared/cts-indications/low-range-catalog.ts"
 import { DEFAULT_STEP_AUTO } from "./step-evidence"
 import { DEFAULT_RELATE } from "./relate"
@@ -22,11 +22,11 @@ export const MODES = [...EXIT_MODES]
 export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
-  stageGateMode: "parent-branches",
+  stageGateMode: "exec-branches",
   stageWindowScope: "context", microStageWindowScope: "inherit",
-  stageBlocks: {}, strategyLastNGrid: {}, strategyStageCoordinations: {},
+  stageBlocks: {}, strategyLastNGrid: {}, strategyExecWindows: DEFAULT_EXEC_WINDOWS, strategyStageCoordinations: {},
   liveEntryMode: "independent",
-  baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
+  baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1, execMinPF: DEFAULT_EXEC_MIN_PF,
   mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20,
   variantBlockEnabled: true, variantDcaEnabled: true, axisPrevEnabled: true,
   axisPrevious: 8, axisLast: 3, axisOutcome: "any",axisReferenceStage:'same-stage',
@@ -55,11 +55,12 @@ export const DEFAULTS: Record<string, unknown> = {
 export const NUMERIC_FIELDS = [
   { key: "baseProfitFactor", label: "Base → Main minimum PF", min: 0, max: 999, step: 0.01 },
   { key: "mainProfitFactor", label: "Main → Real minimum PF", min: 0, max: 999, step: 0.01 },
-  { key: "realProfitFactor", label: "Real → Live minimum PF", min: 0, max: 999, step: 0.01 },
+  { key: "realProfitFactor", label: "Real minimum PF", min: 0, max: 999, step: 0.01 },
   { key: "prevPosWindow", label: "Base completed samples", min: 1, max: 250, step: 1 },
   { key: "mainEvalPosCount", label: "Main completed samples", min: 1, max: 250, step: 1 },
   { key: "realEvalPosCount", label: "Real completed samples", min: 1, max: 250, step: 1 },
 ]
+export const EXEC_PF_FIELD = { key: "execMinPF", label: "Exec → Live minimum PF", min: 1.01, max: 999, step: 0.01 }
 export const COST_FIELDS = [
   { key: "makerFeePct", label: "Maker fee (%)", min: 0, max: 20, step: 0.001 },
   { key: "takerFeePct", label: "Taker fee (%)", min: 0, max: 20, step: 0.001 },
@@ -95,7 +96,7 @@ export const COORDINATION_FIELDS = [
   { key: "relateMaxSlRatio", label: "Relate maximum SL-to-TP ratio", min: .01, max: .5, step: .01 },
 ]
 const WINDOW_SCOPES = ["context", "config", "both"] as const
-const ENUM_FIELDS: Record<string, readonly string[]> = { blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
+const ENUM_FIELDS: Record<string, readonly string[]> = { blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches','exec-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
@@ -127,7 +128,7 @@ export const FACTOR_FIELDS = [
   { key: "strategyTrailRatio", label: "Trail / SL distance ratio", min: 0.05, max: 10, step: 0.05 },
   { key: "holdTimeFactor", label: "Maximum hold factor", min: 0.05, max: 10, step: 0.05 },
 ]
-export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
+export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, EXEC_PF_FIELD, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
 
 const sourceKinds=new Map(PORTED_CATALOG.map(s=>[s.id,s.kind]))
 export function configurationCount(values: Record<string, unknown>) {
@@ -157,7 +158,7 @@ export function configurationCount(values: Record<string, unknown>) {
   const lowRangeCount = hasLowRange
     ? lowRangeCells * lowRangeSources.length * timeframes.filter(tf => LOW_RANGE_TIMEFRAMES.some(minutes => tf === minutes)).length : 0
   const count = lowRangeCount + cells * ((types.length-technical-portedTypes.length-signals-Number(hasLowRange)+signals*signalSources.length)*timeframes.length+extra+technical*(values.strategySignalPeriods as number[]).length*timeframes.length)
-  return count * lastNVariantCount((values.strategyLastNGrid ?? {}) as LastNGrid)
+  return values.stageGateMode === "exec-branches" ? count : count * lastNVariantCount((values.strategyLastNGrid ?? {}) as LastNGrid)
 }
 
 export function validateConfiguration(input: unknown, { partial = false, formNumbers = false } = {}): Record<string, unknown> {
@@ -171,6 +172,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if (!Object.prototype.hasOwnProperty.call(values, key)) {
       if (partial) continue
       if (key === "strategyStageCoordinations") { output[key] = {}; continue }
+      if (key === "strategyExecWindows" || key === "execMinPF") { output[key] = structuredClone(DEFAULTS[key]); continue }
       throw new Error(`Configuration is missing ${key}.`)
     }
     const value = values[key]
@@ -184,6 +186,8 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
       output[key] = checkStageCoordinations(value)
     } else if (key === "strategyLastNGrid") {
       output[key] = structuredClone(checkLastNGrid(value))
+    } else if (key === "strategyExecWindows") {
+      output[key] = structuredClone(checkExecWindows(value))
     } else if (key === "relationalVolumeRatios") {
       output[key]=relationalVolumeSettings(value,true)
     } else if (key === "strategyProcessingByRange") {
@@ -208,6 +212,10 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     const count = configurationCount(output)
     if (count === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
     const windows = output.strategyLastNGrid as LastNGrid
+    const exec = output.stageGateMode === "exec-branches"
+    if (exec && ["baseProfitFactor","mainProfitFactor","realProfitFactor"].some(key => Number(output[key]) < 1.01)) {
+      throw new Error("Base, Main and Real minimum PF must be at least 1.01 in Exec progression.")
+    }
     if ((output.strategyPriceDistancesEnabled || LAST_N_STAGES.some(stage => windows[stage]?.length)) && (output.stageGateMode === "parent-branches" ? count / lastNVariantCount(windows) : count) > EXPANDED_CATALOG_MAX) {
       throw new Error(`Expanded catalog exceeds ${EXPANDED_CATALOG_MAX} configurations. Select fewer distances, sources, timeframes or windows.`)
     }
@@ -232,6 +240,8 @@ export function hydrate(settings: Record<string, string>): Record<string, unknow
       try { result[key] = checkStageCoordinations(JSON.parse(settings[key])) } catch { /* Keep legacy defaults. */ }
     } else if (key === "strategyLastNGrid") {
       try { result[key] = checkLastNGrid(JSON.parse(settings[key])) } catch { /* Preserve defaults on invalid legacy data. */ }
+    } else if (key === "strategyExecWindows") {
+      try { result[key] = checkExecWindows(JSON.parse(settings[key])) } catch { /* Preserve defaults on invalid data. */ }
     } else if (key === "relationalVolumeRatios") {
       try{result[key]=relationalVolumeSettings(JSON.parse(settings[key]),true)}catch{}
     } else if (key === "strategyProcessingByRange") {
@@ -256,7 +266,7 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
     stageWindowScope:s.stageWindowScope??"context",microStageWindowScope:s.microStageWindowScope??"inherit",
     normalVolumeRatio:s.volumeRatios?.normal??1,axisVolumeRatio:s.volumeRatios?.axis??1,blockVolumeFactor:s.volumeRatios?.block??1,dcaVolumeRatio:s.volumeRatios?.dca??1,relateVolumeRatio:s.volumeRatios?.relate??1,
     prevPosWindow:s.stageLastN.base,mainEvalPosCount:s.stageLastN.main,realEvalPosCount:s.stageLastN.real,
-    baseProfitFactor:s.stageMinPF.base,mainProfitFactor:s.stageMinPF.main,realProfitFactor:s.stageMinPF.real,
+    baseProfitFactor:s.stageMinPF.base,mainProfitFactor:s.stageMinPF.main,realProfitFactor:s.stageMinPF.real,execMinPF:s.execMinPF??DEFAULT_EXEC_MIN_PF,
     variantBlockEnabled:s.coordinations.block.enabled,variantDcaEnabled:s.coordinations.dca.enabled,axisPrevEnabled:s.coordinations.axis.enabled,
     blockVolumeRatio:s.coordinations.block.ratio,axisPrevious:s.coordinations.axis.previous,axisLast:s.coordinations.axis.last,axisOutcome:s.coordinations.axis.outcome,axisReferenceStage:s.coordinations.axis.reference??'same-stage',
     blockBehavior:s.coordinations.block.behavior??"pyramid",blockSize:s.coordinations.block.size??3,blockPauseRounds:s.coordinations.block.pauseRounds??1,blockMaxMultiplier:s.coordinations.block.maxMultiplier??3,

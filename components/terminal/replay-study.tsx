@@ -6,7 +6,7 @@ import { formatProfitFactor, profitFactorRank, type ProfitFactorState } from "./
 
 type ReplayMetrics = { trades: number; pf: number | null; pfState?: ProfitFactorState; netReturnSumPct: number; maxDrawdownPct: number; winRate: number; long: number; short: number; open: number }
 type ReplayRow = {lookback?:number;signalTimeframeMinutes?:number; id: string; range: string; tactic: string; tpStep: number; slRatio: number; exitMode: string; training: ReplayMetrics; trainingPassed: boolean; holdout: ReplayMetrics }
-type ReplayResult = { success: boolean; source: string; createdAt: string | number; configurations: number; enoughSamples: number; samplesPercent: number; eligible: number; minSamples?: number; minPf?: number; trainingCandles: number; holdoutCandles: number; rows: ReplayRow[]; executionEligible: false; note: string }
+type ReplayResult = { success: boolean; source: string; createdAt: string | number; configurations: number; enoughSamples: number; samplesPercent: number; eligible: number; minSamples?: number; minPf?: number; trainingCandles: number; holdoutCandles: number; rows: ReplayRow[]; executionEligible: false; note: string; progression?:{stage:string;closed:number;wins:number;profitFactor:number;pfState:ProfitFactorState;net:number;cost:number}[] }
 const decimal = (value: number | null | undefined, places = 2) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(places) : "—"
 const stat = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "—"
 
@@ -81,6 +81,12 @@ export function ReplayStudy({connectionId="bingx-x02"}:{connectionId?:string}) {
           ["Candles", `${stat(result.trainingCandles)} / ${stat(result.holdoutCandles)}`, "Training / holdout"],
         ].map(([label, value, description]) => <div key={label} className="rounded-lg border border-[var(--terminal-border)] p-4"><p className="terminal-muted text-[10px] uppercase tracking-wider">{label}</p><p className="mt-2 font-mono text-2xl">{value}</p><p className="terminal-muted mt-1 text-[11px]">{description}</p></div>)}</div>
         <p className="terminal-muted text-xs leading-relaxed">{result.note}</p>
+        {result.progression&&<section className="space-y-3">
+          <h3 className="text-sm font-semibold">Saved stage progression on holdout</h3>
+          <div className="terminal-table-wrap"><table className="terminal-table"><thead><tr>{["Stage","Settled","Net return PF","Win rate","Net P&L","Modeled costs"].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
+            <tbody>{result.progression.map(row=><tr key={row.stage}><th className="capitalize" scope="row">{row.stage}</th><td>{stat(row.closed)}</td><td>{formatProfitFactor(row.profitFactor,row.pfState)}</td><td>{row.closed?`${decimal(100*row.wins/row.closed,1)}%`:"—"}</td><td>{decimal(row.net,4)}</td><td>{decimal(row.cost,4)}</td></tr>)}</tbody>
+          </table></div>
+        </section>}
         <p className="terminal-muted text-xs leading-relaxed">The table contains a training-ranked shortlist of up to three configurations per range, evaluated separately on holdout candles.{result.minSamples !== undefined && result.minPf !== undefined ? ` Training gate: at least ${result.minSamples} completed samples and PF ${decimal(result.minPf)}.` : ""}</p>
         <div className="flex flex-wrap items-center gap-3 text-xs">
           <label className="flex items-center gap-2 terminal-muted">Range<select className="terminal-input" value={range} onChange={event => { setRange(event.target.value); setPage(0) }}><option value="all">All ranges</option>{[...new Set(result.rows.map(row => row.range))].map(value => <option key={value} value={value}>{value}</option>)}</select></label>

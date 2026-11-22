@@ -1,7 +1,7 @@
 import type {BlockPolicy} from "../shared/cts-lastn/blocks.ts";
-import type { ConfigLastN } from "./last-n-grid"
+import type { ConfigLastN, EvaluationStage } from "./last-n-grid"
 export type Direction = "long" | "short"
-export type Stage = "base" | "main" | "real" | "live"
+export type Stage = EvaluationStage | "live"
 export type Coordination = "normal" | "axis" | "block" | "dca" | "relate"
 export type StrategyRange = "Micro" | "Minimal" | "Short" | "Normal" | "Long" | "Wide" | "Low-Range"
 export const DEFAULT_EXIT_MODES = ["fixed", "trailing", "trailing-only"] as const
@@ -16,7 +16,7 @@ export interface StrategyConfig {
   roundTripCostPct?: number; maxHoldMinutes?: number; trailDistancePct?:number
   indicationSourceId?:string
   autoPfFloor?:number
-  branch?: { geometryId: string; ancestors: readonly { configId: string; coordination: Coordination }[] }
+  branch?: { geometryId: string; ancestors: readonly { configId: string; coordination: Coordination }[]; windows?: Partial<Record<EvaluationStage, BlockPolicy>> }
   stageLastN?: ConfigLastN
   /** Maximum peak-to-trough sum of net-return percentage points in this lane's gate window. Not account drawdown. */
   maxWindowDrawdownPct?:number
@@ -31,7 +31,8 @@ export type StageWindowScope = "context" | "config" | "both"
 export interface EngineSettings {
   stageBlocks?: Partial<Record<"base"|"main"|"real",BlockPolicy>>;
   liveEntryMode?:'independent'|'real-mirror'
-  stageGateMode?:'continuous-ancestors'|'processed-sets'|'parent-branches'
+  stageGateMode?:'continuous-ancestors'|'processed-sets'|'parent-branches'|'exec-branches'
+  execMinPF?:number
   stageWindowScope?: StageWindowScope
   microStageWindowScope?: StageWindowScope | "inherit"
   connectionId: string; symbols: string[]; initialEquity: number; baseNotional: number; volumeFactor: number
@@ -71,6 +72,8 @@ export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   activationOrder?:number
   executionEligible?: boolean
+  /** This Exec entry passed its own completed-position gate at the entry clock. */
+  executed?: boolean
   parentPositionId?:string
   admission?:GateProof[]
   sizing?: { baseBudget: number; block: EngineSettings["coordinations"]["block"]; dca: EngineSettings["coordinations"]["dca"] }
@@ -89,10 +92,13 @@ export interface ClosedTrade {
   openedAt: number; closedAt: number; entryPrice: number; exitPrice: number; quantity: number; notional: number
   grossPnl: number; cost: number; netPnl: number; netReturnPct: number; reason: string; fills: EntryFill[]
   source: "paper"
+  executed?: boolean
   admission?:GateProof[]
   parentPositionId?:string
 }
 export interface LaneState {
+  /** One observation stream for Base policies that do not affect entries or exits. */
+  baseObservation?:true
   /** Internal Normal reference, never funded or counted as active Live execution. */
   calculationOnly?: boolean;
   blockRound?: { closed:number; sum:number; net:number; level:number; pauseRemaining:number; rounds:number };
@@ -108,6 +114,7 @@ export interface LaneState {
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
   costTotal?: number
   admittedClosed?:number;admittedProfit?:number;admittedLoss?:number;admittedNetPnl?:number
+  executed?:{closed:number;profit:number;loss:number;netPnl:number}
   parentProof?:GateProof[]
 }
 export interface SignalState {
@@ -128,13 +135,14 @@ export interface ExecutionIntent {
   id: string; connectionId: string; laneId: string; configId: string; symbol: string; direction: Direction
   kind: "entry" | "add" | "close"; positionId: string; requestedQuantity: number
   timestamp: number; price: number; notional: number; takeProfitPct: number; stopLossPct: number; exitMode: ExitMode
-  source: "real-qualified"; status: "pending" | "acknowledged" | "rejected"
+  source: "real-qualified" | "exec-qualified"; status: "pending" | "acknowledged" | "rejected"
   exchangeOrderId?: string; error?: string
   maxOrderNotional?:number
   qualificationId?:string
   minimumAddRatio?:number
   entryAllocationRatio?:number
   realPositionId?:string
+  execPositionId?:string
   leverage?:number
 }
 export interface EngineEvent { type: "opened" | "added" | "closed" | "qualified" | "execution"; status?:string; reason?:string; laneId: string; timestamp: number; stage: Stage; trade?: ClosedTrade }
@@ -148,8 +156,10 @@ export interface EngineState {
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]
 }
 export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; pfState: ProfitFactorState; netPnl: number; wins:number; fees:number|null; longOpen:number; shortOpen:number; currentLanes:number; currentEnoughSamples:number; currentQualified:number; admissionReady:number; blockedByParent:number; currentProfitFactor:number|null; currentPfState:ProfitFactorState
+  baseCandidates?:{observed:number;enoughSamples:number}
   validatedWindow?:{samples:number;sets:number;profitFactor:number;pfState:ProfitFactorState;profit?:number;loss?:number}
   admittedForward?:{closes:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number;unprovenCloses:number}
+  executed?:{open:number;closed:number;profitFactor:number;pfState:ProfitFactorState;netPnl:number}
 }
 export interface EngineSnapshot {
   settings: EngineSettings; catalogCount: number; symbolCount: number; processedCandles: number; updatedAt: number

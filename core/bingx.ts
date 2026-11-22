@@ -617,8 +617,8 @@ export class BingxVstClient extends BingxClient{
 export class BingxMainnetClient extends BingxClient{
  constructor(credentials:DemoCredentials|null=mainnetCredentials(),options:ClientOptions={}){super(credentials,options,'mainnet')}
 }
-export function connectionClient(connectionId:string):BingxClient{
- if(connectionId==='bingx-x02')return new BingxVstClient()
- if(connectionId==='bingx-x01')return new BingxMainnetClient()
+export function connectionClient(connectionId:string, options?:ClientOptions):BingxClient{
+ if(connectionId==='bingx-x02')return new BingxVstClient(undefined,options)
+ if(connectionId==='bingx-x01')return new BingxMainnetClient(undefined,options)
  throw new Error('Unknown connection')
 }

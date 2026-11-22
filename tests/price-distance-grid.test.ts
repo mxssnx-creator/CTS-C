@@ -8,7 +8,7 @@ import { DEFAULTS, configurationCount, hydrate, validateConfiguration } from "..
 import { EXIT_MODES, type Candle } from "../core/types"
 
 test("all exact protection distances and both trailing types have their own catalog IDs and Auto PF", () => {
-  const settings = validateConfiguration({ ...DEFAULTS, strategyEnabledRanges: ["Short"], strategyTpSteps: [12],
+  const settings = validateConfiguration({ ...DEFAULTS, stageGateMode:"parent-branches", strategyEnabledRanges: ["Short"], strategyTpSteps: [12],
     strategyIndicationTypes: ["Trend"], strategyExitModes: [...EXIT_MODES], strategyPriceDistancesEnabled: true,
     strategyLastNGrid: { base: [8, 12] }, autoPfEnabled: true })
   const rows = generateStrategyCatalog("offline", settings)

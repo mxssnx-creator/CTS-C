@@ -283,7 +283,11 @@ test('history recovery yields between bounded slices and matches complete engine
  await isolated(async runtime=>{
   const internal=runtime as any,symbol=runtime.engine.settings.symbols[0],now=Math.floor(Date.now()/60000)*60000
   internal.prefetchHistory=()=>{};internal.executor={process:async()=>[]};runtime.control.warmed=[]
-  runtime.engine=new TradingEngine({...runtime.engine.settings,symbols:[symbol],catalog:{strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend']}})
+  const short = { long:["none"], short:[4], last:[1] }
+  runtime.engine=new TradingEngine({...runtime.engine.settings,symbols:[symbol],catalog:{
+    strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend'],
+    strategyExecWindows:{base:{...short,long:[10]},main:short,real:short,exec:short},
+  }})
   const reference=new TradingEngine(runtime.engine.settings),candles=Array.from({length:512},(_,i)=>{const close=100+8*Math.sin(i/17);return {timestamp:now-(511-i)*60000,open:close,high:close,low:close,close,volume:1}})
   reference.processCandles(symbol,candles,{allowExecution:false})
   internal.warmJobs.set(symbol,{data:candles,plan:{count:512,cursor:null,cutoff:now}})
@@ -396,6 +400,24 @@ test('a stale or pre-close quote cannot authorize a fresh executable history bar
   let allowed:boolean|undefined;const process=runtime.engine.processCandles.bind(runtime.engine);runtime.engine.processCandles=(s,b,o)=>{allowed=o?.allowExecution;return process(s,b,o)}
   await r.tick();if(r.executionTask)await r.executionTask;assert.equal(allowed,undefined);assert.equal(runtime.engine.lastProcessedAt(symbol),now-60000);assert.equal(runtime.engine.pendingIntents().length,0)
   r.marks.set(symbol,{price:100,timestamp:Date.now()});await r.tick();assert.equal(allowed,true);assert.equal(runtime.engine.lastProcessedAt(symbol),now)
+ })
+})
+
+test("a ready candle with no fresh quote yields its history slot without opening exchange orders", async()=>{
+ await isolated(async runtime=>{
+  const r=runtime as any, symbol=runtime.engine.settings.symbols[0], cutoff=Math.floor(Date.now()/60_000)*60_000
+  r.prefetchHistory=()=>{};r.client.quotes=async()=>[];r.executor={process:async()=>[]}
+  const bar=(timestamp:number)=>({timestamp,open:100,high:100,low:100,close:100,volume:1})
+  runtime.engine.processCandles(symbol,[bar(cutoff-60_000)])
+  r.warmJobs.set(symbol,{data:[bar(cutoff)],plan:{count:100,cursor:cutoff-60_000,cutoff},live:true,readyAt:Date.now()-3_000})
+  const processed=runtime.engine.processCandles.bind(runtime.engine)
+  let allowed:boolean|undefined
+  runtime.engine.processCandles=(name,bars,options)=>{allowed=options?.allowExecution;return processed(name,bars,options)}
+  await r.tick()
+  assert.equal(allowed,false)
+  assert.equal(runtime.engine.lastProcessedAt(symbol),cutoff)
+  assert.equal(r.warmJobs.has(symbol),false)
+  assert.equal(runtime.engine.pendingIntents().length,0)
  })
 })
 

@@ -156,7 +156,7 @@ const inspection = (() => {
   const v2Configs:Record<string,LaneState["config"]>={}
   let v2RowsBytes=0,v3RowsBytes=0
   const laneIds = Object.keys(lanes)
-  const byStage = { base: 0, main: 0, real: 0, live: 0 }
+  const byStage = { base: 0, main: 0, real: 0, exec: 0, live: 0 }
   const mainChildren = new Map<string, number>(), realChildren = new Map<string, number>()
   let missingParent = 0, duplicateIds = laneIds.length - new Set(laneIds).size
   for (const lane of Object.values(lanes)) {

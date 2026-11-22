@@ -114,8 +114,10 @@
 .terminal-tag.positive { color:var(--terminal-green); border-color:color-mix(in srgb,var(--terminal-green) 25%,transparent); background:color-mix(in srgb,var(--terminal-green) 7%,transparent); }
 .terminal-tag.negative { color:var(--terminal-red); border-color:color-mix(in srgb,var(--terminal-red) 25%,transparent); background:color-mix(in srgb,var(--terminal-red) 7%,transparent); }
 .terminal-stage-row { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); padding:19px 18px 14px; gap:16px; }
+.terminal-stage-row.with-exec { grid-template-columns:repeat(5,minmax(0,1fr)); }
 .terminal-stage { text-align:center; position:relative; --stage-color:var(--terminal-blue); }
 .terminal-stage.stage-1 { --stage-color:var(--terminal-accent); }.terminal-stage.stage-2 { --stage-color:var(--terminal-green); }.terminal-stage.stage-3 { --stage-color:var(--terminal-amber); }
+.terminal-stage.stage-4 { --stage-color:var(--terminal-blue); }
 .terminal-stage:after { content:""; position:absolute; height:1px; top:25px; left:calc(50% + 32px); width:calc(100% - 47px); background:linear-gradient(to right,var(--terminal-border),var(--stage-color),var(--terminal-border)); opacity:.7; }
 .terminal-stage:last-child:after { display:none; }
 .terminal-stage-node { display:grid; place-items:center; position:relative; width:50px; height:50px; border:1px solid color-mix(in srgb,var(--stage-color) 50%,var(--terminal-border)); background:color-mix(in srgb,var(--stage-color) 8%,var(--terminal-panel)); border-radius:50%; margin:auto auto 10px; color:var(--stage-color); box-shadow:0 0 0 5px color-mix(in srgb,var(--stage-color) 3%,transparent); }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/core/auth'
 import { getResearchCandles, intervalSeconds, marketSymbol, marketInterval, marketVenue } from '@/core/market'
-import { runTerminalReplayAsync } from '@/core/terminal-replay'
+import { runExecProgressionReplay, runTerminalReplayAsync } from '@/core/terminal-replay'
 import { getStore } from '@/core/store'
 import {connectionInfo} from '@/core/connections'
 import {TECHNICAL_INDICATIONS} from '@/core/indications'
@@ -25,8 +25,10 @@ export async function POST(request: NextRequest) {
     const settings=getStore(connection.id).engineSettings()
     if(interval!=='1m'&&Array.isArray(settings?.catalog.strategyIndicationTypes)&&settings.catalog.strategyIndicationTypes.some(t=>(TECHNICAL_INDICATIONS as readonly unknown[]).includes(t)))return NextResponse.json({success:false,error:'Trend and Break timeframe grids require one-minute source candles. Select 1m.'},{status:400})
     const candles=await getResearchCandles(venue,symbol,interval,typeof body.demo==='boolean'?body.demo:connection.demo,limit)
-    const study=await runTerminalReplayAsync(symbol,candles,{...settings?.catalog,...settings?.symbolFees?.[symbol],mainEvalPosCount:settings?.stageLastN.base??20,baseProfitFactor:settings?.stageMinPF.base??1.1,replayBarSeconds:intervalSeconds(interval)},request.signal)
-    const result={success:true,connectionId:connection.id,source:`${venue}:${connection.demo?'demo':'public'}`,createdAt:Date.now(),...study}
+    const study=await runTerminalReplayAsync(symbol,candles,{...settings?.catalog,...settings?.symbolFees?.[symbol],stageGateMode:settings?.stageGateMode,mainEvalPosCount:settings?.stageLastN.base??20,baseProfitFactor:settings?.stageMinPF.base??1.1,replayBarSeconds:intervalSeconds(interval)},request.signal)
+    const progression = interval==="1m"&&settings?.stageGateMode==="exec-branches"
+      ? await runExecProgressionReplay(symbol,candles,settings,request.signal) : undefined
+    const result={success:true,connectionId:connection.id,source:`${venue}:${connection.demo?'demo':'public'}`,createdAt:Date.now(),...study,progression}
     getStore(connection.id).set('lastReplay',result)
     return NextResponse.json(result)
   } catch(error) {return NextResponse.json({success:false,error:error instanceof Error?`Replay unavailable: ${error.message}`:'Replay unavailable'},{status:502})}

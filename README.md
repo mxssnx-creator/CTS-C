@@ -88,7 +88,7 @@ TP distance is estimated round-trip position cost multiplied by the selected ste
 
 The balanced default retains seven TP steps (`3, 5, 8, 12, 18, 24, 30`), three SL ratios (`0.6, 1, 1.4`), four core indications, and three exits: **252 configurations per symbol**. All 29 steps with 15 ratios and those four indications produce 5,220 configurations before optional Low-Range overlaps. The Micro + Low-Range preset selects steps 2–5, all 15 ratios, three exits and both 10-second and one-minute signals: 2,880 configurations per symbol with four core indications. Other tactics, periods and timeframes remain independently selectable. Directions, coordinations, and stages create separate lanes; these are not simultaneous order counts.
 
-Micro and Low-Range trailing width defaults to half the selected SL distance (adjustable), with the existing dynamic peak ratchet and fixed initial stop. Auto PF is optional and computes each configuration's floor once: `max(stage floor, 1.01, min(cap, 1 + floor(TP_percent × 10) / 10 × slope))`. It changes qualification thresholds, never samples or reported returns. The Micro preset enables Auto PF and processed-set progression; a child retains its admission proof and learns from its own subsequent trades, while Real remains the current execution gate.
+Micro and Low-Range trailing width defaults to half the selected SL distance (adjustable), with the dynamic peak ratchet and fixed initial stop. Auto PF is optional and computes each configuration's floor once as `max(stage floor, 1.01, min(cap, 1 + floor(TP_percent × 10) / 10 × slope))`. The Micro preset enables Auto PF.
 
 ### Observed 10-second history
 
@@ -96,7 +96,17 @@ The optional trade stream uses the exchange's compressed `@trade` WebSocket feed
 
 Complete and incomplete recorded bars persist for three days in SQLite. Ten-second and minute signals have independent timestamps and evidence. During minute warmup, present-time ticks only affect sub-minute lanes; they cannot close historical minute positions. REST reads run in the background, and history work yields in bounded batches so the trade loop can continue. The 100ms timer is a scheduling target, not a measured exchange execution latency guarantee. See [Micro verification](docs/MICRO-20261111.md) for results and limitations.
 
-Progression is **Base → Main → Real → Live**. A child stage begins only while all matching preceding lanes meet their independent sample and PF gates. Each child records its own subsequent results; parent samples are never copied forward. Defaults are 20 Base closes, 8 Main closes, 8 Real closes, and PF 1.1 at each gate. The runtime rechecks current qualification after asynchronous preflight before entry/add submission. Rolling qualification can decline as results change.
+New runtimes use **Base → Main → Real → Exec → Live**. Existing settings and checkpoints can select Exec progression in Strategy Lab. The grid uses adjacent, disjoint blocks of completed positions in chronological order.
+
+| Stage | Long | Short | Last |
+|---|---|---|---|
+| Base | 10, 20, 30, 40, 50 | 4, 8, 12, 16 | 1–5 |
+| Main, Real, Exec | Omitted or the originating Base Set's Long count | 4, 8, 12, 16 | 1–5 |
+| Live | Mirrors an accepted Exec entry | | |
+
+Each enabled block requires its full sample count and stage PF (default 1.10). Settlements at the entry clock cannot count toward that entry. Base candidates with identical signal and order rules share observations until qualification. Each qualifying parent can start every configured child with fresh, independent trade history. An admitted child continues from its own parent's entries. Exec checks its own current stage window before accepting an entry, and Live uses that accepted position's allocation and admission proof. Open positions continue through their recorded exits.
+
+The exchange dispatch timer targets 250ms. Market reads and exchange writes use separate paced clients. A late or absent quote falls back to paper history after a short wait. Venue requests, fills, and reconciliation determine end-to-end latency. The dashboard counts owned exchange positions by symbol and direction and counts individual exchange orders by confirmed venue ID.
 
 Replay and the engine share observed-price exits and independent long/short position handling. Catalog version 4 uses a peak-proportional trailing distance, persists activation and ratchets the stop across weighted-entry additions. Its economic identity is separate from prior cohorts. Restored older positions retain their earlier exit basis, historical losses and ownership; disabled symbols remain monitored through closure. Changing the symbol universe or refreshing fees on startup no longer waits for every research position to close.
 
@@ -113,7 +123,7 @@ PF divides positive net percentage outcomes by the absolute sum of negative outc
 
 The studio exposes range, step, ratio, exit, indication, gate, sizing, cost, Axis, Block, and DCA settings. Validated settings JSON can be exported and imported; an import updates the draft and requires the normal Save action. Changes generate new economic identities where needed, so incompatible configurations cannot borrow historical samples. Open positions retain their captured sizing and exit terms.
 
-Initial paper sizing is `baseNotional × volumeFactor × coordination ratio`: by default `100 × 0.01 = 1 USDT`, before coordination adjustments. The executor normalizes the entry so that its smallest planned relative add can meet exchange minimums, then applies the same actual-entry scale to adds. Invalid small adds and orders above the notional cap are rejected before canceling existing protection. Confirmed receipts determine actual fills. The default universe targets 100 available contracts with a fixed initial symbol priority, not a volatility ranking or guaranteed selection of the best markets.
+Initial paper sizing is `baseNotional × (volumeFactor ÷ 5) × coordination ratio`. The default is `100 × (0.01 ÷ 5) = 0.20 USDT` before coordination adjustments. The executor normalizes the entry so that its smallest planned relative add can meet exchange minimums, then applies the same actual-entry scale to adds. Invalid small adds and orders above the notional cap are rejected before canceling existing protection. Confirmed receipts determine actual fills. The default universe targets 100 available contracts with a fixed initial symbol priority.
 
 ## x02 execution
 
@@ -170,7 +180,7 @@ Separate native IDs establish ownership without guessing an attached order's par
 
 Paper unrealized PnL uses recent marks and becomes unavailable when stale. Paper equity/drawdown reflect realized Live-stage paper closes, not marked-to-market exchange NAV. The execution importer deduplicates trade IDs for exact known order IDs, preserves signed fee cash flows, and reports local lot gross PnL less confirmed fees separately from the venue's realized-PnL field. Net figures exclude funding and remain unavailable until all applied fills have fee coverage. Validation of that complete path is recorded in [validation](docs/VALIDATION.md).
 
-Terminal historical replay splits chronological candles 65/35 into training/holdout, freezes up to three training candidates per range, and evaluates them on the holdout. It cannot submit orders or automatically change active settings. Its equal-size percentage-return totals are not account equity growth. Replay observes candle closes, not an invented intrabar path. A short 200-candle response may have insufficient evidence; insufficient samples remain visible.
+Terminal historical replay splits chronological candles 65/35 into training and holdout, freezes up to three training candidates per range, and evaluates them on the holdout. With Exec progression selected, one-minute replay also runs the saved stage settings and reports holdout fills, costs, and PF from the accepted Exec entries. Replay evaluates observed candle closes. The CLI `scripts/replay-exec-stages.ts` runs independent symbol tapes in a bounded worker pool and ranks configs on the first 12 hours before reporting the next 12 hours.
 
 ## Architecture and state
 
