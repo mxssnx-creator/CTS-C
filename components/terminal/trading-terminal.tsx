@@ -20,7 +20,7 @@ type Stage = StageTelemetry
 interface Connection { id: string; name: string; exchange: string; demo: boolean; configured: boolean; enabled: boolean; liveEnabled: boolean }
 interface Position { id: string; connectionId: string; symbol: string; direction: string; entryPrice: number; quantity: number; status: string; unrealizedPnl: number | null; realizedPnl: number; fee: number; createdAt: string | number | null; closedAt: string | number | null; source?: string }
 interface EventItem { timestamp: string; level: string; phase: string; message: string; connectionId: string }
-interface Snapshot { connectionId?:ConnectionId;coordinationStats?:CoordinationRow[];updatedAt: number; connections: Connection[]; equity: number | null; paperEquity?: number; positionCount?: number; positionDisplayLimit?: number; realizedPnl: number; fees: number|null;paperTotals?:{closed:number;wins:number;winRate:number|null;longOpen:number;shortOpen:number};engine?:{symbolFees?:Record<string,{makerFeePct:number;takerFeePct:number}>;feeReadFailures?:string[];feeCheckedAt?:number|null;equityHistory:{equity:number}[]}; openPositions: Position[]; closedPositions: Position[]; stages: Record<string, Stage>; events: EventItem[]; settings: Record<string, string>; readiness: { configured?:boolean;environment?:string;x02Configured: boolean; status: string; engineStatus: string }; metricScope?: string; execution?: ExecutionSnapshot }
+interface Snapshot { connectionId?:ConnectionId;coordinationStats?:CoordinationRow[];updatedAt: number; connections: Connection[]; equity: number | null; paperEquity?: number; positionCount?: number; positionDisplayLimit?: number; realizedPnl: number; fees: number|null;paperTotals?:{closed:number;wins:number;winRate:number|null;longOpen:number;shortOpen:number};engine?:{symbolCount?:number;symbolFees?:Record<string,{makerFeePct:number;takerFeePct:number}>;feeReadFailures?:string[];feeCheckedAt?:number|null;equityHistory:{equity:number}[]}; openPositions: Position[]; closedPositions: Position[]; stages: Record<string, Stage>; events: EventItem[]; settings: Record<string, string>; readiness: { currentMinuteSymbols?:number;configured?:boolean;environment?:string;x02Configured: boolean; status: string; engineStatus: string }; metricScope?: string; execution?: ExecutionSnapshot }
 type View = "terminal" | "strategies" | "positions" | "activity" | "connections" | "integrations"
 const NAV = [
   { id: "terminal", label: "Command center", icon: LayoutDashboard }, { id: "strategies", label: "Strategy lab", icon: SlidersHorizontal },
@@ -165,6 +165,8 @@ export function TradingTerminal() {
     ["Selected connection configured", ready ? "Ready" : "Missing credentials", ready],
     ["Execution environment", `${selectedConnection.name} / ${selectedConnection.environment}`, true],
     ["Base PF threshold", settings.baseProfitFactor || "1.1 default", null],
+    ...(running && snapshot?.readiness.currentMinuteSymbols!==undefined && snapshot.engine?.symbolCount!==undefined
+      ? [["Current minute coverage", `${snapshot.readiness.currentMinuteSymbols} / ${snapshot.engine.symbolCount}`, null] as const] : []),
     ...(directMirror ? [["Exec PF threshold", settings.execMinPF || "1.1", null] as const]
       : [["Main validation samples", settings.mainEvalPosCount || "8 default", null] as const,
         ["Real validation samples", settings.realEvalPosCount || "8 default", null] as const]),

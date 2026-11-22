@@ -743,7 +743,9 @@ export class TradingEngine {
     this.dirtyLaneIds.add(lane.id)
     lane.lastTimestamp = candle.timestamp
     const sign = lane.direction === "long" ? 1 : -1
-    const exit=observedExit(open,{trailingEnabled:strategyProcessing(this.state.settings.catalog,lane.config).trailing,price:candle.close,timestamp:candle.timestamp,trailingBasis:open.trailingBasis??((lane.config.catalogVersion??2)>=3?"peak":"entry")})
+    const acceptedExec = open.executed || lane.stage === "live" && lane.config.branch?.windows
+    const trailingEnabled = Boolean(acceptedExec) || strategyProcessing(this.state.settings.catalog,lane.config).trailing
+    const exit=observedExit(open,{trailingEnabled,price:candle.close,timestamp:candle.timestamp,trailingBasis:open.trailingBasis??((lane.config.catalogVersion??2)>=3?"peak":"entry")})
     open.peak=exit.peak
     if((open.exitPolicyVersion??3)>=4){open.trailingActive=exit.trailingActive;if(exit.trailingActive)open.trailingStopPrice=exit.stop}
     const reason=exit.reason

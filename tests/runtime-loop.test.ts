@@ -279,7 +279,9 @@ test('fresh signal updates use exchange OHLCV and volume while warm-up remains n
  })
 })
 
-test('history recovery yields between bounded slices and matches complete engine state and PF',async()=>{
+test('history recovery yields between bounded slices and matches complete engine state and PF',async t=>{
+ const now = Date.now()
+ t.mock.method(Date,"now",()=>now)
  await isolated(async runtime=>{
   const internal=runtime as any,symbol=runtime.engine.settings.symbols[0],now=Math.floor(Date.now()/60000)*60000
   internal.prefetchHistory=()=>{};internal.executor={process:async()=>[]};runtime.control.warmed=[]

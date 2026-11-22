@@ -20,6 +20,8 @@ const EXECUTION_INTERVAL_MS = 250
 const RECONCILIATION_INTERVAL_MS = 1000
 const MARKET_INTERVAL_MS = 45
 const HISTORY_QUOTE_WAIT_MS = 2_000
+const HISTORY_REQUESTS = 16
+const HISTORY_QUEUE_LIMIT = 32
 function retainEvents(target:EngineEvent[],source:readonly EngineEvent[],limit=5000){
   if(source.length>=limit)target.length=0
   for(let i=Math.max(0,source.length-limit);i<source.length;i++)target.push(source[i])
@@ -264,7 +266,9 @@ export class TerminalRuntime {
     const latest=Math.floor(Date.now()/60000)*60000
     const warmed = new Set(this.control.warmed)
     const needed=this.engine.managedSymbols().filter(symbol=>(!warmed.has(symbol)||(this.engine.lastProcessedAt(symbol)??latest)<latest)&&!this.warmJobs.has(symbol)&&(this.warmRetryAt.get(symbol)??0)<=Date.now())
-    const capacity = Math.max(0,8-this.warmJobs.size)
+    let reading = 0
+    for (const job of this.warmJobs.values()) if (!job.data && !job.error) reading++
+    const capacity = Math.max(0,Math.min(HISTORY_REQUESTS-reading,HISTORY_QUEUE_LIMIT-this.warmJobs.size))
     const cold = needed.filter(symbol=>!warmed.has(symbol)).slice(0,Math.ceil(capacity/2))
     const available = [...new Set([...cold,...needed])].slice(0,capacity)
     for(const symbol of available){
@@ -480,6 +484,8 @@ export class TerminalRuntime {
     const positions=s.positions.filter(p=>p.stage==='live')
     const trades=s.liveTrades, live=s.stages.find(stage=>stage.stage==='live')!,ownedLots=this.executor.lots()
     const warmedCount=this.control.warmed.filter(symbol=>s.settings.symbols.includes(symbol)).length
+    const latestClosedMinute = Math.floor(Date.now()/60_000)*60_000
+    const observedCurrent = s.settings.symbols.filter(symbol=>(this.engine.lastProcessedAt(symbol)??0)>=latestClosedMinute).length
     const unrealized=(p:typeof positions[number])=>{const mark=this.marks.get(p.symbol);return mark&&Date.now()-mark.timestamp<=15_000?(mark.price-p.entryPrice)*p.quantity*(p.direction==='long'?1:-1):null}
     return {updatedAt:Date.now(),equity:account&&Date.now()-account.updatedAt<60_000?account.equity:null,paperEquity:s.equity,
       realizedPnl:live.netPnl,fees:live.fees,paperTotals:{closed:live.closed,wins:live.wins,winRate:live.closed?100*live.wins/live.closed:null,longOpen:live.longOpen,shortOpen:live.shortOpen,retainedCloses:trades.length},
@@ -487,7 +493,7 @@ export class TerminalRuntime {
       closedPositions:trades.map(p=>({id:p.id,connectionId:s.settings.connectionId,symbol:p.symbol,direction:p.direction,entryPrice:p.entryPrice,quantity:p.quantity,status:'paper-closed',unrealizedPnl:0,realizedPnl:p.netPnl,fee:p.cost,createdAt:p.openedAt,closedAt:p.closedAt,source:'paper'})),
       stages,settings,connectionId:this.connectionId,connections:CONNECTIONS.map(c=>({...c,configured:Boolean(connectionCredentials(c.id)),enabled:c.id===this.connectionId&&this.control.running,liveEnabled:c.id===this.connectionId&&this.control.exchangeExecution})),
       events:this.store.events().map(e=>({timestamp:new Date(Number(e.timestamp)||Date.now()).toISOString(),level:e.status==='rejected'?'error':'info',phase:String(e.stage||'engine'),message:`${e.type}${e.status?' '+e.status:''}: ${e.reason||String(e.laneId||'').slice(0,240)}`,connectionId:this.connectionId})),
-      readiness:{x02Configured:Boolean(connectionCredentials('bingx-x02')),configured:Boolean(connectionCredentials(this.connectionId)),environment:connectionInfo(this.connectionId).environment,status:this.control.lastError||this.accountError||(this.control.running?warmedCount>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${warmedCount}/${s.symbolCount}`:connectionCredentials(this.connectionId)?`Configured; ready to verify ${connectionInfo(this.connectionId).environment}`:`Dedicated ${connectionInfo(this.connectionId).name} credentials required`),engineStatus:this.control.running?'running':'stopped',warmedSymbols:warmedCount,lastTick:this.control.lastTick},
+      readiness:{x02Configured:Boolean(connectionCredentials('bingx-x02')),configured:Boolean(connectionCredentials(this.connectionId)),environment:connectionInfo(this.connectionId).environment,status:this.control.lastError||this.accountError||(this.control.running?warmedCount>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${warmedCount}/${s.symbolCount}`:connectionCredentials(this.connectionId)?`Configured; ready to verify ${connectionInfo(this.connectionId).environment}`:`Dedicated ${connectionInfo(this.connectionId).name} credentials required`),engineStatus:this.control.running?'running':'stopped',warmedSymbols:warmedCount,currentMinuteSymbols:observedCurrent,lastTick:this.control.lastTick},
       positionCount:live.open,positionDisplayLimit:1000,microMarketData:this.marketDataStatus(),metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
       coordinationStats:this.engine.coordinationStats(),
       engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory,symbolFees:s.settings.symbolFees??{},feeReadFailures:this.control.feeReadFailures,feeCheckedAt:this.control.feeCheckedAt,feeFallbackSymbols:s.settings.symbols.filter(symbol=>!s.settings.symbolFees?.[symbol])},
