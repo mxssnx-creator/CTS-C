@@ -42,6 +42,7 @@ test("Exec policies use separate chronological blocks and reject an incomplete o
   assert.equal(result.short.state,"qualified")
   assert.equal(result.minimal.state,"qualified")
   assert.equal(evaluateBlocks(blockPrefix(samples),short,1.1).state,"qualified")
+  assert.throws(()=>evaluateBlocks(blockPrefix(samples),{...short,lastRequiresPF:undefined},1.1),/Invalid disjoint/)
   assert.equal(evaluateBlocks(blockPrefix(samples.slice(0,5)),short,1.1).state,"insufficient")
   assert.equal(evaluateBlocks(blockPrefix([2,-1.9,1,1,1,1]),short,1.1).minimal.state,"failed")
   assert.equal(windowMetrics(undefined, 5, 1.1, short).qualified,false)
