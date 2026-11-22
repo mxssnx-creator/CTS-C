@@ -72,8 +72,8 @@ try{
  await page.getByRole('button',{name:'Activity',exact:true}).click();await page.getByRole('heading',{name:'Event stream'}).waitFor()
  await page.getByRole('button',{name:'Connections',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Verify & start x02'}).isEnabled(),false)
  await page.getByLabel('Trading connection',{exact:true}).selectOption('bingx-x01');await page.getByRole('heading',{name:'X01 execution control',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Verify & start x01 mainnet'}).isEnabled(),false)
- await page.getByRole('button',{name:'Strategy lab',exact:true}).click();await page.getByLabel('Main completed samples',{exact:true}).fill('6');await page.getByRole('button',{name:'Save configuration',exact:true}).click();await page.getByText('Strategy configuration saved to x01.',{exact:true}).waitFor()
- assert.equal((await (await page.request.get(origin+'/api/terminal?connection=bingx-x01')).json()).settings.mainEvalPosCount,'6')
+ await page.getByRole('button',{name:'Strategy lab',exact:true}).click();await page.getByLabel('Exec → Live minimum PF',{exact:true}).fill('1.2');await page.getByRole('button',{name:'Save configuration',exact:true}).click();await page.getByText('Strategy configuration saved to x01.',{exact:true}).waitFor()
+ assert.equal((await (await page.request.get(origin+'/api/terminal?connection=bingx-x01')).json()).settings.execMinPF,'1.2')
  assert.equal((await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings.mainEvalPosCount,'7')
  await page.getByLabel('Trading connection',{exact:true}).selectOption('bingx-x02');await page.getByLabel('Main completed samples',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelector('input[type=number]')!==null)
 
