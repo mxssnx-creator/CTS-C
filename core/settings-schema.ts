@@ -10,7 +10,7 @@ import { EXPANDED_CATALOG_MAX, STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS, SELECTAB
 import { LAST_N_STAGES, DEFAULT_EXEC_MIN_PF, DEFAULT_EXEC_WINDOWS, checkExecWindows, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TIMEFRAMES } from "../shared/cts-indications/low-range-catalog.ts"
 import { DEFAULT_STEP_AUTO } from "./step-evidence"
-import { DEFAULT_RELATE } from "./relate"
+import { DEFAULT_RELATE, DEFAULT_RELATE_AUTO } from "./relate"
 import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
 import { MAX_WARMUP_CANDLES } from "./history"
@@ -46,6 +46,8 @@ export const DEFAULTS: Record<string, unknown> = {
   relateEnabled: DEFAULT_RELATE.enabled, relateSteps: DEFAULT_RELATE.steps, relateRatio: DEFAULT_RELATE.ratio,
   relateLastN: DEFAULT_RELATE.lastN, relateMinTrades: DEFAULT_RELATE.minTrades, relateMinPF: DEFAULT_RELATE.minPF,
   relateMaxMultiplier: DEFAULT_RELATE.maxMultiplier, relateMaxSlRatio: DEFAULT_RELATE.maxSlRatio,
+  relateAutoEnabled: DEFAULT_RELATE_AUTO.enabled, relateAutoLastN: DEFAULT_RELATE_AUTO.lastN, relateAutoMinSamples: DEFAULT_RELATE_AUTO.minSamples,
+  relateAutoMinPF: DEFAULT_RELATE_AUTO.minPF, relateAutoConfidence: DEFAULT_RELATE_AUTO.confidence, relateAutoInherit: DEFAULT_RELATE_AUTO.inherit,
   normalVolumeRatio: 1, axisVolumeRatio: 1, blockVolumeFactor: 1, dcaVolumeRatio: 1, relateVolumeRatio: 1, maxOrderNotional: 0,
   microTrailRatio: .5, microMinSlDistancePct: .1, microMinTrailDistancePct: .05, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
   blockVolumeRatio: 0.2, makerFeePct: 0.02, takerFeePct: 0.05, slippagePctOfFees: 10,
@@ -103,6 +105,10 @@ export const COORDINATION_FIELDS = [
   { key: "relateMinPF", label: "Relate minimum PF", min: 1.01, max: 100, step: .01 },
   { key: "relateMaxMultiplier", label: "Relate maximum multiplier", min: 1, max: 8, step: .1 },
   { key: "relateMaxSlRatio", label: "Relate maximum SL-to-TP ratio", min: .01, max: .5, step: .01 },
+  { key: "relateAutoLastN", label: "Relate Auto recent returns", min: 3, max: 100, step: 1 },
+  { key: "relateAutoMinSamples", label: "Relate Auto minimum returns", min: 3, max: 100, step: 1 },
+  { key: "relateAutoMinPF", label: "Relate Auto minimum PF", min: 1.01, max: 10, step: .01 },
+  { key: "relateAutoConfidence", label: "Relate Auto confidence (standard errors)", min: 0, max: 3, step: .1 },
 ]
 const WINDOW_SCOPES = ["context", "config", "both"] as const
 const ENUM_FIELDS: Record<string, readonly string[]> = { autoPfMode:["set-history","tp-distance"],blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches','exec-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
@@ -241,6 +247,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     ["Block Auto", output.blockAutoMinSamples, output.blockAutoLastN],
     ["DCA Auto", output.dcaAutoMinSamples, output.dcaAutoLastN],
     ["Relate", output.relateMinTrades, output.relateLastN],
+    ["Relate Auto", output.relateAutoMinSamples, output.relateAutoLastN],
   ]) {
     if (typeof minimum === "number" && typeof window === "number" && minimum > window) {
       throw new Error(`${label} minimum observations cannot exceed its recent observation window.`)
@@ -279,6 +286,7 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
   const blockAuto = s.coordinations.block.auto ?? DEFAULT_STEP_AUTO
   const dcaAuto = s.coordinations.dca.auto ?? DEFAULT_STEP_AUTO
   const relate = s.coordinations.relate ?? DEFAULT_RELATE
+  const relateAuto = relate.auto ?? DEFAULT_RELATE_AUTO
   for(const [key,value] of Object.entries(s.catalog))if(Object.hasOwn(DEFAULTS,key))values[key]=value
   values.autoPfEnabled = s.catalog.autoPfEnabled === true
   if (values.autoPfEnabled && s.catalog.autoPfMode === undefined) values.autoPfMode = "tp-distance"
@@ -294,6 +302,8 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
     blockSteps:s.coordinations.block.steps,blockMode:s.coordinations.block.mode,dcaSteps:s.coordinations.dca.steps,dcaDistancePct:s.coordinations.dca.distancePct,dcaMultiplier:s.coordinations.dca.multiplier,
     dcaAutoEnabled:dcaAuto.enabled,dcaAutoLastN:dcaAuto.lastN,dcaAutoMinSamples:dcaAuto.minSamples,dcaAutoMinPF:dcaAuto.minPF,
     relateEnabled:relate.enabled,relateSteps:relate.steps,relateRatio:relate.ratio,relateLastN:relate.lastN,relateMinTrades:relate.minTrades,
-    relateMinPF:relate.minPF,relateMaxMultiplier:relate.maxMultiplier,relateMaxSlRatio:relate.maxSlRatio}
+    relateMinPF:relate.minPF,relateMaxMultiplier:relate.maxMultiplier,relateMaxSlRatio:relate.maxSlRatio,
+    relateAutoEnabled:relateAuto.enabled,relateAutoLastN:relateAuto.lastN,relateAutoMinSamples:relateAuto.minSamples,
+    relateAutoMinPF:relateAuto.minPF,relateAutoConfidence:relateAuto.confidence,relateAutoInherit:relateAuto.inherit}
 }
 

@@ -22,3 +22,11 @@ export function strategyProcessing(settings: Record<string, unknown>, config: Pi
     trailing: settings.strategyTrailingEnabled !== false && range?.trailing !== false,
   }
 }
+
+/** The `trailing` decision of strategyProcessing without allocating a result object (per-candle hot path). */
+export function strategyTrailing(settings: Record<string, unknown>, config: Pick<StrategyConfig, "range">): boolean {
+  if (settings.strategyTrailingEnabled === false) return false
+  const ranges = settings.strategyProcessingByRange as ProcessingByRange | undefined
+  const range = config.range ? ranges?.[config.range] : undefined
+  return range?.trailing !== false
+}
