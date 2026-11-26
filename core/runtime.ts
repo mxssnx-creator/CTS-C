@@ -11,6 +11,7 @@ import type { Candle, EngineSettings, EngineEvent } from './types'
 import {flatEngineSettings,validateConfiguration} from './settings-schema'
 import { DEFAULT_STEP_AUTO } from './step-evidence'
 import { DEFAULT_RELATE } from './relate'
+import { RELATE_SOURCES } from '../shared/cts-relate/policy'
 import { AUTO_PF_DEFAULTS } from './auto-pf'
 import { EXEC_PROFILES, withDefaultExecProfile } from './exec-profile'
 
@@ -423,7 +424,7 @@ export class TerminalRuntime {
     } as const
     const relateFields = {
       relateEnabled: "enabled", relateSteps: "steps", relateRatio: "ratio", relateLastN: "lastN",
-      relateMinTrades: "minTrades", relateMinPF: "minPF", relateMaxMultiplier: "maxMultiplier", relateMaxSlRatio: "maxSlRatio",
+      relateMinTrades: "minTrades", relateMinPF: "minPF", relateMaxMultiplier: "maxMultiplier", relateMaxSlRatio: "maxSlRatio", relateActiveStep: "activeStep",
     } as const
     for(const [key,value] of Object.entries(input)) {
       if(key==='stageBlocks'){next.stageBlocks=structuredClone(value) as EngineSettings['stageBlocks'];continue}
@@ -468,6 +469,19 @@ export class TerminalRuntime {
         const policy = next.coordinations.relate ??= { ...DEFAULT_RELATE }
         if (field === "enabled") policy.enabled = value === true
         else policy[field] = Number(value)
+        continue
+      }
+      if (key === "relateScope") {
+        if (value !== "set" && value !== "overall") throw new Error("Invalid Relate scope")
+        const policy = next.coordinations.relate ??= { ...DEFAULT_RELATE }
+        policy.scope = value
+        continue
+      }
+      if (key.startsWith("relateFactor_")) {
+        const source = RELATE_SOURCES.find(item => key === `relateFactor_${item}`)
+        if (!source || typeof value !== "number") throw new Error("Invalid Relate volume factor")
+        const policy = next.coordinations.relate ??= { ...DEFAULT_RELATE }
+        policy.volumeFactors = { ...policy.volumeFactors, [source]: value }
         continue
       }
       throw new Error(`Unknown setting ${key}`)

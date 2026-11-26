@@ -2,7 +2,8 @@ import {blockPrefix,blockRequired,blockPolicyKey,checkBlockPolicy,evaluateBlocks
 import {blockRoundBudget,settleBlockRound,consumeBlockPause} from "./block-rounds"
 import { checkBlockPyramidAdd, settleBlockSteps } from "./block-auto"
 import { validateStepAuto } from "./step-evidence"
-import { DEFAULT_RELATE, relateAllocation } from "./relate"
+import { DEFAULT_RELATE, relateDecision } from "./relate"
+import { RELATE_SOURCES, relateKeys, relateLossLevel } from "../shared/cts-relate/policy"
 import { dcaStepVerdict, observeDcaStep, settleDcaSteps, validateDcaAuto } from "./dca-auto"
 import {normalizedVolumeFactor,relationalVolumeSettings,SYSTEM_VOLUME_DIVISOR} from "../shared/cts-volume/ratios";
 import { strategyProcessing } from "./strategy-processing"
@@ -139,6 +140,7 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   if (dca.auto !== undefined) dca.auto = validateDcaAuto(dca.auto)
   const relate = settings.coordinations.relate!
   finite(relate.steps, "Relate steps", 2, 15, true)
+  finite(relate.activeStep ?? 0, "Relate Active skip count", 0, Math.min(6, relate.steps), true)
   finite(relate.ratio, "Relate ratio", .2, 6)
   if (Math.abs(relate.ratio * 5 - Math.round(relate.ratio * 5)) > 1e-9) throw new Error("Relate ratio must use 0.2 increments")
   finite(relate.lastN, "Relate recent samples", 60, 250, true)
@@ -146,6 +148,23 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   finite(relate.minPF, "Relate minimum PF", 1.01, 100)
   finite(relate.maxMultiplier, "Relate maximum multiplier", 1, 8)
   finite(relate.maxSlRatio, "Relate maximum SL-to-TP ratio", .01, .5)
+  if (relate.scope !== undefined && relate.scope !== "set" && relate.scope !== "overall") throw new Error("Invalid Relate scope")
+  if (relate.volumeFactors !== undefined) {
+    if (!relate.volumeFactors || typeof relate.volumeFactors !== "object" || Array.isArray(relate.volumeFactors))
+      throw new Error("Invalid Relate volume factors")
+    for (const [source, factor] of Object.entries(relate.volumeFactors)) {
+      if (!RELATE_SOURCES.some(value => value === source)) throw new Error("Invalid Relate volume factor relation")
+      finite(factor, "Relate volume factor", 0, 8)
+    }
+    const factors = RELATE_SOURCES.flatMap(source => {
+      const factor = relate.volumeFactors?.[source] ?? 1
+      return factor === 1 ? [] : [[source, factor] as const]
+    })
+    if (factors.length) relate.volumeFactors = Object.fromEntries(factors)
+    else delete relate.volumeFactors
+  }
+  if (relate.scope === "set") delete relate.scope
+  if (relate.activeStep === 0) delete relate.activeStep
   if (relate.enabled && relate.lastN > settings.maxSamples) throw new Error("Relate window exceeds retained samples")
   for (const enabled of [axis.enabled, block.enabled, dca.enabled, relate.enabled]) if (typeof enabled !== "boolean") throw new Error("Coordination enabled must be boolean")
   generateEngineCatalog(settings)
@@ -250,6 +269,7 @@ export class TradingEngine {
   private geometry = new Map<string, StrategyConfig>()
   private childrenByLane = new Map<string, LaneState[]>()
   private groupKeys = new WeakMap<LaneState, string>()
+  private relateKeysByLane = new WeakMap<LaneState, ReturnType<typeof relateKeys>>()
   private economicsIds = {} as Record<Coordination, string>
   private profileDcaEconomicsId = ""
   private configs: StrategyConfig[]
@@ -440,7 +460,7 @@ export class TradingEngine {
   /** Rechecked after asynchronous exchange preflight, immediately before a new risk write. */
   isLiveIntentEligible(positionId:string,before=Infinity):boolean {
     const lane=this.livePositions.get(positionId)
-    if(!lane?.open?.executionEligible||!this.currentLane(lane)||!this.processingAllows(lane))return false
+    if(!lane?.open?.executionEligible||lane.open.relateActiveSkipped||!this.currentLane(lane)||!this.processingAllows(lane))return false
     if (lane.config.branch?.windows) {
       const exec = this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,"exec")
       const {open} = lane
@@ -465,15 +485,22 @@ export class TradingEngine {
     this.volumeWeights=relationalVolumeSettings(s.catalog.relationalVolumeRatios,true)
     const budgetKey = (coordination: Coordination, parameters: unknown) => [s.baseNotional,s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0,parameters]
     this.profileDcaEconomicsId = hashId(JSON.stringify(budgetKey("dca",PROFILE_DCA_SIZING)))
+    const oldRelate = this.coordinationIds.relate
     for (const coordination of COORDINATIONS) {
-      let parameters = coordination === "normal" ? null : s.coordinations[coordination]
+      let parameters: (typeof s.coordinations)[keyof typeof s.coordinations] | {progression: "losses"} | null =
+        coordination === "normal" ? null : s.coordinations[coordination]
       if (parameters && "auto" in parameters && !parameters.auto?.enabled) {
         const { auto: _auto, ...manual } = parameters
         parameters = manual
       }
+      if (coordination === "relate" && s.coordinations.relate?.enabled) parameters = { ...s.coordinations.relate, progression: "losses" }
       this.economicsIds[coordination] = hashId(JSON.stringify(budgetKey(coordination,parameters)))
       this.coordinationIds[coordination] = hashId(JSON.stringify([s.baseNotional, s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0, parameters, s.stageLastN, s.stageMinPF,...(s.stageBlocks&&Object.keys(s.stageBlocks).length?[s.stageBlocks]:[])]))
       this.processedCoordinationIds[coordination]=hashId(this.coordinationIds[coordination]+':processed-sets-v1')
+    }
+    if (oldRelate && oldRelate !== this.coordinationIds.relate) {
+      this.relateKeysByLane = new WeakMap()
+      delete this.state.relateWindows
     }
   }
   private get processedSets(){return this.state.settings.stageGateMode==='processed-sets'||!!this.branches}
@@ -583,6 +610,40 @@ export class TradingEngine {
     const samples = lane.samples.slice(start, end)
     if (Object.isFrozen(lane.samples)) Object.freeze(samples)
     return {config: lane.config, samples, closedCount: lane.closedCount, timedSampleCount: Math.max(0, (times?.length ?? 0) - start)}
+  }
+  private relateKeysFor(lane: LaneState) {
+    let keys = this.relateKeysByLane.get(lane)
+    if (!keys) {
+      const { config, stage } = lane
+      const profile = config.branch?.ancestors.map(parent => parent.coordination) ?? []
+      const source = stage === "live" ? this.finalGate : stage
+      const context = JSON.stringify([this.coordinationIds.relate, stage, this.stageWindowPolicy(config, source)])
+      keys = relateKeys(context, lane.id, lane.symbol, lane.direction, config.type,
+        config.exitMode ?? "fixed", profile.join("/"), config.range ?? "Wide")
+      this.relateKeysByLane.set(lane, keys)
+    }
+    return keys
+  }
+  private settleRelateRelations(lane: LaneState, at: number, value: number): void {
+    const policy = this.state.settings.coordinations.relate
+    if (!policy?.enabled || policy.scope !== "overall" || lane.coordination !== "relate" || lane.stage === "base" || !this.currentLane(lane)) return
+    const keys = this.relateKeysFor(lane)
+    const windows = this.state.relateWindows ??= {}
+    const row: [number, number, string] = [at, value, lane.id]
+    for (const source of RELATE_SOURCES) {
+      if (source === "config" || (policy.volumeFactors?.[source] ?? 1) === 0) continue
+      const samples = windows[keys[source]] ??= []
+      // Symbol updates can arrive out of order. The lane ID stabilizes equal-time rows on replay.
+      let lo = 0, hi = samples.length
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1
+        const [time, , id] = samples[mid]
+        if (time > at || (time === at && id < lane.id)) lo = mid + 1
+        else hi = mid
+      }
+      samples.splice(lo, 0, row)
+      if (samples.length > policy.lastN * 2) samples.length = policy.lastN * 2
+    }
   }
   private stageWindowPolicy(config: StrategyConfig | undefined, source: EvaluationStage) {
     const settings = this.state.settings
@@ -724,13 +785,25 @@ export class TradingEngine {
     const total = s.baseNotional * (s.volumeFactor / SYSTEM_VOLUME_DIVISOR)*(s.volumeRatios?.[lane.coordination]??1)*this.laneVolumeFactor(lane.coordination,lane.config,lane.symbol)
     const relateEvidence = lane.coordination === "relate" && lane.stage !== "base" && !mirror
       ? this.contextEvidence(lane,candle.timestamp) : undefined
-    const relate = relateEvidence ? relateAllocation(relateEvidence.samples,lane.config,s.coordinations.relate!,
-      relateEvidence.timedSampleCount ?? relateEvidence.sampleTimes?.length) : 1
-    const notional = lane.coordination !== "block" ? total * relate : block.behavior==="rounds" ? total*blockRoundBudget(lane,block) : block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
+    const relatePolicy = s.coordinations.relate!
+    const relate = relateEvidence ? relateDecision(relateEvidence.samples,lane.config,relatePolicy,
+      relateEvidence.timedSampleCount ?? relateEvidence.sampleTimes?.length, source => {
+        const rows = this.state.relateWindows?.[this.relateKeysFor(lane)[source]]
+        if (!rows) return null
+        const samples: number[] = []
+        for (const [at, value] of rows) {
+          if (at >= candle.timestamp) continue
+          samples.push(value)
+          if (samples.length === relatePolicy.lastN) break
+        }
+        return relateLossLevel(samples, relatePolicy)
+      }) : undefined
+    const notional = lane.coordination !== "block" ? total * (relate?.multiplier ?? 1) : block.behavior==="rounds" ? total*blockRoundBudget(lane,block) : block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
     const quantity = notional / candle.close
     const dca = lane.config.execProfile ? PROFILE_DCA_SIZING : s.coordinations.dca
     const exitMode = lane.config.exitMode ?? (lane.config.trailing ? "trailing" : "fixed")
     const position: PaperPosition = {
+      ...(relate?.active === false ? {relateActiveSkipped: true} : {}),
       id: `${lane.id}@${candle.timestamp}`, activationOrder:++this.state.nextActivationOrder!,openedAt: candle.timestamp, direction: lane.direction,...(admission?{admission}:{}),
       fills: [{ price: candle.close, quantity, timestamp: candle.timestamp, kind: "entry" }], quantity,
       sizing: { baseBudget: total, block: s.coordinations.block, dca },
@@ -751,6 +824,7 @@ export class TradingEngine {
       // Use the final gate's allocation, including its Block recovery budget.
       position.fills=mirror.fills.map(fill=>({...fill}));position.quantity=mirror.quantity
       position.notional=mirror.notional;position.entryPrice=mirror.entryPrice;position.sizing=mirror.sizing
+      if (mirror.relateActiveSkipped) position.relateActiveSkipped = true
     }
     lane.open = position; lane.lastTimestamp = candle.timestamp; lane.admittedAt ??= candle.timestamp; lane.admissionCount++
     this.activate(lane)
@@ -766,12 +840,14 @@ export class TradingEngine {
     const trade: ClosedTrade = { id: open.id, laneId: lane.id, configId: lane.configId, symbol: lane.symbol, direction: lane.direction, stage: lane.stage, coordination: lane.coordination,
       openedAt: open.openedAt, closedAt: candle.timestamp, entryPrice: open.entryPrice, exitPrice: candle.close,
       quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.executed?{executed:true}:{}),...(open.executionProof?{executionProof:open.executionProof}:{}),...(open.progressionProof?{progressionProof:open.progressionProof}:{}),...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
+    if (open.relateActiveSkipped) trade.relateActiveSkipped = true
     if (lane.coordination === "block") {
       if (open.sizing?.block.behavior === "rounds" && !(this.processedSets && lane.stage === "live")) settleBlockRound(lane, netPnl, open.sizing.block)
       settleBlockSteps(lane, open, candle.close, netReturnPct)
     }
     if (lane.coordination === "dca") settleDcaSteps(lane, open, candle.close)
     this.recordSample(lane,netReturnPct,candle.timestamp)
+    this.settleRelateRelations(lane,candle.timestamp,netReturnPct)
     this.configWindows.settled(lane,candle.timestamp)
     lane.closedCount++; lane.wins += netPnl > 0 ? 1 : 0; lane.netPnl += netPnl
     if(lane.costTotal!==undefined)lane.costTotal+=cost
@@ -792,8 +868,8 @@ export class TradingEngine {
     lane.open = undefined; this.active.get(lane.symbol)?.delete(lane.id)
     this.activeMicro.get(lane.symbol)?.delete(lane.id);this.activeMinute.get(lane.symbol)?.delete(lane.id)
     if (!lane.calculationOnly) { this.state.recentTrades.unshift(trade); this.state.recentTrades.length = Math.min(this.state.recentTrades.length, this.maxRecentTrades) }
-    if (lane.stage === "live" && !lane.calculationOnly) {
-      this.livePositions.delete(open.id)
+    if (lane.stage === "live") this.livePositions.delete(open.id)
+    if (lane.stage === "live" && !lane.calculationOnly && !open.relateActiveSkipped) {
       this.state.recentLiveTrades!.unshift(trade);this.state.recentLiveTrades!.length=Math.min(this.state.recentLiveTrades!.length,this.maxRecentTrades)
       this.state.equity += netPnl; this.state.peakEquity = Math.max(this.state.peakEquity, this.state.equity)
       const dd = this.state.peakEquity > 0 ? 100 * (this.state.peakEquity - this.state.equity) / this.state.peakEquity : 0
@@ -802,7 +878,7 @@ export class TradingEngine {
       if (this.state.equityHistory.length > 1000) this.state.equityHistory.shift()
     }
     if (!lane.calculationOnly) this.stageCloseObserver?.(trade)
-    if(lane.stage==='live')this.liveCloseObserver?.(trade)
+    if(lane.stage==='live'&&!open.relateActiveSkipped)this.liveCloseObserver?.(trade)
     return trade
   }
   private mark(lane: LaneState, candle: Candle, ordered=false): EngineEvent | undefined {
@@ -942,7 +1018,7 @@ export class TradingEngine {
         (scope === "context" || this.stageWindow(lane,stage,candle.timestamp).qualified)
       const nextProof = plan.exec && qualified ? [...(entryProof ?? []),this.immutableProof(this.gateProof(lane,stage,candle.timestamp,exact))] : undefined
       if (stage === this.finalGate) {
-        if (qualified && (!plan.exec || this.processingAllows(lane))) visit(config,coordination,"live",position,nextProof)
+        if (qualified && !position.relateActiveSkipped && (!plan.exec || this.processingAllows(lane))) visit(config,coordination,"live",position,nextProof)
         return
       }
       const next = stage === "base" ? "main" : stage === "main" ? "real" : "exec"
@@ -1088,10 +1164,10 @@ export class TradingEngine {
               }
               const mirror=this.realMirror&&stage==='live'?this.cachedLane(symbol,config.id,signal,coordination,'real')?.open:undefined
               const position = this.open(lane, candle,mirror)
-              if(stage==='real')realPositionId=position.id
+              if(stage==='real'&&!position.relateActiveSkipped)realPositionId=position.id
               if(this.realMirror&&stage==='live')position.parentPositionId=realPositionId
               if (!lane.calculationOnly) emit({ type: "opened", laneId: lane.id, timestamp: candle.timestamp, stage })
-              if (stage === "live" && !lane.calculationOnly && options.allowExecution) {
+              if (stage === "live" && !lane.calculationOnly && !position.relateActiveSkipped && options.allowExecution) {
                 position.executionEligible = true
                 if(this.stageScope(config)==="context"||this.isLiveIntentEligible(position.id,candle.timestamp))this.enqueueIntent(lane, position, candle, "entry", position.quantity)
                 else position.executionEligible=false

@@ -64,6 +64,9 @@ export interface RelateSettings {
   minPF: number
   maxMultiplier: number
   maxSlRatio: number
+  activeStep?: number
+  scope?: import("../shared/cts-relate/policy").RelateScope
+  volumeFactors?: import("../shared/cts-relate/policy").RelateVolumeFactors
 }
 export interface StepAutoPolicy { enabled: boolean; lastN: number; minSamples: number; minPF: number }
 export type DcaAutoPolicy = StepAutoPolicy
@@ -78,6 +81,7 @@ export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   activationOrder?:number
   executionEligible?: boolean
+  relateActiveSkipped?: true
   /** This Exec entry passed its own completed-position gate at the entry clock. */
   executed?: boolean
   executionProof?: GateProof
@@ -101,6 +105,7 @@ export interface ClosedTrade {
   openedAt: number; closedAt: number; entryPrice: number; exitPrice: number; quantity: number; notional: number
   grossPnl: number; cost: number; netPnl: number; netReturnPct: number; reason: string; fills: EntryFill[]
   source: "paper"
+  relateActiveSkipped?: true
   executed?: boolean
   executionProof?: GateProof
   progressionProof?: GateProof
@@ -163,6 +168,7 @@ export interface EngineState {
   lastMicroTimestamp?: Record<string, number>;
   lastTimestamp: Record<string, number>; recentTrades: ClosedTrade[]; intents: ExecutionIntent[]
   recentLiveTrades?: ClosedTrade[]
+  relateWindows?: Record<string, [closedAt: number, netReturnPct: number, laneId: string][]>
   nextActivationOrder?:number
   processedCandles: number; startedAt: number; updatedAt: number; equity: number; peakEquity: number; maxDrawdownPct: number
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]

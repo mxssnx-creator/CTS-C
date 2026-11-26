@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import { generateStrategyCatalog } from "../core/catalog"
 import { TradingEngine, validateEngineSettings } from "../core/engine"
-import { DEFAULT_RELATE, relateAllocation } from "../core/relate"
+import { DEFAULT_RELATE, relateAllocation, relateDecision } from "../core/relate"
 import type { Candle } from "../core/types"
 
 const catalog = {
@@ -14,11 +14,12 @@ const symbol = "BTC-USDT"
 
 test("Relate sizes only qualified own returns within the configured stop and stack caps", () => {
   const [tight, wide] = generateStrategyCatalog("test", catalog)
-  const sample = [...Array(3).fill(1), -.1, ...Array(56).fill(.2)]
-  assert.equal(relateAllocation(sample, tight, policy), 1.6)
+  const sample = [...Array(3).fill(-.1), 1, ...Array(56).fill(.2)]
+  assert.equal(relateAllocation(sample, tight, policy), 1.2 ** 3)
+  assert.equal(relateAllocation([0, ...sample.slice(1)], tight, policy), 1)
   assert.equal(relateAllocation(sample, wide, policy), 1)
   assert.equal(relateAllocation(sample.slice(0,59), tight, policy), 1)
-  assert.equal(relateAllocation([-1, ...sample.slice(1)], tight, policy), 1)
+  assert.equal(relateAllocation([-20, ...sample.slice(1)], tight, policy), 1)
   assert.equal(relateAllocation([1, NaN, ...sample.slice(2)], tight, policy), 1)
   assert.equal(relateAllocation(sample, {...tight, exitMode: "trailing-only-fixed"}, policy), 1)
   assert.equal(relateAllocation(sample, tight, {...policy, maxMultiplier: 1.2}), 1.2)
@@ -49,7 +50,7 @@ test("Relate's Real allocation and exact Live mirror survive a checkpoint withou
   const relationLanes = Object.values(state.lanes).filter(lane => lane.coordination === "relate" && lane.stage === "real")
   assert.ok(relationLanes.length >= 2)
   for (const lane of relationLanes) {
-    lane.samples = Array.from({length:60}, () => 1)
+    lane.samples = Array.from({length:60}, (_, index) => index < 4 ? -.01 : 1)
     lane.sampleTimes = Array.from({length:60}, (_, i) => bars[249 - i].timestamp)
   }
   const resumed = TradingEngine.fromSerialized(JSON.stringify(state))
@@ -77,9 +78,27 @@ test("Relate increases volume only when its own recent PF clears the disjoint Au
   const settings = {...DEFAULT_RELATE,enabled:true,lastN:60,minTrades:60}
   const config = {...generateStrategyCatalog("test",{strategyTpSteps:[3],strategySlRatios:[.5],strategyExitModes:["fixed"]})[0],
     autoPfPolicy:{fallback:1.1,minSamples:16,history:40,adjustment:.75,cap:2}}
-  const recent = [...Array<number>(33).fill(1),...Array<number>(27).fill(-1)]
+  const recent = [-1,...Array<number>(33).fill(1),...Array<number>(26).fill(-1)]
   const weak = [...recent,...Array<number>(16).fill(-1)]
   assert.ok(relateAllocation(recent,config,settings,recent.length)>1)
   assert.equal(relateAllocation(weak,config,settings,weak.length),1)
   assert.ok(relateAllocation(weak,config,settings,weak.length-1)>1,"untimed older returns leave the fallback in force")
+})
+
+test("Overall sizes each relation from its own window only after the exact Set qualifies", () => {
+  const [config] = generateStrategyCatalog("test", catalog)
+  const settings = {...policy, scope: "overall" as const,
+    volumeFactors: {overall: 3, symbol: 1, config: 0, direction: 0, indication: 0, strategy: 0, coordination: 0, range: 0}}
+  const own = Array<number>(60).fill(1)
+  const level = (source: string) => source === "overall" ? 2 : 0
+  assert.equal(relateAllocation([], config, settings, 0, level), 1)
+  assert.equal(relateAllocation(own, config, settings, 60, level), 1 + .75 * (1.2 ** 2 - 1))
+})
+
+test("Relate Active leaves its first loss step in the internal tape and activates after two", () => {
+  const [config] = generateStrategyCatalog("test", catalog)
+  const active = {...policy, activeStep: 2}
+  assert.deepEqual(relateDecision([-0.1, ...Array<number>(59).fill(1)], config, active), {multiplier: 1, active: false})
+  assert.deepEqual(relateDecision([-0.1, -0.1, ...Array<number>(58).fill(1)], config, active), {multiplier: 1.44, active: true})
+  assert.deepEqual(relateDecision([1, ...Array<number>(59).fill(1)], config, active), {multiplier: 1, active: false})
 })
