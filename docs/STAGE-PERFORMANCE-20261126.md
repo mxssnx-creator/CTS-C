@@ -26,6 +26,8 @@ Baseline `ead92fa` and the optimized build used the same Node 24 workspace, sett
 
 The dashboard bytes used for the comparison had identical hashes. Repeated reads measure an unchanged stage book. A relevant book change rebuilds the shared view once. The storage timing covers persistence itself and excludes market or order latency.
 
+The separate capacity fixture materialized and restored 24,108 current Sets. Its one-million target provides a projection. The layout test compares live SQLite pages for the same rows in the production binary layout and its base64 predecessor. It also reports two alternative table layouts. On the 67,190 replay rows, a normalized integer-key layout saved 16 KiB relative to the binary rowid layout. The rowid layout can upgrade rows during ordinary checkpoints without rebuilding the lane table.
+
 ## Trade replay parity
 
 Both Inverse profiles ran against the same 30 observed VST tapes with 2,880 minutes of prehistory and 7,200 scored minutes. All per-symbol financial and stage outputs, including post-stage figures, complete windows, accepted Exec cohorts and unique paths, matched the baseline exactly. The table shows the final 2,880-minute holdout. [Replay inputs and configuration](EXEC-CONTINUATION-20261126.md#reproduction)
