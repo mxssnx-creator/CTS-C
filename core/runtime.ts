@@ -1,4 +1,4 @@
-import {BingxTradeStream,TradeBarBuilder,type ObservedTrade} from './trade-stream'
+import {BingxTradeStream,TradeBarBuilder,type ObservedTrade,type TradeBar} from './trade-stream'
 import { randomUUID } from 'node:crypto'
 import { normalizeSymbol, TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings,validateObservedCandles } from './engine'
 import { connectionClient, connectionCredentials,type BingxClient,type ClientOptions } from './bingx'
@@ -17,6 +17,7 @@ import { EXEC_PROFILES, withDefaultExecProfile } from './exec-profile'
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
 interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null;readyAt?:number;batchSize?:number}
+interface TradeBatch {trades:{trade:ObservedTrade;bar?:TradeBar}[];bars:{symbol:string;bar:TradeBar}[];offset:number}
 const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:4320,lastTick:null,lastError:null,feeReadFailures:[],feeCheckedAt:null }
 const EXECUTION_INTERVAL_MS = 250
 const RECONCILIATION_INTERVAL_MS = 1000
@@ -39,7 +40,7 @@ export class TerminalRuntime {
   private tradeStream?:BingxTradeStream
   private tradeBars=new TradeBarBuilder()
   private tradeGeneration=0
-  private tradeBatch?:{trades:ObservedTrade[];offset:number}
+  private tradeBatch?:TradeBatch
   private tradeTimer?:ReturnType<typeof setTimeout>
   private tradeSerialPending=false
   private tradeBarsRecorded=0
@@ -162,7 +163,7 @@ export class TerminalRuntime {
       const cold=this.control.warmed.length<this.engine.managedSymbols().length
       if(elapsed<30000&&cold&&!this.executor.lots?.().some(lot=>lot.quantity>1e-10))return
     }
-    const metadata=this.engine.checkpointMetadata(),settings=this.engine.settings
+    const metadata=this.engine.checkpointPayload(),settings=this.engine.settings
     if(this.store.hasLaneCheckpoint())this.store.saveLaneCheckpoint(metadata,this.engine.checkpointLanes(),this.bufferedEvents,settings,()=>this.ensureLease())
     else this.store.migrateLaneCheckpoint(metadata,this.engine.checkpointLanes(true),this.bufferedEvents,settings,()=>this.ensureLease())
     this.engine.checkpointSaved();this.store.set('control',this.control)
@@ -229,7 +230,7 @@ export class TerminalRuntime {
         this.tradeSerialPending=true
         void this.serial(async()=>this.consumeTrades()).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Trade processing failed'}).finally(()=>{this.tradeSerialPending=false;this.scheduleTrades()})
       }
-    },this.tradeBatch?0:100)
+    },this.tradeBatch&&!this.tradeBatch.bars.length?0:100)
     this.tradeTimer.unref?.()
   }
   private consumeTrades(){
@@ -240,23 +241,34 @@ export class TerminalRuntime {
       this.tradeBatch=undefined
       this.tradeBars.reset()
     }
-    const batch=this.tradeBatch??={trades:this.tradeStream.drain(1000),offset:0}
-    const first=batch.offset,deadline=performance.now()+TRADE_SLICE_MS
-    const events:EngineEvent[]=[]
+    const deadline=performance.now()+TRADE_SLICE_MS
+    let batch=this.tradeBatch
+    if(!batch){
+      batch={trades:[],bars:[],offset:0}
+      const latest=Date.now()+5000
+      for(const trade of this.tradeStream.drain(1000)){
+        if(trade.timestamp>latest)continue
+        const observed=this.tradeBars.ingest(trade)
+        if(!observed.accepted)continue
+        batch.trades.push({trade,bar:observed.bar})
+        if(observed.bar)batch.bars.push({symbol:trade.symbol,bar:observed.bar})
+      }
+      this.tradeBatch=batch
+    }
+    // An I/O failure leaves the batch pending. Bar evidence is durable before
+    // any candle can open a risk intent, including on the retry.
+    if(batch.bars.length){
+      this.store.saveTradeBars(batch.bars)
+      this.tradeBarsRecorded+=batch.bars.length
+      batch.bars.length=0
+    }
+    const first=batch.offset,events:EngineEvent[]=[]
     while(batch.offset<batch.trades.length&&(batch.offset===first||performance.now()<deadline)){
-      const trade=batch.trades[batch.offset++]
-      const now=Date.now()
-      if(trade.timestamp>now+5000)continue
-      const observed=this.tradeBars.ingest(trade)
-      if(!observed.accepted)continue
-      if(observed.bar){
-        this.store.saveTradeBar(trade.symbol,observed.bar);this.tradeBarsRecorded++
-        if(observed.bar.complete){
-          // Each micro lane warms on its own observed bars and stage proofs;
-          // unrelated minute-history recovery must not block a qualified lane.
-          const fresh=now-trade.timestamp<=15000
-          retainEvents(events,this.engine.processCandles(trade.symbol,[observed.bar],{barSeconds:10,allowExecution:fresh&&this.control.exchangeExecution,eventLimit:fresh?5000:0}))
-        }
+      const {trade,bar}=batch.trades[batch.offset++]
+      if(bar?.complete){
+        // Each micro lane warms on its own observed bars and stage proofs.
+        const fresh=Date.now()-trade.timestamp<=15000
+        retainEvents(events,this.engine.processCandles(trade.symbol,[bar],{barSeconds:10,allowExecution:fresh&&this.control.exchangeExecution,eventLimit:fresh?5000:0}))
       }
       if((this.marks.get(trade.symbol)?.timestamp??0)<=trade.timestamp)this.marks.set(trade.symbol,{price:trade.price,timestamp:trade.timestamp})
       retainEvents(events,this.engine.processTick(trade.symbol,trade.price,trade.timestamp,true,this.control.warmed.includes(trade.symbol)?"all":"micro"))
@@ -528,7 +540,7 @@ export class TerminalRuntime {
   }
   marketDataStatus(){return {...this.tradeStream?.status,barsRecorded:this.tradeBarsRecorded,duplicates:this.tradeBars.duplicates,lateTrades:this.tradeBars.late,gaps:this.tradeBars.gaps,barSeconds:10}}
   snapshot() {
-    const s=this.engine.snapshot({laneLimit:500,positionLimit:1000,positionStage:'live'}), account=this.store.get<{equity:number;updatedAt:number}>('account')
+    const s=this.engine.snapshot({laneLimit:500,positionLimit:1000,positionStage:'live',includeCoordinationStats:true}), account=this.store.get<{equity:number;updatedAt:number}>('account')
     const exec = s.settings.stageGateMode === "exec-branches"
     const stages=Object.fromEntries(s.stages.filter(stage=>stage.stage!=="exec"||exec||stage.lanes).map(stage=>{
       const mirror = exec && stage.stage === "live"
@@ -553,7 +565,7 @@ export class TerminalRuntime {
       events:this.store.events().map(e=>({timestamp:new Date(Number(e.timestamp)||Date.now()).toISOString(),level:e.status==='rejected'?'error':'info',phase:String(e.stage||'engine'),message:`${e.type}${e.status?' '+e.status:''}: ${e.reason||String(e.laneId||'').slice(0,240)}`,connectionId:this.connectionId})),
       readiness:{x02Configured:Boolean(connectionCredentials('bingx-x02')),configured:Boolean(connectionCredentials(this.connectionId)),environment:connectionInfo(this.connectionId).environment,status:this.control.lastError||this.accountError||(this.control.running?warmedCount>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${warmedCount}/${s.symbolCount}`:connectionCredentials(this.connectionId)?`Configured; ready to verify ${connectionInfo(this.connectionId).environment}`:`Dedicated ${connectionInfo(this.connectionId).name} credentials required`),engineStatus:this.control.running?'running':'stopped',warmedSymbols:warmedCount,currentMinuteSymbols:observedCurrent,lastTick:this.control.lastTick},
       positionCount:live.open,positionDisplayLimit:1000,microMarketData:this.marketDataStatus(),metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
-      coordinationStats:this.engine.coordinationStats(),
+      coordinationStats:s.coordinationStats,
       engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory,symbolFees:s.settings.symbolFees??{},feeReadFailures:this.control.feeReadFailures,feeCheckedAt:this.control.feeCheckedAt,feeFallbackSymbols:s.settings.symbols.filter(symbol=>!s.settings.symbolFees?.[symbol])},
       execution:{lots:ownedLots,intents:this.store.intents(100),summary:{...this.executor.summary(ownedLots),dispatchIntervalMs:EXECUTION_INTERVAL_MS},comparison:this.executor.comparison(ownedLots)},lastReplay:this.store.get('lastReplay')}
   }

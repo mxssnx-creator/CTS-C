@@ -530,6 +530,37 @@ test("trade slices yield with their unprocessed prices and discard only an inval
   })
 })
 
+test("a failed market batch write delays trade processing until its bars are durable",async(t)=>{
+  await isolated(async runtime=>{
+    const internal=runtime as any,symbol=runtime.engine.settings.symbols[0]
+    const minute=Math.floor(Date.now()/10000)*10000
+    const input=[-20000,-10000,0].map((offset,index)=>({id:String(index),symbol,timestamp:minute+offset,price:100+index,quantity:1}))
+    internal.tradeStream={status:{generation:1},drain:()=>input.splice(0),stop:()=>{}}
+    t.mock.method(performance,"now",()=>0)
+    const persisted=runtime.store.saveTradeBars.bind(runtime.store)
+    let attempts=0
+    t.mock.method(runtime.store,"saveTradeBars",(bars:Parameters<typeof persisted>[0])=>{
+      if(attempts++===0)throw new Error("Temporary storage failure")
+      persisted(bars)
+    })
+    const ticks:number[]=[]
+    runtime.engine.processTick=(_symbol,price)=>{ticks.push(price);return []}
+    const applied:number[]=[]
+    runtime.engine.processCandles=(_symbol,bars)=>{
+      assert.equal(runtime.store.tradeBars(symbol).length,2)
+      applied.push(bars[0].timestamp)
+      return []
+    }
+    assert.throws(()=>internal.consumeTrades(),/Temporary storage failure/)
+    assert.deepEqual(ticks,[])
+    assert.deepEqual(applied,[])
+    internal.consumeTrades()
+    assert.equal(attempts,2)
+    assert.deepEqual(ticks,[100,101,102])
+    assert.deepEqual(applied,[minute])
+  })
+})
+
 
 test('explicit observed-study symbols survive native startup and invalid scopes cannot select replacement symbols',async()=>{
  await isolated(async runtime=>{

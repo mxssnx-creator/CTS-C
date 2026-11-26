@@ -1,4 +1,21 @@
-import type { GateProof, LaneState, StrategyConfig } from "./types"
+import { createHash } from "node:crypto"
+import { deflateRawSync, inflateRawSync } from "node:zlib"
+import type { EngineState, GateProof, LaneState, StrategyConfig } from "./types"
+
+type CheckpointConfigs = {bytes:Uint8Array;hash:string}
+export type LaneCheckpointPayload = { state: Omit<EngineState,"lanes">; configs:CheckpointConfigs }
+
+export function encodeCheckpointConfigs(configs:Record<string,StrategyConfig>):CheckpointConfigs {
+  const bytes=deflateRawSync(JSON.stringify(configs),{level:1})
+  return {bytes,hash:createHash("sha256").update(bytes).digest("hex")}
+}
+
+export function decodeCheckpointConfigs(bytes:unknown,hash:unknown):Record<string,StrategyConfig> {
+  if(!(bytes instanceof Uint8Array)||createHash("sha256").update(bytes).digest("hex")!==hash)throw new Error("Checkpoint configuration index is missing or corrupt")
+  const configs=JSON.parse(inflateRawSync(bytes).toString())
+  if(!configs||typeof configs!=="object"||Array.isArray(configs))throw new Error("Invalid checkpoint configuration index")
+  return configs
+}
 
 type JsonRecord=Record<string,unknown>
 

@@ -4,37 +4,69 @@ import {deflateRawSync,inflateRawSync} from 'node:zlib'
 import { mkdirSync, chmodSync } from "node:fs"
 import path from "node:path"
 import type {EngineState,StrategyConfig} from "./types"
-import { expandLaneV4 } from "./lane-checkpoint-codec"
+import { decodeCheckpointConfigs, expandLaneV4, type LaneCheckpointPayload } from "./lane-checkpoint-codec"
+import type { TradeBar } from "./trade-stream"
 
 export interface Intent { id: string; status: "reserved" | "accepted" | "rejected" | "unknown"; payload: Record<string, unknown>; result: Record<string, unknown> | null; createdAt: number; updatedAt: number }
 export interface RuntimeLease { owner: string; expiresAt: number; fence: number }
-const encodeLane=(data:string)=>'z1:'+deflateRawSync(Buffer.from(data),{level:1}).toString('base64')
-const decodeLane=(data:string)=>data.startsWith('z1:')?inflateRawSync(Buffer.from(data.slice(3),'base64')).toString():data
+type LaneRow={id:string;data:string|Uint8Array}
+const TRADE_BAR_RETENTION_MS=3*86_400_000
+const COMPACT_CHECKPOINTS=['lane-rows-v2','lane-rows-v3','lane-rows-v4','lane-rows-v5']
+const encodeLane=(data:string)=>deflateRawSync(data,{level:1,chunkSize:2048})
+const encodeLegacyLane=(data:string)=>'z1:'+encodeLane(data).toString('base64')
+function decodeLane(data:LaneRow["data"]):string{
+  if(typeof data!=="string")return inflateRawSync(data).toString()
+  return data.startsWith('z1:')?inflateRawSync(Buffer.from(data.slice(3),'base64')).toString():data
+}
+function wrapCheckpoint(metadata:string|LaneCheckpointPayload):string{
+  if(typeof metadata!=="string")return JSON.stringify({checkpointFormat:'lane-rows-v5',payload:{laneRowsVersion:5,state:metadata.state,configsHash:metadata.configs.hash}})
+  const parsed=JSON.parse(metadata)
+  const compact=parsed?.state&&parsed?.configs&&typeof parsed.configs==='object'
+  if(!compact)return JSON.stringify({checkpointFormat:'lane-rows-v1',state:parsed})
+  const version=parsed.laneRowsVersion===4?4:parsed.laneRowsVersion===3?3:2
+  return JSON.stringify({checkpointFormat:`lane-rows-v${version}`,payload:parsed})
+}
 export class StateStore {
   readonly database: DatabaseSync
   private loadedToken:string|null=null
-  constructor(readonly filename: string) {
+  constructor(readonly filename: string,{readOnly=false}:{readOnly?:boolean}={}) {
+    if(readOnly){this.database=new DatabaseSync(filename,{readOnly:true});return}
     if (filename !== ":memory:") { mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 }); chmodSync(path.dirname(filename), 0o700) }
     this.database = new DatabaseSync(filename)
     if (filename !== ":memory:") chmodSync(filename, 0o600)
-    this.database.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;")
+    this.database.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA journal_size_limit=16777216; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;")
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS market_trade_bars(symbol TEXT NOT NULL, timestamp INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(symbol,timestamp));
       CREATE TABLE IF NOT EXISTS records(key TEXT PRIMARY KEY, data TEXT NOT NULL, updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS intents(id TEXT PRIMARY KEY, status TEXT NOT NULL, payload TEXT NOT NULL, result TEXT, created INTEGER NOT NULL, updated INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, expires INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS engine_lanes(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS engine_lanes(id TEXT PRIMARY KEY,data BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS runtime_lease(name TEXT PRIMARY KEY, owner TEXT NOT NULL, expires INTEGER NOT NULL, fence INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS intents_status_created ON intents(status,created);
       CREATE INDEX IF NOT EXISTS intents_engine_id ON intents(json_extract(payload,'$.intent.connectionId'),json_extract(payload,'$.intent.id')) WHERE json_extract(payload,'$.role') IS NULL;
     `)
   }
-  saveTradeBar(symbol:string,bar:import('./trade-stream').TradeBar):void{
-    this.database.prepare('INSERT OR IGNORE INTO market_trade_bars VALUES(?,?,?)').run(symbol,bar.timestamp,JSON.stringify(bar))
-    this.database.prepare('DELETE FROM market_trade_bars WHERE symbol=? AND timestamp<?').run(symbol,bar.timestamp-3*86400000)
+  saveTradeBar(symbol:string,bar:TradeBar):void{
+    this.saveTradeBars([{symbol,bar}])
   }
-  tradeBars(symbol:string,limit=4320):import('./trade-stream').TradeBar[]{
+  saveTradeBars(bars:readonly {symbol:string;bar:TradeBar}[]):void{
+    if(!bars.length)return
+    const ownsTransaction=!this.database.isTransaction
+    if(ownsTransaction)this.database.exec('BEGIN IMMEDIATE')
+    try{
+      const insert=this.database.prepare('INSERT OR IGNORE INTO market_trade_bars VALUES(?,?,?)')
+      const prune=this.database.prepare('DELETE FROM market_trade_bars WHERE symbol=? AND timestamp<(SELECT MAX(timestamp) FROM market_trade_bars WHERE symbol=?)-?')
+      const symbols=new Set<string>()
+      for(const {symbol,bar} of bars){
+        insert.run(symbol,bar.timestamp,JSON.stringify(bar))
+        symbols.add(symbol)
+      }
+      for(const symbol of symbols)prune.run(symbol,symbol,TRADE_BAR_RETENTION_MS)
+      if(ownsTransaction)this.database.exec('COMMIT')
+    }catch(error){if(ownsTransaction)this.database.exec('ROLLBACK');throw error}
+  }
+  tradeBars(symbol:string,limit=4320):TradeBar[]{
     return (this.database.prepare('SELECT data FROM market_trade_bars WHERE symbol=? ORDER BY timestamp DESC LIMIT ?').all(symbol,limit) as {data:string}[]).reverse().map(r=>JSON.parse(r.data))
   }
   getRaw(key: string): string | null { const row = this.database.prepare("SELECT data FROM records WHERE key=?").get(key) as { data: string } | undefined; if(key==='engine'&&row?.data.startsWith('{"checkpointFormat":"lane-rows-v'))return JSON.stringify(this.loadEngineState())
@@ -42,7 +74,7 @@ export class StateStore {
   /** True only for the compact format. A v1 row checkpoint is migrated atomically on the next save. */
   hasLaneCheckpoint():boolean{
     const row=this.database.prepare("SELECT substr(data,1,80) AS prefix FROM records WHERE key='engine'").get() as {prefix:string}|undefined
-    return /^\{"checkpointFormat":"lane-rows-v[234]"/.test(row?.prefix??'')
+    return /^\{"checkpointFormat":"lane-rows-v[2345]"/.test(row?.prefix??'')
   }
   loadEngineState():EngineState|null{
     const ownTransaction=!this.database.isTransaction
@@ -51,45 +83,41 @@ export class StateStore {
     const row=this.engineRecord()
     if(!row){this.loadedToken=null;if(ownTransaction)this.database.exec('COMMIT');return null}
     const decoded=JSON.parse(row.data)
+    const compactIndex=COMPACT_CHECKPOINTS.indexOf(decoded.checkpointFormat)
     let state:EngineState
-    if(decoded.checkpointFormat==='lane-rows-v4'){
+    if(compactIndex>=0){
+      const version=compactIndex+2
       const payload=decoded.payload
-      if(payload?.laneRowsVersion!==4||!payload.state||!payload.configs||typeof payload.configs!=='object')throw new Error('Invalid v4 checkpoint metadata')
+      if(!payload?.state||version>2&&payload.laneRowsVersion!==version)throw new Error('Invalid compact checkpoint metadata')
+      const configs=version===5?decodeCheckpointConfigs(this.database.prepare("SELECT data FROM records WHERE key='engine-configs-v5'").get()?.data,payload.configsHash):payload.configs
+      if(!configs||typeof configs!=='object')throw new Error('Missing compact checkpoint configurations')
       state={...payload.state,lanes:{}}
-      for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){
-        const compact=JSON.parse(decodeLane(item.data)),config=payload.configs[compact.c] as StrategyConfig|undefined
-        if(!config)throw new Error('Missing v4 checkpoint config')
-        state.lanes[item.id]=expandLaneV4(compact,item.id,config)
-      }
-    }else if(decoded.checkpointFormat==='lane-rows-v3'){
-      const payload=decoded.payload
-      if(payload?.laneRowsVersion!==3||!payload.state||!payload.configs||typeof payload.configs!=='object')throw new Error('Invalid bounded checkpoint metadata')
-      state={...payload.state,lanes:{}}
-      for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){
-        const compact=JSON.parse(decodeLane(item.data)),config=payload.configs[compact.c] as StrategyConfig|undefined
-        if(!config||typeof compact.c!=='string'||config.id!==compact.c||'id' in compact||'config' in compact||'configId' in compact)throw new Error('Bounded checkpoint lane identity mismatch')
-        const {c:configId,...lane}=compact
-        state.lanes[item.id]={...lane,id:item.id,configId,config}
-      }
-    }else if(decoded.checkpointFormat==='lane-rows-v2'){
-      const payload=decoded.payload
-      if(!payload?.state||!payload.configs||typeof payload.configs!=='object')throw new Error('Invalid compact checkpoint metadata')
-      state={...payload.state,lanes:{}}
-      for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){
-        const compact=JSON.parse(decodeLane(item.data)),config=payload.configs[compact.configId] as StrategyConfig|undefined
-        if(!config||config.id!==compact.configId||'id' in compact||'config' in compact)throw new Error('Compact checkpoint lane identity mismatch')
-        state.lanes[item.id]={...compact,id:item.id,config}
+      for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<LaneRow>){
+        const compact=JSON.parse(decodeLane(item.data))
+        if(!compact||typeof compact!=='object'||Array.isArray(compact))throw new Error('Invalid compact checkpoint lane')
+        // The v2/v3 layout stays readable until each old row is touched.
+        const legacy=version<=3||typeof item.data==='string'&&Object.hasOwn(compact,'stage')&&Object.hasOwn(compact,'samples')
+        const configId=legacy?(compact.configId??compact.c):compact.c
+        const config=typeof configId==='string'?configs[configId] as StrategyConfig|undefined:undefined
+        if(!config||config.id!==configId)throw new Error('Compact checkpoint lane identity mismatch')
+        if(legacy){
+          if('id' in compact||'config' in compact||'g' in compact||'a' in compact||('c' in compact&&'configId' in compact))throw new Error('Invalid legacy compact checkpoint lane')
+          const {c:_,configId:__,...lane}=compact
+          state.lanes[item.id]={...lane,id:item.id,configId,config}
+        }else state.lanes[item.id]=expandLaneV4(compact,item.id,config)
       }
     }else if(decoded.checkpointFormat==='lane-rows-v1'){
       state={...decoded.state,lanes:{}}
-      for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<{id:string;data:string}>){
+      for(const item of this.database.prepare('SELECT id,data FROM engine_lanes').iterate() as Iterable<LaneRow>){
         const lane=JSON.parse(decodeLane(item.data));if(lane.id!==item.id)throw new Error('Checkpoint lane identity mismatch');state.lanes[item.id]=lane
       }
     }else state=decoded
-    const configs=new Map<string,StrategyConfig>()
-    for(const id in state.lanes??{}){const lane=state.lanes[id]
-      const identity=JSON.stringify(lane.config),shared=configs.get(identity)
-      if(shared)lane.config=shared;else configs.set(identity,lane.config)
+    if(compactIndex<0){
+      const configs=new Map<string,StrategyConfig>()
+      for(const id in state.lanes??{}){const lane=state.lanes[id]
+        const identity=JSON.stringify(lane.config),shared=configs.get(identity)
+        if(shared)lane.config=shared;else configs.set(identity,lane.config)
+      }
     }
     this.loadedToken=this.recordToken(row)
     if(ownTransaction)this.database.exec('COMMIT')
@@ -102,38 +130,38 @@ export class StateStore {
   loadedCheckpointToken():string|null{return this.loadedToken}
   private advanceEngineRevision(){this.database.prepare("INSERT INTO records VALUES('engine-revision','1',?) ON CONFLICT(key) DO UPDATE SET data=CAST(CAST(data AS INTEGER)+1 AS TEXT),updated=excluded.updated").run(Date.now())}
   /** Migration rows stay invisible until the final metadata transaction. No full-state rewrite. */
-  migrateLaneCheckpoint(metadata:string,lanes:Iterable<{id:string;data:string}>,events:unknown[],settings:unknown,guard:()=>void):void{
+  migrateLaneCheckpoint(metadata:string|LaneCheckpointPayload,lanes:Iterable<{id:string;data:string}>,events:unknown[],settings:unknown,guard:()=>void):void{
     if(this.hasLaneCheckpoint())throw new Error('Checkpoint is already migrated')
     guard();this.database.exec('DELETE FROM engine_lanes')
     const insert=this.database.prepare('INSERT INTO engine_lanes VALUES(?,?)')
+    const encode=typeof metadata==='string'?encodeLegacyLane:encodeLane
     let batch:{id:string;data:string}[]=[],guardedAt=Date.now()
     const timelyGuard=()=>{if(Date.now()-guardedAt>=500){guard();guardedAt=Date.now()}}
-    const flush=()=>{if(!batch.length)return;guard();this.database.exec('BEGIN IMMEDIATE');try{for(const row of batch){timelyGuard();insert.run(row.id,encodeLane(row.data))}guard();this.database.exec('COMMIT')}catch(error){this.database.exec('ROLLBACK');throw error}batch=[]}
+    const flush=()=>{if(!batch.length)return;guard();this.database.exec('BEGIN IMMEDIATE');try{for(const row of batch){timelyGuard();insert.run(row.id,encode(row.data))}guard();this.database.exec('COMMIT')}catch(error){this.database.exec('ROLLBACK');throw error}batch=[]}
     for(const lane of lanes){timelyGuard();batch.push(lane);if(batch.length>=500)flush()}
     flush();this.saveLaneCheckpoint(metadata,[],events,settings,guard)
   }
-  saveLaneCheckpoint(metadata:string,lanes:Iterable<{id:string;data:string}>,events:unknown[],settings:unknown,guard:()=>void):void{
+  saveLaneCheckpoint(metadata:string|LaneCheckpointPayload,lanes:Iterable<{id:string;data:string}>,events:unknown[],settings:unknown,guard:()=>void):void{
+    const checkpoint=wrapCheckpoint(metadata)
+    const encode=typeof metadata==='string'?encodeLegacyLane:encodeLane
     guard();this.database.exec('BEGIN IMMEDIATE')
     try{
-      const insert=this.database.prepare('INSERT INTO engine_lanes VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data')
+      const insert=this.database.prepare('INSERT INTO engine_lanes VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data WHERE engine_lanes.data<>excluded.data')
       let count=0,guardedAt=Date.now();for(const lane of lanes){
         // Serialization and large retained lane rows can take longer than a lease before 500 rows exist.
         // Check elapsed work as well as count; an expired/stolen owner still fails before the row is written.
         if(Date.now()-guardedAt>=500){guard();guardedAt=Date.now()}
-        insert.run(lane.id,encodeLane(lane.data));if(++count%500===0){guard();guardedAt=Date.now()}
+        insert.run(lane.id,encode(lane.data));if(++count%500===0){guard();guardedAt=Date.now()}
       }
-      const parsedMetadata=JSON.parse(metadata)
-      const compact=parsedMetadata?.state&&parsedMetadata?.configs&&typeof parsedMetadata.configs==='object'
-      const version=compact&&parsedMetadata.laneRowsVersion===4?4:compact&&parsedMetadata.laneRowsVersion===3?3:compact?2:1
-      const checkpoint=version===4?JSON.stringify({checkpointFormat:'lane-rows-v4',payload:parsedMetadata})
-        :version===3?JSON.stringify({checkpointFormat:'lane-rows-v3',payload:parsedMetadata})
-        :version===2?JSON.stringify({checkpointFormat:'lane-rows-v2',payload:parsedMetadata})
-        :JSON.stringify({checkpointFormat:'lane-rows-v1',state:parsedMetadata})
+      if(typeof metadata==='string')this.database.exec("DELETE FROM records WHERE key='engine-configs-v5'")
+      else this.database.prepare("INSERT INTO records VALUES('engine-configs-v5',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated WHERE records.data<>excluded.data").run(metadata.configs.bytes,Date.now())
       this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run(checkpoint,Date.now())
       this.advanceEngineRevision()
-      this.set('engine-settings',settings)
-      const eventInsert=this.database.prepare('INSERT INTO events(data,created) VALUES(?,?)');for(const event of events)eventInsert.run(JSON.stringify(event),Date.now())
-      this.database.exec('DELETE FROM events WHERE id < (SELECT COALESCE(MAX(id),0)-5000 FROM events)')
+      this.database.prepare("INSERT INTO records VALUES('engine-settings',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated WHERE records.data<>excluded.data").run(JSON.stringify(settings),Date.now())
+      if(events.length){
+        const eventInsert=this.database.prepare('INSERT INTO events(data,created) VALUES(?,?)');for(const event of events)eventInsert.run(JSON.stringify(event),Date.now())
+        this.database.exec('DELETE FROM events WHERE id < (SELECT COALESCE(MAX(id),0)-5000 FROM events)')
+      }
       guard();this.database.exec('COMMIT')
     }catch(error){this.database.exec('ROLLBACK');throw error}
   }
@@ -146,6 +174,7 @@ export class StateStore {
   saveEngineJSON(serialized: string, events: unknown[] = [], settings?:unknown) {
     this.database.exec("BEGIN IMMEDIATE")
     try {
+      this.database.exec("DELETE FROM records WHERE key='engine-configs-v5'")
       this.database.prepare("INSERT INTO records VALUES('engine',?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data,updated=excluded.updated").run(serialized, Date.now())
       this.advanceEngineRevision()
       if(settings!==undefined)this.set('engine-settings',settings)

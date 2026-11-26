@@ -70,6 +70,71 @@ test("positive and negative outcomes make independent paths and preserve the ful
   assert.equal(evaluateBlocks(blockPrefix([-1,.2,.2,.2,.2]),negative,1.1).state,"failed")
 })
 
+test("Base materializes geometry only when that window qualifies", () => {
+  const initial=checkExecWindows(settings.catalog!.strategyExecWindows)
+  const windows=checkExecWindows({...initial,base:{...initial.base,long:[10,50],shortOutcomes:["positive","negative"]}})
+  const engine=new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows}})
+  const plan=(engine as unknown as {branches:ParentBranches}).branches
+  engine.processCandles(symbol,bars.slice(0,45),{eventLimit:0})
+  const observation=Object.values(engine.exportState().lanes).find(lane=>lane.baseObservation&&lane.direction==="long")!
+  const templates=plan.baseWindows(observation.config)
+  assert.ok(plan.baseConfig(observation.config,templates[0]))
+  assert.equal(plan.baseConfig(observation.config,templates[1]),undefined,"the negative Short did not qualify")
+  assert.equal(plan.baseConfig(observation.config,templates[2]),undefined,"the long window needs more closes")
+  engine.processCandles(symbol,bars.slice(45),{eventLimit:0})
+  assert.ok(plan.baseConfig(observation.config,templates[2]),"the longer Set is created once its own gate passes")
+})
+
+test("dashboard reuses stage totals for marks and refreshes them on settlement and settings changes", (t) => {
+  const engine=new TradingEngine(settings)
+  let end=130
+  engine.processCandles(symbol,bars.slice(0,end),{eventLimit:0,allowExecution:true})
+  while(!engine.snapshot().positions.some(position=>position.stage==="live")&&end<bars.length){
+    engine.processCandles(symbol,[bars[end++]],{eventLimit:0,allowExecution:true})
+  }
+  const display={laneLimit:100,positionLimit:100,positionStage:"live" as const}
+  const mock=t.mock.method(engine as unknown as {stageWindow:()=>unknown},"stageWindow")
+  const read=()=>engine.snapshot({...display,includeCoordinationStats:true})
+  const first=read()
+  const calls=mock.mock.callCount()
+  assert.ok(calls>0)
+  const live=first.positions[0]
+  assert.ok(live)
+  engine.processTick(symbol,live.entryPrice*1.00001,bars[end-1].timestamp+1000)
+  const marked=read()
+  assert.equal(mock.mock.callCount(),calls,"price-only marks do not rescan stage books")
+  assert.deepEqual(marked.stages,first.stages)
+  assert.ok(marked.positions.find(position=>position.id===live.id)!.peak>live.peak)
+  marked.stages[0].closed=-1
+  assert.deepEqual(read().stages,first.stages,"returned reports cannot mutate the cache")
+
+  engine.processTick(symbol,live.entryPrice*1.1,bars[end-1].timestamp+2000)
+  const settled=read()
+  assert.ok(mock.mock.callCount()>calls)
+  assert.ok(settled.stages.find(stage=>stage.stage==="live")!.closed>first.stages.find(stage=>stage.stage==="live")!.closed)
+  const {coordinationStats,...standard}=settled
+  assert.deepEqual(standard,engine.snapshot(display))
+  assert.deepEqual(coordinationStats,engine.coordinationStats())
+  engine.updateSettings({stageMinPF:{base:1.5,main:1.5,real:1.5}})
+  const {coordinationStats:reported,...updated}=read()
+  assert.deepEqual(updated,engine.snapshot(display))
+  assert.deepEqual(reported,engine.coordinationStats())
+})
+
+test("bounded recent closes keep exact newest-first order through a rollover and restart",()=>{
+  const engine=new TradingEngine(settings)
+  const reference:string[]=[]
+  engine.observeStageCloses(trade=>reference.push(trade.id))
+  engine.processCandles(symbol,Array.from({length:360},(_,i)=>makeBar(i)),{eventLimit:0})
+  assert.ok(reference.length>1000)
+  assert.deepEqual(engine.snapshot({laneLimit:0}).trades.map(trade=>trade.id),reference.slice(-1000).reverse())
+
+  const restored=TradingEngine.fromSerialized(engine.serializeState())
+  restored.observeStageCloses(trade=>reference.push(trade.id))
+  restored.processCandles(symbol,Array.from({length:12},(_,i)=>makeBar(360+i)),{eventLimit:0})
+  assert.deepEqual(restored.snapshot({laneLimit:0}).trades.map(trade=>trade.id),reference.slice(-1000).reverse())
+})
+
 test("fresh parent entries fund independent child Sets and Exec mirrors without a Live window", () => {
   const engine = new TradingEngine(settings)
   engine.processCandles(symbol,bars.slice(0,39))

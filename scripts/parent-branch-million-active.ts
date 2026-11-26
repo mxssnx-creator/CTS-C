@@ -107,9 +107,9 @@ let serialized = engine.serializeState()
 const fullSerializedBytes = Buffer.byteLength(serialized)
 const compactStore = new StateStore(":memory:")
 const compactSaveStarted = performance.now()
-compactStore.migrateLaneCheckpoint(engine.checkpointMetadata(), engine.checkpointLanes(true), [], engine.settings, () => {})
+compactStore.migrateLaneCheckpoint(engine.checkpointPayload(), engine.checkpointLanes(true), [], engine.settings, () => {})
 const compactSaveAt = performance.now()
-const compactRecord = compactStore.database.prepare("SELECT length(data) AS bytes FROM records WHERE key='engine'").get() as { bytes:number }
+const compactRecord = compactStore.database.prepare("SELECT SUM(length(data)) AS bytes FROM records WHERE key IN ('engine','engine-configs-v5')").get() as { bytes:number }
 const compactRows = compactStore.database.prepare("SELECT COALESCE(SUM(length(id)+length(data)),0) AS bytes FROM engine_lanes").get() as { bytes:number }
 const compactCheckpointBytes = compactRecord.bytes + compactRows.bytes
 const laneIdBytes=(compactStore.database.prepare("SELECT COALESCE(SUM(length(id)),0) AS bytes FROM engine_lanes").get() as {bytes:number}).bytes
@@ -124,7 +124,7 @@ const laneStorageLayout=(()=>{
   const normalizedIdInsert=normalized.prepare("INSERT INTO engine_lane_ids VALUES(?,?)")
   const normalizedDataInsert=normalized.prepare("INSERT INTO engine_lanes VALUES(?,?)")
   let ref=0
-  for(const lane of compactStore.database.prepare("SELECT id,data FROM engine_lanes ORDER BY id").iterate() as Iterable<{id:string;data:string}>){
+  for(const lane of compactStore.database.prepare("SELECT id,data FROM engine_lanes ORDER BY id").iterate() as Iterable<{id:string;data:Uint8Array}>){
     rowidInsert.run(lane.id,lane.data);boundedInsert.run(lane.id,lane.data)
     normalizedIdInsert.run(lane.id,++ref);normalizedDataInsert.run(ref,lane.data)
   }
