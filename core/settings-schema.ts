@@ -82,6 +82,7 @@ export const AUTO_PF_FIELDS = [
   {key:"autoPfMinSamples",label:"Minimum prior closes per Set",min:3,max:250,step:1},
   {key:"autoPfHistory",label:"Maximum prior closes per Set",min:3,max:250,step:1},
   {key:"autoPfAdjustment",label:"Adjustment for weak prior PF",min:0,max:4,step:.05},
+  {key:"autoPfStrength",label:"Auto PF ratio",min:1,max:10,step:1},
   {key:"autoPfRatio",label:"Legacy PF slope per 1% TP",min:0,max:2,step:.05},
   {key:"autoPfMax",label:"Auto PF maximum",min:1.01,max:10,step:.01},
 ]

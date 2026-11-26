@@ -21,8 +21,7 @@ export function checkStageCoordinations(raw: unknown): StageCoordinations {
 function baseRequirements(windows: ExecWindows | undefined): number[] {
   if (!windows) return []
   const {base} = windows
-  return base.long.flatMap(long=>base.short.flatMap(short=>execShortOutcomes(base)
-    .flatMap(()=>base.last.flatMap(last=>(base.lastOutcomes??POSITIVE_EXEC_OUTCOME).map(()=>long+short+last))))).sort((a,b)=>a-b)
+  return [...new Set(base.long.flatMap(long => base.short.flatMap(short => base.last.map(last => long + short + last))))].sort((a,b)=>a-b)
 }
 const profiles=new Map(EXEC_PROFILES.map(profile=>[profile.id,{windows:profile.windows,required:baseRequirements(profile.windows)}]))
 

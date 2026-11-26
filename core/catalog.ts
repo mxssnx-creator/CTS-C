@@ -80,7 +80,9 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   const periodsByType = new Map(types.map(type=>[type,indicationPeriods(type,periods,commonPeriods)]))
   const adaptivePf = autoPfPolicy(settings)
   const distancePf = settings.autoPfEnabled === true && !adaptivePf
-  const autoPfRatio=Number(settings.autoPfRatio??AUTO_PF_DEFAULTS.autoPfRatio),autoPfMax=Number(settings.autoPfMax??AUTO_PF_DEFAULTS.autoPfMax)
+  const autoPfRatio=Number(settings.autoPfRatio??AUTO_PF_DEFAULTS.autoPfRatio)
+    * (Number(settings.autoPfStrength??AUTO_PF_DEFAULTS.autoPfStrength) / AUTO_PF_DEFAULTS.autoPfStrength)
+  const autoPfMax=Number(settings.autoPfMax??AUTO_PF_DEFAULTS.autoPfMax)
   const configs: StrategyConfig[] = []
   const variants = new Map(ranges.map(range => [range, protectionVariants(range,
     modes.filter(mode => mode === "fixed" || strategyProcessing(settings, { range }).trailing),

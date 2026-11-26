@@ -24,7 +24,7 @@ test('all requested signed combinations are distinct and agree with an independe
       }
       const positive=(a:number[])=>{const gp=a.reduce((s,v)=>s+Math.max(v,0),0),gl=a.reduce((s,v)=>s+Math.max(-v,0),0);return gp>gl&&(gl===0||gp/gl>=1.1)};
       const long=values.slice(p.short+p.minimal,p.short+p.minimal+p.long),short=values.slice(p.minimal,p.minimal+p.short),minimal=values.slice(0,p.minimal);
-      const pass=positive(long)&&(p.shortPolarity==='positive'?positive(short):short.reduce((a,b)=>a+b,0)<0)&&(p.minimalPolarity==='positive'?minimal.reduce((a,b)=>a+b,0)>0:minimal.reduce((a,b)=>a+b,0)<0);
+      const pass=positive(long)&&(p.shortPolarity==='positive'?positive(short):positive(short.map(value=>-value)))&&(p.minimalPolarity==='positive'?minimal.reduce((a,b)=>a+b,0)>0:minimal.reduce((a,b)=>a+b,0)<0);
       assert.equal(r.state==='qualified',pass);
     }
   }

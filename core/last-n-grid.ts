@@ -19,9 +19,12 @@ export const DEFAULT_EXEC_MIN_PF = 1.1
 type ShortLast = { short: readonly number[]; last: readonly number[]; shortOutcomes?: readonly Polarity[]; lastOutcomes?: readonly Polarity[] }
 export type ExecWindows = { base: ShortLast & { long: readonly number[] } } &
   Record<Exclude<EvaluationStage, "base">, ShortLast & { long: readonly typeof EXEC_LONG_MODES[number][] }>
-const shortLast = { short: DEFAULT_SHORT_COUNTS, last: EXEC_LAST_COUNTS }
+const shortLast = { short: DEFAULT_SHORT_COUNTS, last: EXEC_LAST_COUNTS, shortOutcomes: EXEC_OUTCOMES, lastOutcomes: EXEC_OUTCOMES }
 const inherited = { ...shortLast, long: EXEC_LONG_MODES }
-export const DEFAULT_EXEC_WINDOWS: ExecWindows = { base: { ...shortLast, long: EXEC_LONG_COUNTS }, main: inherited, real: inherited, exec: inherited }
+const downstream = { ...inherited, short: EXEC_SHORT_COUNTS }
+export const DEFAULT_EXEC_WINDOWS: ExecWindows = {
+  base: { ...shortLast, long: EXEC_LONG_COUNTS }, main: inherited, real: downstream, exec: downstream,
+}
 
 export function stageShortCounts(stage: EvaluationStage): readonly number[] {
   return stage === "real" || stage === "exec" ? EXEC_SHORT_COUNTS : DEFAULT_SHORT_COUNTS
@@ -40,7 +43,7 @@ export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindo
     }
     return options.filter(v => value.includes(v))
   }
-  const input = record(raw)
+  const input = record(raw === undefined ? DEFAULT_EXEC_WINDOWS : raw)
   if (Object.keys(input).some(stage => !EXEC_EVALUATION_STAGES.includes(stage as EvaluationStage))) throw new Error("Invalid Exec window stage")
   const result = {} as ExecWindows
   for (const stage of EXEC_EVALUATION_STAGES) {

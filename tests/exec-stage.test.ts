@@ -35,7 +35,7 @@ const settings: Partial<EngineSettings> = {
 }
 
 test("Exec policies use separate chronological blocks and reject an incomplete or failed block", () => {
-  assert.equal(execPathCount(checkExecWindows(DEFAULT_EXEC_WINDOWS)), 6_400_000)
+  assert.equal(execPathCount(checkExecWindows(DEFAULT_EXEC_WINDOWS)), 6_553_600_000)
   assert.throws(() => checkExecWindows({ real: { short: [] } }))
   const withLong = execBlockPolicy(10,4,2), short = execBlockPolicy(0,4,2)
   const samples = [1,1, 1,1,1,1, ...Array<number>(10).fill(-1)]

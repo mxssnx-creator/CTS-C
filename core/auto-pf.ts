@@ -5,6 +5,7 @@ export const AUTO_PF_DEFAULTS = {
   autoPfMinSamples: 16,
   autoPfHistory: 40,
   autoPfAdjustment: .75,
+  autoPfStrength: 4,
   autoPfRatio: .2,
   autoPfMax: 2,
 } as const
@@ -32,11 +33,12 @@ export function autoPfPolicy(settings: Record<string, unknown>): AutoPfPolicy | 
   }
   const cap = number("autoPfMax", 1.01, 10)
   number("autoPfRatio", 0, 2)
+  const strength = number("autoPfStrength", 1, 10, true)
   if (autoPfMode === "tp-distance") return
   const fallback = number("autoPfFallback", 1.01, cap)
   const history = number("autoPfHistory", 3, 250, true)
   const minSamples = number("autoPfMinSamples", 3, history, true)
-  const adjustment = number("autoPfAdjustment", 0, 4)
+  const adjustment = number("autoPfAdjustment", 0, 4) * (strength / AUTO_PF_DEFAULTS.autoPfStrength)
   if (autoPfEnabled) return Object.freeze({ fallback, minSamples, history, adjustment, cap })
 }
 

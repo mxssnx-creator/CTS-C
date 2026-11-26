@@ -323,7 +323,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
               <p className="terminal-muted text-xs">{draft.autoPfMode === "tp-distance"
                 ? "The TP-based floor depends on the configuration's target distance and slope."
                 : "Each Set uses its older completed returns to raise the PF requirement when its history is weak. The fallback applies while history is sparse. Every Last-N block still needs its full sample count."}</p>
-              <div className="grid gap-5 sm:grid-cols-2">{AUTO_PF_FIELDS.filter(field => field.key === "autoPfMax" || (field.key === "autoPfRatio") === (draft.autoPfMode === "tp-distance")).map(numberField)}</div>
+              <div className="grid gap-5 sm:grid-cols-2">{AUTO_PF_FIELDS.filter(field => field.key === "autoPfMax" || field.key === "autoPfStrength" || (field.key === "autoPfRatio") === (draft.autoPfMode === "tp-distance")).map(numberField)}</div>
             </div>}
             <label className="mt-5 flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.microTradeStream===true} onChange={e=>change('microTradeStream',e.target.checked)}/>Record trades and 10-second history</label>
           </section>
