@@ -58,9 +58,9 @@ test("positive and negative outcomes make independent paths and preserve the ful
   const plan = new ParentBranches({strategyExecWindows:windows},true)
   const config = generateStrategyCatalog("test",settings.catalog)[0]
   const base = plan.variants(config,undefined,"base")
-  assert.equal(base.length,6)
-  assert.equal(new Set(base.map(lane=>lane.id)).size,6)
-  assert.equal(base.filter(lane=>lane.branch?.windows?.base?.shortPolarity==="negative").length,2)
+  assert.equal(base.length,8)
+  assert.equal(new Set(base.map(lane=>lane.id)).size,8)
+  assert.equal(base.filter(lane=>lane.branch?.windows?.base?.shortPolarity==="negative").length,4)
   const parent = base.find(lane=>lane.branch?.windows?.base?.minimalPolarity==="negative")!
   const next = plan.variants(parent,"normal","main")
   assert.equal(next.length,8)
@@ -138,16 +138,18 @@ test("fresh parent entries fund independent child Sets and Exec mirrors without 
   } finally { db.close() }
 })
 
-test("only Exec can select Short up to 30 and each width uses its own complete window", () => {
+test("Real and Exec can select Short up to 30 and each stage uses its own complete window", () => {
   const initial = checkExecWindows(settings.catalog!.strategyExecWindows)
   const exec = {...initial.exec,short:[30,20,28,24]}
-  const windows = checkExecWindows({...initial,exec})
+  const windows = checkExecWindows({...initial,real:{...initial.real,short:[30]},exec})
+  assert.deepEqual(windows.real.short,[30])
   assert.deepEqual(windows.exec.short,[20,24,28,30])
-  assert.throws(()=>checkExecWindows({real:{short:[30]}}),/distinct Exec window choices/)
+  assert.throws(()=>checkExecWindows({main:{short:[30]}}),/distinct Exec window choices/)
   assert.throws(()=>checkExecWindows({...initial,exec:{...exec,short:[31]}}),/distinct Exec window choices/)
   assert.throws(()=>checkExecWindows({...initial,exec},50),/exceed retained/)
   const minimal = {long:["none"],short:[4,30],last:[1],shortOutcomes:["negative"]}
-  assert.doesNotThrow(()=>checkExecWindows({...initial,exec:minimal},25))
+  assert.throws(()=>checkExecWindows({...initial,exec:minimal},30),/exceed retained/)
+  assert.doesNotThrow(()=>checkExecWindows({...initial,exec:minimal},31))
   const engine = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows}})
   const traded:ClosedTrade[]=[]
   engine.observeStageCloses(trade=>{if(trade.executed) traded.push(trade)})
@@ -156,6 +158,35 @@ test("only Exec can select Short up to 30 and each width uses its own complete w
   assert.ok(closings.includes(31),"30 Short closes plus one Last close are needed for the no-Long variant")
   assert.ok(closings.includes(41),"the inherited Base Long contributes ten more disjoint closes")
   assert.ok(traded.every(trade=>trade.executionProof!.count===trade.executionProof!.required))
+  assert.ok(traded.every(trade=>trade.admission?.some(proof=>proof.stage==="real"&&proof.required===31&&proof.count===31)))
+})
+
+test("wide signed Real and Exec Sets keep their own parent, inherited Long and exact window", () => {
+  const signed = {long:["none","inherit"],short:[30],last:[1],shortOutcomes:["positive","negative"],lastOutcomes:["positive","negative"]}
+  const windows = checkExecWindows({base:{long:[10],short:[4],last:[1]},main:{long:["none"],short:[4],last:[1]},real:signed,exec:signed})
+  const catalog = {strategyExecWindows:windows}
+  const plan = new ParentBranches(catalog,true)
+  const geometry = generateStrategyCatalog("test",settings.catalog)[0]
+  const [base] = plan.variants(geometry,undefined,"base")
+  const [main] = plan.variants(base,"normal","main")
+  const real = plan.variants(main,"normal","real")
+  const exec = real.flatMap(parent=>plan.variants(parent,"normal","exec"))
+  assert.equal(real.length,8)
+  assert.equal(new Set(exec.map(config=>config.id)).size,64)
+  assert.equal(exec.length,execPathCount(windows))
+  const restoredPlan=new ParentBranches(catalog,true)
+  assert.deepEqual(exec.map(config=>restoredPlan.restore(config,geometry,()=>true)),exec)
+
+  const returns = [-.05,...Array<number>(30).fill(-.02),...Array<number>(10).fill(.2)]
+  for(const stage of ["real","exec"] as const){
+    const configs=stage==="real"?real:plan.variants(real[0],"normal","exec")
+    const qualified=configs.filter(config=>evaluateBlocks(blockPrefix(returns),config.branch!.windows![stage]!,1.1).state==="qualified")
+    assert.equal(qualified.length,1)
+    const policy=qualified[0].branch!.windows![stage]!
+    assert.deepEqual(policy,execBlockPolicy(10,30,1,"negative","negative"))
+    assert.equal(evaluateBlocks(blockPrefix(returns.slice(0,-1)),policy,1.1).state,"insufficient")
+    assert.equal(evaluateBlocks(blockPrefix(returns),policy,4).state,"failed")
+  }
 })
 
 test("terminal holdout reports only the settled positions that fed a child", async () => {

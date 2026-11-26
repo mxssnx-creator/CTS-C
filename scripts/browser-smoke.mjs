@@ -119,9 +119,12 @@ try{
  await page.getByText('Independent Last-N Sets',{exact:true}).click()
  const execLong=page.getByRole('group',{name:/^Exec Long/})
  await execLong.getByRole('button',{name:'No Long',exact:true}).click()
- const execThirty=page.getByRole('button',{name:'30',exact:true})
- const execShort=page.getByRole('group',{name:/^Exec Short/}).filter({has:execThirty})
- await execShort.getByRole('button',{name:'30',exact:true}).click()
+ for(const stage of ['Real','Exec']){
+  const thirty=page.getByRole('button',{name:'30',exact:true})
+  const short=page.getByRole('group',{name:new RegExp(`^${stage} Short`)}).filter({has:thirty})
+  await short.getByRole('button',{name:'30',exact:true}).click()
+  await page.getByRole('group',{name:new RegExp(`^${stage} Short outcomes`)}).getByRole('button',{name:'negative',exact:true}).click()
+ }
  await page.getByRole('button',{name:'Prepare Signals preset',exact:true}).click()
  await page.getByLabel('Signals source configurations',{exact:true}).selectOption(['sig-ema-cross-s','sig-coord-v2-r80-n3-i3-bzikk5k'])
  await page.getByLabel('Signals gate return drawdown limit (pp; 0 = disabled)',{exact:true}).fill('2.5')
@@ -130,8 +133,13 @@ try{
  const signals=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
  assert.deepEqual(JSON.parse(signals.strategyIndicationTypes),['Signals'])
  assert.deepEqual(JSON.parse(signals.strategySignalsSources),['sig-ema-cross-s','sig-coord-v2-r80-n3-i3-bzikk5k'])
- assert.equal(signals.signalsMaxWindowDrawdownPct,'2.5');assert.equal(signals.stageGateMode,'exec-branches');assert.equal(signals.execMinPF,'1.15');assert.deepEqual(JSON.parse(signals.strategyExecWindows).exec.long,['inherit'])
- assert.deepEqual(JSON.parse(signals.strategyExecWindows).exec.short,[4,8,12,16,30])
+ assert.equal(signals.signalsMaxWindowDrawdownPct,'2.5');assert.equal(signals.stageGateMode,'exec-branches');assert.equal(signals.execMinPF,'1.15')
+ const savedWindows=JSON.parse(signals.strategyExecWindows)
+ assert.deepEqual(savedWindows.exec.long,['inherit'])
+ for(const stage of ['real','exec']){
+  assert.deepEqual(savedWindows[stage].short,[4,8,12,16,30])
+  assert.deepEqual(savedWindows[stage].shortOutcomes,['positive','negative'])
+ }
  assert.deepEqual([signals.strategyTrendDcaEnabled,signals.strategySarDcaEnabled],['true','true'])
  await page.getByLabel('Filter Signals sources',{exact:true}).fill('unmatched-no-source')
  assert.equal(await page.getByLabel('Signals source configurations',{exact:true}).locator('option').count(),2)

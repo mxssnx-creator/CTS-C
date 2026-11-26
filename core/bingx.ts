@@ -65,7 +65,16 @@ export type ClientOptions = {
   now?: () => number
   sleep?: (ms: number) => Promise<void>
   minRequestIntervalMs?: number
+  pacePublicMarket?: boolean
   timeoutMs?: number
+}
+
+const PRICE_TICKER_PATH = "/openApi/swap/v1/ticker/price"
+const KLINE_PATH = "/openApi/swap/v3/quote/klines"
+const PUBLIC_MARKET_INTERVAL_MS = 1050
+type RequestSchedule = { tail: Promise<void>; nextStart: number; interval: number }
+function requestSchedule(interval: number): RequestSchedule {
+  return {tail:Promise.resolve(),nextStart:0,interval}
 }
 
 type RecordValue = Record<string, unknown>
@@ -175,10 +184,9 @@ export class BingxClient {
   private readonly fetcher: typeof globalThis.fetch
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
-  private readonly interval: number
   private readonly timeout: number
-  private schedule: Promise<void> = Promise.resolve()
-  private nextStart = 0
+  private readonly schedule: RequestSchedule
+  private readonly publicMarketSchedules?: ReadonlyMap<string,RequestSchedule>
   private offset = 0
   private receiveWindow=5000
   private cooldowns=new Map<string,number>()
@@ -193,32 +201,46 @@ export class BingxClient {
     this.fetcher = options.fetch ?? globalThis.fetch
     this.now = options.now ?? Date.now
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
-    this.interval = options.minRequestIntervalMs ?? 210
+    const interval = options.minRequestIntervalMs ?? 210
+    this.schedule = requestSchedule(interval)
+    if(options.pacePublicMarket){
+      // Both endpoints document one request per second. A queued backfill must
+      // leave the ticker and the executor's authenticated traffic available.
+      const marketInterval=Math.max(interval,PUBLIC_MARKET_INTERVAL_MS)
+      this.publicMarketSchedules=new Map([PRICE_TICKER_PATH,KLINE_PATH].map(path=>[path,requestSchedule(marketInterval)]))
+    }
     this.timeout = options.timeoutMs ?? 15_000
-    if (this.interval < 0 || this.timeout <= 0) throw new Error("Invalid transport timing configuration")
+    if (interval < 0 || this.timeout <= 0) throw new Error("Invalid transport timing configuration")
   }
 
   get configured(): boolean { return !!(this.credentials?.apiKey && this.credentials?.apiSecret) }
   get environment(){return this.network==='vst'?'BingX VST':'BingX mainnet'}
 
-  private async reserveStart(): Promise<() => void> {
+  private async reserveStart(path: string): Promise<() => void> {
+    const schedule=this.publicMarketSchedules?.get(path)??this.schedule
     let release!: () => void
     const started = new Promise<void>((resolve) => { release = resolve })
-    const slot = this.schedule.then(async () => {
-      const wait = Math.max(0, this.nextStart - this.now())
+    const slot = schedule.tail.then(async () => {
+      const wait = Math.max(0, schedule.nextStart - this.now())
       if (wait) await this.sleep(wait)
-      this.nextStart = this.now() + this.interval
+      schedule.nextStart = this.now() + schedule.interval
       return release
     })
-    this.schedule = slot.then(() => started).catch(() => {})
+    schedule.tail = slot.then(() => started).catch(() => {})
     return slot
+  }
+
+  private checkCooldown(path: string) {
+    const blockedUntil=this.cooldowns.get(path)??0
+    if(blockedUntil>this.now())throw new VenueError('100410',`Exchange endpoint is cooling down until ${new Date(blockedUntil).toISOString()}`,0,false,blockedUntil)
   }
 
   private async request(path: string, params: Record<string, string | number | boolean> = {}, method: "GET" | "POST" | "DELETE" = "GET", authenticated = false, onStart?: (timestamp: number) => void, beforeWrite?: () => void): Promise<unknown> {
     if (authenticated && !this.configured) throw new VenueError("MISSING_CREDENTIALS", "Dedicated x02 credentials are unavailable", 0, false)
-    const blockedUntil=this.cooldowns.get(path)??0
-    if(blockedUntil>this.now())throw new VenueError('100410',`Exchange endpoint is cooling down until ${new Date(blockedUntil).toISOString()}`,0,false,blockedUntil)
-    const release = await this.reserveStart()
+    this.checkCooldown(path)
+    const release = await this.reserveStart(path)
+    try { this.checkCooldown(path) }
+    catch (error) { release(); throw error }
     try { beforeWrite?.(); onStart?.(this.now()) }
     catch (error) { release(); throw new WriteGuardError(error) }
     const query = authenticated
@@ -301,7 +323,7 @@ export class BingxClient {
   }
 
   async quotes(): Promise<Quote[]> {
-    return rows(await this.read("/openApi/swap/v1/ticker/price")).map((raw) => {
+    return rows(await this.read(PRICE_TICKER_PATH)).map((raw) => {
       const value = object(raw)
       return { symbol: text(value.symbol), price: number(value.price), timestamp: number(value.time ?? value.timestamp) }
     }).filter((quote) => quote.price > 0 && Number.isSafeInteger(quote.timestamp) && quote.timestamp > 0)
@@ -311,7 +333,7 @@ export class BingxClient {
     if (!["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"].includes(interval)) throw new Error("Unsupported candle interval")
     if (!Number.isInteger(limit) || limit < 1 || limit > 1440) throw new Error("Candle limit must be 1–1440")
     if (endTime !== undefined && (!Number.isSafeInteger(endTime) || endTime <= 0)) throw new Error("Candle end time must be a positive millisecond timestamp")
-    const data = await this.read("/openApi/swap/v3/quote/klines", { symbol: normalizeSymbol(symbol), interval, limit, ...(endTime === undefined ? {} : { endTime }) })
+    const data = await this.read(KLINE_PATH, { symbol: normalizeSymbol(symbol), interval, limit, ...(endTime === undefined ? {} : { endTime }) })
     return rows(data).map((raw) => {
       const value = object(raw)
       const row = rows(raw)

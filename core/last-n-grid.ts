@@ -10,7 +10,7 @@ export type ConfigLastN = Partial<Record<LegacyEvaluationStage, number>>
 
 export const EXEC_LONG_COUNTS = [10, 20, 30, 40, 50] as const
 const DEFAULT_SHORT_COUNTS = [4, 8, 12, 16] as const
-const EXEC_SHORT_COUNTS = [...DEFAULT_SHORT_COUNTS, 20, 24, 28, 30] as const
+const EXTENDED_SHORT_COUNTS = [...DEFAULT_SHORT_COUNTS, 20, 24, 28, 30] as const
 export const EXEC_LAST_COUNTS = [1, 2, 3, 4, 5] as const
 export const EXEC_LONG_MODES = ["none", "inherit"] as const
 export const EXEC_OUTCOMES = ["positive", "negative"] as const
@@ -24,7 +24,7 @@ const inherited = { ...shortLast, long: EXEC_LONG_MODES }
 export const DEFAULT_EXEC_WINDOWS: ExecWindows = { base: { ...shortLast, long: EXEC_LONG_COUNTS }, main: inherited, real: inherited, exec: inherited }
 
 export function stageShortCounts(stage: EvaluationStage): readonly number[] {
-  return stage === "exec" ? EXEC_SHORT_COUNTS : DEFAULT_SHORT_COUNTS
+  return stage === "real" || stage === "exec" ? EXTENDED_SHORT_COUNTS : DEFAULT_SHORT_COUNTS
 }
 
 export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindows {
@@ -52,12 +52,10 @@ export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindo
       ...(fields.shortOutcomes!==undefined&&{shortOutcomes:choices(fields.shortOutcomes,EXEC_OUTCOMES)}),
       ...(fields.lastOutcomes!==undefined&&{lastOutcomes:choices(fields.lastOutcomes,EXEC_OUTCOMES)}),
     }
-    const longestShort = short.findLast(n=>execShortOutcomes(windows,n).length)
-    if (longestShort === undefined) throw new Error(`Exec ${stage} needs a compatible Short size and outcome`)
     if (stage === "base") result.base = { ...windows, long: choices(fields.long, EXEC_LONG_COUNTS) }
     else result[stage] = { ...windows, long: choices(fields.long, EXEC_LONG_MODES) }
     const baseLong = stage === "base" || result[stage].long.includes("inherit") ? Math.max(...result.base.long) : 0
-    if (baseLong + longestShort + Math.max(...last) > maxSamples) throw new Error(`Exec ${stage} windows exceed retained samples`)
+    if (baseLong + Math.max(...short) + Math.max(...last) > maxSamples) throw new Error(`Exec ${stage} windows exceed retained samples`)
   }
   return result
 }
@@ -65,13 +63,8 @@ export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindo
 export function execPathCount(windows: ExecWindows): number {
   return EXEC_EVALUATION_STAGES.reduce((count, stage) => {
     const w = windows[stage]
-    return count * w.long.length * w.short.reduce((sum,n)=>sum+execShortOutcomes(w,n).length,0) * w.last.length * (w.lastOutcomes?.length ?? 1)
+    return count * w.long.length * w.short.length * (w.shortOutcomes?.length ?? 1) * w.last.length * (w.lastOutcomes?.length ?? 1)
   }, 1)
-}
-
-export function execShortOutcomes(windows: ShortLast, short: number): readonly Polarity[] {
-  const outcomes = windows.shortOutcomes ?? POSITIVE_EXEC_OUTCOME
-  return short <= 12 ? outcomes : outcomes.filter(outcome=>outcome==="positive")
 }
 
 export function execBlockPolicy(long: number, short: number, last: number, shortPolarity:Polarity="positive",minimalPolarity:Polarity="positive"): BlockPolicy {

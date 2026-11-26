@@ -49,7 +49,7 @@ const credentials=demoCredentials();if(!credentials)throw Error('Dedicated x02 c
 mkdirSync(output,{recursive:true,mode:0o700})
 const write=(name:string,data:unknown)=>{const file=join(output,name);writeFileSync(file+'.tmp',JSON.stringify(data,null,2),{mode:0o600});renameSync(file+'.tmp',file)}
 const log=(phase:string,data:unknown={})=>console.log(JSON.stringify({at:new Date().toISOString(),phase,...data as object}))
-const client=new BingxVstClient(credentials),tapes=JSON.parse(readFileSync(join(market,'manifest.json'),'utf8')) as {symbols:string[];datasets:{symbol:string;file:string;sha256:string}[]}
+const client=new BingxVstClient(credentials,{pacePublicMarket:true}),tapes=JSON.parse(readFileSync(join(market,'manifest.json'),'utf8')) as {symbols:string[];datasets:{symbol:string;file:string;sha256:string}[]}
 if(tapes.symbols.length<symbolCount||new Set(tapes.symbols).size!==tapes.symbols.length||
    tapes.datasets.length!==tapes.symbols.length||new Set(tapes.datasets.map(d=>d.symbol)).size!==tapes.datasets.length||
    tapes.datasets.some(d=>!tapes.symbols.includes(d.symbol)||d.file!==d.symbol+'.json'))
