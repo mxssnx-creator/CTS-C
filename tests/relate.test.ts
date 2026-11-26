@@ -2,8 +2,9 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 import { generateStrategyCatalog } from "../core/catalog"
 import { TradingEngine, validateEngineSettings } from "../core/engine"
-import { DEFAULT_RELATE, relateAllocation, relateDecision } from "../core/relate"
+import { DEFAULT_RELATE, relateAllocation, relateDecision, relateExecution } from "../core/relate"
 import type { Candle } from "../core/types"
+import type { RelateTrial } from "../shared/cts-relate/recovery"
 
 const catalog = {
   strategyEnabledRanges: ["Short"], strategyTpSteps: [12], strategySlRatios: [.5, 1],
@@ -52,6 +53,7 @@ test("Relate's Real allocation and exact Live mirror survive a checkpoint withou
   for (const lane of relationLanes) {
     lane.samples = Array.from({length:60}, (_, index) => index < 4 ? -.01 : 1)
     lane.sampleTimes = Array.from({length:60}, (_, i) => bars[249 - i].timestamp)
+    lane.relateTrials = Array.from({length:16}, (_, i) => [bars[244 - i].timestamp, 4, i % 4 === 0 ? -.1 : 1, 2])
   }
   const resumed = TradingEngine.fromSerialized(JSON.stringify(state))
   const seen = new Map<number, number>()
@@ -67,12 +69,12 @@ test("Relate's Real allocation and exact Live mirror survive a checkpoint withou
       const intent = resumed.pendingIntents().find(item => item.positionId === position.id && item.kind === "entry")
       assert.equal(intent?.entryAllocationRatio, position.notional / position.sizing!.baseBudget)
       const ratio = lane.config.slRatio!
-      if (ratio === 1 || position.notional > position.sizing!.baseBudget) seen.set(ratio, intent!.entryAllocationRatio!)
+      if (position.notional > position.sizing!.baseBudget) seen.set(ratio, intent!.entryAllocationRatio!)
     }
-    if (seen.size === 2) break
+    if (seen.size === 1) break
   }
   assert.equal(seen.get(.5), 2)
-  assert.equal(seen.get(1), 1)
+  assert.equal(seen.get(1), undefined)
 })
 test("Relate increases volume only when its own recent PF clears the disjoint Auto PF floor", () => {
   const settings = {...DEFAULT_RELATE,enabled:true,lastN:60,minTrades:60}
@@ -101,4 +103,23 @@ test("Relate Active leaves its first loss step in the internal tape and activate
   assert.deepEqual(relateDecision([-0.1, ...Array<number>(59).fill(1)], config, active), {multiplier: 1, active: false})
   assert.deepEqual(relateDecision([-0.1, -0.1, ...Array<number>(58).fill(1)], config, active), {multiplier: 1.44, active: true})
   assert.deepEqual(relateDecision([1, ...Array<number>(59).fill(1)], config, active), {multiplier: 1, active: false})
+})
+
+test("Execution needs two positive recovery cohorts at the same entry-time loss step", () => {
+  const [config] = generateStrategyCatalog("test", catalog)
+  const settings = {...policy, activeStep: 2, recoveryMinTrades: 6}
+  const samples = [-.1, -.1, ...Array<number>(58).fill(1)]
+  const good: RelateTrial[] = [[15,2,-.2,1.44],[14,2,1,1.44],[13,2,1,1.44],[12,2,1,1.44],[11,2,1,1.44],[10,2,-.2,1.44]]
+  const decide = (trials: RelateTrial[], before = 16, since = 10, stageMinPF = 1.25) =>
+    relateExecution(samples,config,settings,60,{trials,before,since,stageMinPF},() => undefined)
+  assert.equal(decide(good).multiplier,1.44)
+  assert.equal(decide(good).active,true)
+  assert.equal(decide(good,15).active,false, "the same-clock result is unavailable")
+  assert.equal(decide(good,16,11).active,false, "expired evidence stays out of the decision")
+  assert.equal(decide(good,16,10,11).active,false, "Exec uses its own required PF")
+  assert.equal(decide(good.map(([time, , value, size])=>[time,1,value,size])).active,false, "another step is not a substitute")
+  const losing: RelateTrial[] = good.map(([at,step,value,size]) => [at,step,at >= 13 ? -.2 : value,size])
+  assert.equal(decide(losing).active,false, "a profitable aggregate can hide a losing recent cohort")
+  const overstaked: RelateTrial[] = good.map(([at,step,value,size]) => [at,step,at === 15 ? -.9 : value,at === 15 ? 2 : size])
+  assert.equal(decide(overstaked).active,false, "oversizing losses exceeds the drawdown limit")
 })

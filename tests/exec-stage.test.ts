@@ -230,7 +230,9 @@ test("each enabled coordination and chosen Short size forms a separately qualifi
   const engine = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows},
     coordinations:{...defaults,axis:{...defaults.axis,previous:4,last:1,reference:"same-stage"},relate:{...defaults.relate!,enabled:true}}})
   const routes = new Set<string>()
+  const modeledRoutes = new Set<string>()
   engine.observeStageCloses(trade=>{
+    if (trade.stage === "exec") modeledRoutes.add(trade.laneId)
     if (!trade.executed || routes.has(trade.laneId)) return
     const proofs = [...trade.admission!,trade.executionProof!]
     assert.deepEqual(proofs.map(proof=>proof.stage),["base","main","real","exec"])
@@ -245,7 +247,9 @@ test("each enabled coordination and chosen Short size forms a separately qualifi
     const {ancestors,windows:blocks} = lane.config.branch!
     coordinates.add([...ancestors.map(parent=>parent.coordination),lane.coordination,blocks!.exec!.short].join("/"))
   }
-  assert.equal(coordinates.size,BRANCH_COORDINATIONS.length**4 * windows.exec.short.length)
+  assert.equal(modeledRoutes.size,BRANCH_COORDINATIONS.length**4 * windows.exec.short.length)
+  assert.equal(coordinates.size,BRANCH_COORDINATIONS.length**3 * (BRANCH_COORDINATIONS.length - 1) * windows.exec.short.length)
+  assert.ok([...routes].every(id=>lanes[id].coordination!=="relate"),"winning paths have no post-loss Relate evidence")
   assert.equal(coordinates.size,routes.size,"one independent Set for every window and coordination path")
 })
 

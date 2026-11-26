@@ -425,6 +425,7 @@ export class TerminalRuntime {
     const relateFields = {
       relateEnabled: "enabled", relateSteps: "steps", relateRatio: "ratio", relateLastN: "lastN",
       relateMinTrades: "minTrades", relateMinPF: "minPF", relateMaxMultiplier: "maxMultiplier", relateMaxSlRatio: "maxSlRatio", relateActiveStep: "activeStep",
+      relateRecoveryMinTrades: "recoveryMinTrades", relateRecoveryMaxDrawdownRatio: "recoveryMaxDrawdownRatio",
     } as const
     for(const [key,value] of Object.entries(input)) {
       if(key==='stageBlocks'){next.stageBlocks=structuredClone(value) as EngineSettings['stageBlocks'];continue}

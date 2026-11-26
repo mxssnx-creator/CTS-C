@@ -373,7 +373,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
           </section>
           {draft.relateEnabled === true && <section className="terminal-panel space-y-4 p-5">
             <h3 className="text-sm font-semibold">Relate allocation</h3>
-            <p className="terminal-muted text-xs">Each qualified Set can increase after a settled loss. A win or flat close resets the step. Relate Active keeps skipped positions in simulation and starts execution after the configured loss count.</p>
+            <p className="terminal-muted text-xs">A settled loss advances the Set’s recovery step. A win or flat close resets it. A step reaches execution after its own earlier and later trials both clear the PF and drawdown limits. Skipped positions continue in simulation.</p>
             <label className="grid gap-2 text-xs">Relation scope
               <select className="terminal-input" value={String(draft.relateScope ?? "set")} onChange={event => change("relateScope", event.target.value)}>
                 <option value="set">Exact Set</option><option value="overall">Overall · all relations</option>

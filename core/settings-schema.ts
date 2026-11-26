@@ -12,6 +12,7 @@ import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TI
 import { DEFAULT_STEP_AUTO } from "./step-evidence"
 import { DEFAULT_RELATE } from "./relate"
 import { RELATE_LABELS, RELATE_SOURCES } from "../shared/cts-relate/policy"
+import { DEFAULT_RELATE_RECOVERY_DRAWDOWN, DEFAULT_RELATE_RECOVERY_TRADES } from "../shared/cts-relate/recovery"
 import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
 import { MAX_WARMUP_CANDLES } from "./history"
@@ -48,6 +49,8 @@ export const DEFAULTS: Record<string, unknown> = {
   relateLastN: DEFAULT_RELATE.lastN, relateMinTrades: DEFAULT_RELATE.minTrades, relateMinPF: DEFAULT_RELATE.minPF,
   relateMaxMultiplier: DEFAULT_RELATE.maxMultiplier, relateMaxSlRatio: DEFAULT_RELATE.maxSlRatio,
   relateActiveStep: 0,
+  relateRecoveryMinTrades: DEFAULT_RELATE_RECOVERY_TRADES,
+  relateRecoveryMaxDrawdownRatio: DEFAULT_RELATE_RECOVERY_DRAWDOWN,
   relateScope: "set", ...Object.fromEntries(RELATE_SOURCES.map(source => [`relateFactor_${source}`, 1])),
   normalVolumeRatio: 1, axisVolumeRatio: 1, blockVolumeFactor: 1, dcaVolumeRatio: 1, relateVolumeRatio: 1, maxOrderNotional: 0,
   microTrailRatio: .5, microMinSlDistancePct: .1, microMinTrailDistancePct: .05, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
@@ -101,6 +104,8 @@ export const COORDINATION_FIELDS = [
   { key: "dcaAutoMinPF", label: "DCA Auto minimum add PF", min: 1.01, max: 10, step: .01 },
   { key: "relateSteps", label: "Relate maximum loss steps", min: 2, max: 15, step: 1 },
   { key: "relateActiveStep", label: "Relate Active positions to skip", min: 0, max: 6, step: 1 },
+  { key: "relateRecoveryMinTrades", label: "Minimum completed trials at the same loss step", min: 6, max: 250, step: 1 },
+  { key: "relateRecoveryMaxDrawdownRatio", label: "Maximum recovery drawdown / gross profit", min: .01, max: 1, step: .01 },
   { key: "relateRatio", label: "Relate increase per step", min: .2, max: 6, step: .2 },
   { key: "relateLastN", label: "Relate recent samples", min: 60, max: 250, step: 1 },
   { key: "relateMinTrades", label: "Relate minimum samples", min: 60, max: 250, step: 1 },
@@ -190,7 +195,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if (!Object.prototype.hasOwnProperty.call(values, key)) {
       if (partial) continue
       if (key === "strategyStageCoordinations") { output[key] = {}; continue }
-      if (key === "relateScope" || key === "relateActiveStep" || key.startsWith("relateFactor_")) { output[key] = DEFAULTS[key]; continue }
+      if (key === "relateScope" || key === "relateActiveStep" || key.startsWith("relateFactor_") || key.startsWith("relateRecovery")) { output[key] = DEFAULTS[key]; continue }
       if (key === "strategyExecWindows" || key === "execMinPF" || key === "strategyCoreSignalPeriods" || EXEC_PROFILES.some(profile=>profile.setting===key)) { output[key] = structuredClone(DEFAULTS[key]); continue }
       if (Object.hasOwn(AUTO_PF_DEFAULTS,key)) {
         output[key] = key === "autoPfMode" && values.autoPfEnabled === true ? "tp-distance" : DEFAULTS[key]
@@ -248,6 +253,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     ["Block Auto", output.blockAutoMinSamples, output.blockAutoLastN],
     ["DCA Auto", output.dcaAutoMinSamples, output.dcaAutoLastN],
     ["Relate", output.relateMinTrades, output.relateLastN],
+    ["Relate recovery", output.relateRecoveryMinTrades, output.relateLastN],
   ]) {
     if (typeof minimum === "number" && typeof window === "number" && minimum > window) {
       throw new Error(`${label} minimum observations cannot exceed its recent observation window.`)
@@ -302,6 +308,8 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
     dcaAutoEnabled:dcaAuto.enabled,dcaAutoLastN:dcaAuto.lastN,dcaAutoMinSamples:dcaAuto.minSamples,dcaAutoMinPF:dcaAuto.minPF,
     relateEnabled:relate.enabled,relateSteps:relate.steps,relateRatio:relate.ratio,relateLastN:relate.lastN,relateMinTrades:relate.minTrades,
     relateMinPF:relate.minPF,relateMaxMultiplier:relate.maxMultiplier,relateMaxSlRatio:relate.maxSlRatio,relateScope:relate.scope??"set",relateActiveStep:relate.activeStep??0,
+    relateRecoveryMinTrades:relate.recoveryMinTrades??DEFAULT_RELATE_RECOVERY_TRADES,
+    relateRecoveryMaxDrawdownRatio:relate.recoveryMaxDrawdownRatio??DEFAULT_RELATE_RECOVERY_DRAWDOWN,
     ...Object.fromEntries(RELATE_SOURCES.map(source => [`relateFactor_${source}`, relate.volumeFactors?.[source] ?? 1]))}
 }
 

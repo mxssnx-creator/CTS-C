@@ -2,8 +2,10 @@ import {blockPrefix,blockRequired,blockPolicyKey,checkBlockPolicy,evaluateBlocks
 import {blockRoundBudget,settleBlockRound,consumeBlockPause} from "./block-rounds"
 import { checkBlockPyramidAdd, settleBlockSteps } from "./block-auto"
 import { validateStepAuto } from "./step-evidence"
-import { DEFAULT_RELATE, relateDecision } from "./relate"
-import { RELATE_SOURCES, relateKeys, relateLossLevel } from "../shared/cts-relate/policy"
+import { DEFAULT_RELATE, relateExecution, type RelateEvidence } from "./relate"
+import { RELATE_SOURCES, relateKeys } from "../shared/cts-relate/policy"
+import type { RelateTrial } from "../shared/cts-relate/recovery"
+import { DEFAULT_RELATE_RECOVERY_DRAWDOWN, DEFAULT_RELATE_RECOVERY_TRADES } from "../shared/cts-relate/recovery"
 import { dcaStepVerdict, observeDcaStep, settleDcaSteps, validateDcaAuto } from "./dca-auto"
 import {normalizedVolumeFactor,relationalVolumeSettings,SYSTEM_VOLUME_DIVISOR} from "../shared/cts-volume/ratios";
 import { strategyProcessing } from "./strategy-processing"
@@ -146,6 +148,8 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   finite(relate.lastN, "Relate recent samples", 60, 250, true)
   finite(relate.minTrades, "Relate minimum samples", 60, relate.lastN, true)
   finite(relate.minPF, "Relate minimum PF", 1.01, 100)
+  finite(relate.recoveryMinTrades ?? DEFAULT_RELATE_RECOVERY_TRADES, "Relate recovery closes", 6, relate.lastN, true)
+  finite(relate.recoveryMaxDrawdownRatio ?? DEFAULT_RELATE_RECOVERY_DRAWDOWN, "Relate recovery drawdown ratio", .01, 1)
   finite(relate.maxMultiplier, "Relate maximum multiplier", 1, 8)
   finite(relate.maxSlRatio, "Relate maximum SL-to-TP ratio", .01, .5)
   if (relate.scope !== undefined && relate.scope !== "set" && relate.scope !== "overall") throw new Error("Invalid Relate scope")
@@ -165,6 +169,8 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   }
   if (relate.scope === "set") delete relate.scope
   if (relate.activeStep === 0) delete relate.activeStep
+  if (relate.recoveryMinTrades === DEFAULT_RELATE_RECOVERY_TRADES) delete relate.recoveryMinTrades
+  if (relate.recoveryMaxDrawdownRatio === DEFAULT_RELATE_RECOVERY_DRAWDOWN) delete relate.recoveryMaxDrawdownRatio
   if (relate.enabled && relate.lastN > settings.maxSamples) throw new Error("Relate window exceeds retained samples")
   for (const enabled of [axis.enabled, block.enabled, dca.enabled, relate.enabled]) if (typeof enabled !== "boolean") throw new Error("Coordination enabled must be boolean")
   generateEngineCatalog(settings)
@@ -461,6 +467,7 @@ export class TradingEngine {
   isLiveIntentEligible(positionId:string,before=Infinity):boolean {
     const lane=this.livePositions.get(positionId)
     if(!lane?.open?.executionEligible||lane.open.relateActiveSkipped||!this.currentLane(lane)||!this.processingAllows(lane))return false
+    if (lane.coordination === "relate" && !lane.open.relateTrial) return false
     if (lane.config.branch?.windows) {
       const exec = this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,"exec")
       const {open} = lane
@@ -487,13 +494,13 @@ export class TradingEngine {
     this.profileDcaEconomicsId = hashId(JSON.stringify(budgetKey("dca",PROFILE_DCA_SIZING)))
     const oldRelate = this.coordinationIds.relate
     for (const coordination of COORDINATIONS) {
-      let parameters: (typeof s.coordinations)[keyof typeof s.coordinations] | {progression: "losses"} | null =
+      let parameters: (typeof s.coordinations)[keyof typeof s.coordinations] | {progression: "loss-recovery"} | null =
         coordination === "normal" ? null : s.coordinations[coordination]
       if (parameters && "auto" in parameters && !parameters.auto?.enabled) {
         const { auto: _auto, ...manual } = parameters
         parameters = manual
       }
-      if (coordination === "relate" && s.coordinations.relate?.enabled) parameters = { ...s.coordinations.relate, progression: "losses" }
+      if (coordination === "relate" && s.coordinations.relate?.enabled) parameters = { ...s.coordinations.relate, progression: "loss-recovery" }
       this.economicsIds[coordination] = hashId(JSON.stringify(budgetKey(coordination,parameters)))
       this.coordinationIds[coordination] = hashId(JSON.stringify([s.baseNotional, s.volumeFactor,s.volumeRatios?.[coordination]??1,coordination==='axis'?s.volumeRatios?.normal:undefined,s.maxOrderNotional??0, parameters, s.stageLastN, s.stageMinPF,...(s.stageBlocks&&Object.keys(s.stageBlocks).length?[s.stageBlocks]:[])]))
       this.processedCoordinationIds[coordination]=hashId(this.coordinationIds[coordination]+':processed-sets-v1')
@@ -624,12 +631,33 @@ export class TradingEngine {
     }
     return keys
   }
+  private nextRelate(lane: LaneState, before: number) {
+    const policy = this.state.settings.coordinations.relate!
+    const evidence = this.contextEvidence(lane, before)
+    const times = lane.sampleTimes ?? []
+    const timed = evidence.timedSampleCount ?? times.length
+    const since = timed === 0 ? before : times[times.length - timed + Math.min(timed, policy.lastN) - 1]
+    return relateExecution(evidence.samples,lane.config,policy,timed,{
+      trials: lane.relateTrials ?? [], before, since,
+      stageMinPF: this.stageWindowPolicy(lane.config, lane.stage === "live" ? this.finalGate : lane.stage).minPF,
+    }, source => {
+      const rows = this.state.relateWindows?.[this.relateKeysFor(lane)[source]]
+      if (!rows) return undefined
+      const samples: number[] = [], trials: RelateTrial[] = []
+      for (const [at, value, , receipt] of rows) {
+        if (at >= before) continue
+        samples.push(value)
+        if (receipt) trials.push([at, receipt.step, value, receipt.size])
+        if (samples.length === policy.lastN) break
+      }
+      return {samples, trials} satisfies RelateEvidence
+    })
+  }
   private settleRelateRelations(lane: LaneState, at: number, value: number): void {
     const policy = this.state.settings.coordinations.relate
     if (!policy?.enabled || policy.scope !== "overall" || lane.coordination !== "relate" || lane.stage === "base" || !this.currentLane(lane)) return
     const keys = this.relateKeysFor(lane)
     const windows = this.state.relateWindows ??= {}
-    const row: [number, number, string] = [at, value, lane.id]
     for (const source of RELATE_SOURCES) {
       if (source === "config" || (policy.volumeFactors?.[source] ?? 1) === 0) continue
       const samples = windows[keys[source]] ??= []
@@ -641,7 +669,8 @@ export class TradingEngine {
         if (time > at || (time === at && id < lane.id)) lo = mid + 1
         else hi = mid
       }
-      samples.splice(lo, 0, row)
+      const receipt = lane.open?.relateRelationTrials?.[source]
+      samples.splice(lo, 0, receipt ? [at, value, lane.id, receipt] : [at, value, lane.id])
       if (samples.length > policy.lastN * 2) samples.length = policy.lastN * 2
     }
   }
@@ -783,27 +812,16 @@ export class TradingEngine {
     }
     if(admission?.some(proof=>!proof.qualified))throw new Error('Cannot admit a trade without its own qualified parent evidence')
     const total = s.baseNotional * (s.volumeFactor / SYSTEM_VOLUME_DIVISOR)*(s.volumeRatios?.[lane.coordination]??1)*this.laneVolumeFactor(lane.coordination,lane.config,lane.symbol)
-    const relateEvidence = lane.coordination === "relate" && lane.stage !== "base" && !mirror
-      ? this.contextEvidence(lane,candle.timestamp) : undefined
-    const relatePolicy = s.coordinations.relate!
-    const relate = relateEvidence ? relateDecision(relateEvidence.samples,lane.config,relatePolicy,
-      relateEvidence.timedSampleCount ?? relateEvidence.sampleTimes?.length, source => {
-        const rows = this.state.relateWindows?.[this.relateKeysFor(lane)[source]]
-        if (!rows) return null
-        const samples: number[] = []
-        for (const [at, value] of rows) {
-          if (at >= candle.timestamp) continue
-          samples.push(value)
-          if (samples.length === relatePolicy.lastN) break
-        }
-        return relateLossLevel(samples, relatePolicy)
-      }) : undefined
+    const relate = lane.coordination === "relate" && lane.stage !== "base" && !mirror
+      ? this.nextRelate(lane,candle.timestamp) : undefined
     const notional = lane.coordination !== "block" ? total * (relate?.multiplier ?? 1) : block.behavior==="rounds" ? total*blockRoundBudget(lane,block) : block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
     const quantity = notional / candle.close
     const dca = lane.config.execProfile ? PROFILE_DCA_SIZING : s.coordinations.dca
     const exitMode = lane.config.exitMode ?? (lane.config.trailing ? "trailing" : "fixed")
     const position: PaperPosition = {
       ...(relate?.active === false ? {relateActiveSkipped: true} : {}),
+      ...(relate?.trial && {relateTrial: relate.trial}),
+      ...(relate?.relationTrials && {relateRelationTrials: relate.relationTrials}),
       id: `${lane.id}@${candle.timestamp}`, activationOrder:++this.state.nextActivationOrder!,openedAt: candle.timestamp, direction: lane.direction,...(admission?{admission}:{}),
       fills: [{ price: candle.close, quantity, timestamp: candle.timestamp, kind: "entry" }], quantity,
       sizing: { baseBudget: total, block: s.coordinations.block, dca },
@@ -825,6 +843,7 @@ export class TradingEngine {
       position.fills=mirror.fills.map(fill=>({...fill}));position.quantity=mirror.quantity
       position.notional=mirror.notional;position.entryPrice=mirror.entryPrice;position.sizing=mirror.sizing
       if (mirror.relateActiveSkipped) position.relateActiveSkipped = true
+      if (mirror.relateTrial) position.relateTrial = mirror.relateTrial
     }
     lane.open = position; lane.lastTimestamp = candle.timestamp; lane.admittedAt ??= candle.timestamp; lane.admissionCount++
     this.activate(lane)
@@ -841,12 +860,19 @@ export class TradingEngine {
       openedAt: open.openedAt, closedAt: candle.timestamp, entryPrice: open.entryPrice, exitPrice: candle.close,
       quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.executed?{executed:true}:{}),...(open.executionProof?{executionProof:open.executionProof}:{}),...(open.progressionProof?{progressionProof:open.progressionProof}:{}),...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
     if (open.relateActiveSkipped) trade.relateActiveSkipped = true
+    if (open.relateTrial) trade.relateTrial = open.relateTrial
     if (lane.coordination === "block") {
       if (open.sizing?.block.behavior === "rounds" && !(this.processedSets && lane.stage === "live")) settleBlockRound(lane, netPnl, open.sizing.block)
       settleBlockSteps(lane, open, candle.close, netReturnPct)
     }
     if (lane.coordination === "dca") settleDcaSteps(lane, open, candle.close)
     this.recordSample(lane,netReturnPct,candle.timestamp)
+    if (open.relateTrial && (lane.stage !== "live" || !open.parentPositionId) && this.currentLane(lane)) {
+      const trials = lane.relateTrials ??= []
+      trials.unshift([candle.timestamp, open.relateTrial.step, Number.isFinite(netReturnPct) ? netReturnPct : null, open.relateTrial.size])
+      const retention = this.state.settings.coordinations.relate!.lastN + 1
+      if (trials.length > retention) trials.length = retention
+    }
     this.settleRelateRelations(lane,candle.timestamp,netReturnPct)
     this.configWindows.settled(lane,candle.timestamp)
     lane.closedCount++; lane.wins += netPnl > 0 ? 1 : 0; lane.netPnl += netPnl
@@ -857,7 +883,7 @@ export class TradingEngine {
       (!lane.config.branch?.windows||p.count===p.required&&p.checkedAt===open.openedAt))){
       lane.admittedClosed=(lane.admittedClosed??0)+1;lane.admittedProfit=(lane.admittedProfit??0)+Math.max(0,netReturnPct);lane.admittedLoss=(lane.admittedLoss??0)+Math.max(0,-netReturnPct);lane.admittedNetPnl=(lane.admittedNetPnl??0)+netPnl
     }
-    if ((lane.stage === "exec" && open.executed) || open.progressionProof) {
+    if (!open.relateActiveSkipped && ((lane.stage === "exec" && open.executed) || open.progressionProof)) {
       const ledger = lane.stage === "exec" ? "executed" : "postStage"
       const cohort = lane[ledger] ??= { closed: 0, profit: 0, loss: 0, netPnl: 0 }
       cohort.closed++

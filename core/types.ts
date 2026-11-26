@@ -65,6 +65,8 @@ export interface RelateSettings {
   maxMultiplier: number
   maxSlRatio: number
   activeStep?: number
+  recoveryMinTrades?: number
+  recoveryMaxDrawdownRatio?: number
   scope?: import("../shared/cts-relate/policy").RelateScope
   volumeFactors?: import("../shared/cts-relate/policy").RelateVolumeFactors
 }
@@ -82,6 +84,8 @@ export interface PaperPosition {
   activationOrder?:number
   executionEligible?: boolean
   relateActiveSkipped?: true
+  relateTrial?: {step: number; size: number}
+  relateRelationTrials?: import("./relate").RelateRelationTrials
   /** This Exec entry passed its own completed-position gate at the entry clock. */
   executed?: boolean
   executionProof?: GateProof
@@ -106,6 +110,7 @@ export interface ClosedTrade {
   grossPnl: number; cost: number; netPnl: number; netReturnPct: number; reason: string; fills: EntryFill[]
   source: "paper"
   relateActiveSkipped?: true
+  relateTrial?: PaperPosition["relateTrial"]
   executed?: boolean
   executionProof?: GateProof
   progressionProof?: GateProof
@@ -125,6 +130,7 @@ export interface LaneState {
   config: StrategyConfig; samples: number[]; closedCount: number; wins: number; netPnl: number; grossProfit: number; grossLoss: number
   /** Timestamped prefix of samples. Older checkpoints may have exact-lane returns only. */
   sampleTimes?: number[]
+  relateTrials?: import("../shared/cts-relate/recovery").RelateTrial[]
   /** Upper bound for the untimed suffix of samples restored from an older checkpoint. */
   untimedSamplesThrough?: number
   open?: PaperPosition; admittedAt?: number; lastTimestamp: number; admissionCount: number
@@ -168,7 +174,8 @@ export interface EngineState {
   lastMicroTimestamp?: Record<string, number>;
   lastTimestamp: Record<string, number>; recentTrades: ClosedTrade[]; intents: ExecutionIntent[]
   recentLiveTrades?: ClosedTrade[]
-  relateWindows?: Record<string, [closedAt: number, netReturnPct: number, laneId: string][]>
+  relateWindows?: Record<string, [closedAt: number, netReturnPct: number, laneId: string,
+    trial?: import("./relate").RelateTrialStamp][]>
   nextActivationOrder?:number
   processedCandles: number; startedAt: number; updatedAt: number; equity: number; peakEquity: number; maxDrawdownPct: number
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]
