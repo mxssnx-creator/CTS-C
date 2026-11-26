@@ -82,6 +82,9 @@ type ForwardMetrics = Omit<SettledCohort,"profit"|"loss"> & {open:number;profitF
 export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   activationOrder?:number
+  /** Continues an established Set's model while a fresh parent gate is unavailable. */
+  trainingOnly?: true
+  trainingMarkedAt?: number
   executionEligible?: boolean
   relateActiveSkipped?: true
   relateTrial?: {step: number; size: number}
@@ -109,6 +112,7 @@ export interface ClosedTrade {
   openedAt: number; closedAt: number; entryPrice: number; exitPrice: number; quantity: number; notional: number
   grossPnl: number; cost: number; netPnl: number; netReturnPct: number; reason: string; fills: EntryFill[]
   source: "paper"
+  trainingOnly?: true
   relateActiveSkipped?: true
   relateTrial?: PaperPosition["relateTrial"]
   executed?: boolean
@@ -137,6 +141,7 @@ export interface LaneState {
   costTotal?: number
   admittedClosed?:number;admittedProfit?:number;admittedLoss?:number;admittedNetPnl?:number
   executed?: SettledCohort
+  trainingOnlyClosed?: number
   postStage?: SettledCohort
   parentProof?:GateProof[]
 }
@@ -181,6 +186,7 @@ export interface EngineState {
   equityHistory: { timestamp: number; equity: number; drawdownPct: number }[]
 }
 export interface StageMetrics { stage: Stage; lanes: number; open: number; closed: number; enoughSamples: number; enoughSamplesPct: number; qualified: number; profitFactor: number; pfState: ProfitFactorState; netPnl: number; wins:number; fees:number|null; longOpen:number; shortOpen:number; currentLanes:number; currentEnoughSamples:number; currentQualified:number; admissionReady:number; blockedByParent:number; currentProfitFactor:number|null; currentPfState:ProfitFactorState
+  trainingOnlyClosed?: number
   baseCandidates?:{observed:number;enoughSamples:number}
   autoPf?:{historySets:number;fallbackSets:number;minThreshold:number;maxThreshold:number}
   validatedWindow?:{samples:number;sets:number;profitFactor:number;pfState:ProfitFactorState;profit?:number;loss?:number}

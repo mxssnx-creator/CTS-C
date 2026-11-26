@@ -58,9 +58,9 @@ test("positive and negative outcomes make independent paths and preserve the ful
   const plan = new ParentBranches({strategyExecWindows:windows},true)
   const config = generateStrategyCatalog("test",settings.catalog)[0]
   const base = plan.variants(config,undefined,"base")
-  assert.equal(base.length,6)
-  assert.equal(new Set(base.map(lane=>lane.id)).size,6)
-  assert.equal(base.filter(lane=>lane.branch?.windows?.base?.shortPolarity==="negative").length,2)
+  assert.equal(base.length,8)
+  assert.equal(new Set(base.map(lane=>lane.id)).size,8)
+  assert.equal(base.filter(lane=>lane.branch?.windows?.base?.shortPolarity==="negative").length,4)
   const parent = base.find(lane=>lane.branch?.windows?.base?.minimalPolarity==="negative")!
   const next = plan.variants(parent,"normal","main")
   assert.equal(next.length,8)
@@ -138,16 +138,19 @@ test("fresh parent entries fund independent child Sets and Exec mirrors without 
   } finally { db.close() }
 })
 
-test("only Exec can select Short up to 30 and each width uses its own complete window", () => {
+test("Real and Exec accept independent signed Short windows up to 30", () => {
   const initial = checkExecWindows(settings.catalog!.strategyExecWindows)
   const exec = {...initial.exec,short:[30,20,28,24]}
   const windows = checkExecWindows({...initial,exec})
   assert.deepEqual(windows.exec.short,[20,24,28,30])
-  assert.throws(()=>checkExecWindows({real:{short:[30]}}),/distinct Exec window choices/)
+  const real = checkExecWindows({real:{short:[30],shortOutcomes:["negative"]}}).real
+  assert.deepEqual(real.short,[30])
+  assert.deepEqual(real.shortOutcomes,["negative"])
+  assert.throws(()=>checkExecWindows({main:{short:[30]}}),/distinct Exec window choices/)
   assert.throws(()=>checkExecWindows({...initial,exec:{...exec,short:[31]}}),/distinct Exec window choices/)
   assert.throws(()=>checkExecWindows({...initial,exec},50),/exceed retained/)
   const minimal = {long:["none"],short:[4,30],last:[1],shortOutcomes:["negative"]}
-  assert.doesNotThrow(()=>checkExecWindows({...initial,exec:minimal},25))
+  assert.throws(()=>checkExecWindows({...initial,exec:minimal},25),/exceed retained/)
   const engine = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows}})
   const traded:ClosedTrade[]=[]
   engine.observeStageCloses(trade=>{if(trade.executed) traded.push(trade)})
@@ -272,6 +275,25 @@ test("each stage's own PF can independently stop the next stage entry", () => {
       // Last is positive and the Short block has positive net return but only PF 1.05.
       lane.samples = lane.samples.map((_,i)=>[.1,1.03,-1,.01,.01][i]??.2)
     }
-    assert.deepEqual(openedStages(TradingEngine.fromOwnedCheckpoint(partial)),stages.slice(0,depth+1),stage)
+    const replay = TradingEngine.fromOwnedCheckpoint(partial)
+    assert.deepEqual(openedStages(replay),stages.slice(0,depth+1),stage)
+    if (stage === "exec") continue
+    const stateAfterEntry = replay.exportState()
+    const child = Object.values(stateAfterEntry.lanes).find(lane => lane.stage === stages[depth+1] && lane.open?.trainingOnly)
+    assert.ok(child?.open, `${stage}: the established child continues its own paper calculation`)
+    assert.equal(child.open.admission,undefined)
+    assert.equal(child.open.executionEligible,undefined)
+    assert.equal(child.open.executed,undefined)
+    const {id,trainingOnlyClosed} = child
+    const trainingId = child.open.id
+    let modeled: ClosedTrade | undefined
+    const restarted = TradingEngine.fromOwnedCheckpoint(stateAfterEntry)
+    restarted.observeStageCloses(row=>{if(row.id===trainingId) modeled=row})
+    restarted.processCandles(symbol,bars.slice(index+1,index+10),{eventLimit:0})
+    assert.ok(modeled?.trainingOnly)
+    assert.equal(modeled?.progressionProof,undefined)
+    const settledLane = restarted.exportState().lanes[id]
+    assert.ok(settledLane.trainingOnlyClosed! > (trainingOnlyClosed ?? 0))
+    assert.ok(!settledLane.sampleTimes?.includes(modeled!.closedAt),"a preview close cannot qualify a later stage")
   }
 })

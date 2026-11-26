@@ -460,7 +460,7 @@ export class TradingEngine {
       } else if (!this.signalsBySymbol.get(lane.symbol)?.catalog.configIds.has(lane.configId)) continue
       if (lane.id !== laneKey(s.connectionId,lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage,this.coordinationIdentity(lane.coordination,lane.stage,lane.config,lane.symbol))) continue
       this.cacheLane(lane)
-      if (this.branches && !this.branches.exec && lane.parentProof && lane.stage !== "live") this.registerChild(lane)
+      if (this.branches && lane.parentProof && lane.stage !== "live") this.registerChild(lane)
     }
   }
   /** Rechecked after asynchronous exchange preflight, immediately before a new risk write. */
@@ -786,7 +786,7 @@ export class TradingEngine {
   private gateProof(lane: LaneState | undefined, stage: EvaluationStage, checkedAt: number, proof = this.stageWindow(lane, stage, checkedAt)): GateProof {
     return {stage,laneId:lane?.id??"",count:proof.count,required:proof.required,minPF:proof.minPF,profitFactor:proof.profitFactor,pfState:proof.pfState,qualified:proof.qualified,checkedAt,...(proof.maxDrawdownPct!==undefined?{drawdownPct:proof.drawdownPct,maxDrawdownPct:proof.maxDrawdownPct}:{}),...(proof.blockPolicyKey?{blockPolicyKey:proof.blockPolicyKey}:{}),...(proof.windowScope?{windowScope:proof.windowScope}:{}),...(proof.configWindow?{configWindow:{...proof.configWindow}}:{}),...(proof.autoPf?{autoPf:proof.autoPf}:{})}
   }
-  private open(lane: LaneState, candle: Candle, mirror?:PaperPosition, entryProof?:GateProof[]): PaperPosition {
+  private open(lane: LaneState, candle: Candle, mirror?:PaperPosition, entryProof?:GateProof[], trainingOnly?:true): PaperPosition {
     this.dirtyLaneIds.add(lane.id)
     const s = this.state.settings, block = s.coordinations.block
     const proof=(stage:EvaluationStage)=>this.gateProof(this.cachedLane(lane.symbol,lane.configId,lane.direction,lane.coordination,stage),stage,candle.timestamp)
@@ -798,7 +798,7 @@ export class TradingEngine {
         lane.parentProof = [...(parent.parentProof ?? []), direct]
       }
       if (!this.validLineage(lane)) throw new Error("Exec Set lineage does not match its own parent")
-    } else if(lane.stage!=='base'){
+    } else if (!trainingOnly && lane.stage!=='base'){
       const depth = LEGACY_STAGES.indexOf(lane.stage as typeof LEGACY_STAGES[number])
       if(this.processedSets){
         if(lane.stage==='live'||!lane.parentProof){
@@ -812,13 +812,14 @@ export class TradingEngine {
     }
     if(admission?.some(proof=>!proof.qualified))throw new Error('Cannot admit a trade without its own qualified parent evidence')
     const total = s.baseNotional * (s.volumeFactor / SYSTEM_VOLUME_DIVISOR)*(s.volumeRatios?.[lane.coordination]??1)*this.laneVolumeFactor(lane.coordination,lane.config,lane.symbol)
-    const relate = lane.coordination === "relate" && lane.stage !== "base" && !mirror
+    const relate = !trainingOnly && lane.coordination === "relate" && lane.stage !== "base" && !mirror
       ? this.nextRelate(lane,candle.timestamp) : undefined
     const notional = lane.coordination !== "block" ? total * (relate?.multiplier ?? 1) : block.behavior==="rounds" ? total*blockRoundBudget(lane,block) : block.mode === "shared" ? total / (1 + block.steps * block.ratio) : total
     const quantity = notional / candle.close
     const dca = lane.config.execProfile ? PROFILE_DCA_SIZING : s.coordinations.dca
     const exitMode = lane.config.exitMode ?? (lane.config.trailing ? "trailing" : "fixed")
     const position: PaperPosition = {
+      ...(trainingOnly && {trainingOnly}),
       ...(relate?.active === false ? {relateActiveSkipped: true} : {}),
       ...(relate?.trial && {relateTrial: relate.trial}),
       ...(relate?.relationTrials && {relateRelationTrials: relate.relationTrials}),
@@ -845,7 +846,8 @@ export class TradingEngine {
       if (mirror.relateActiveSkipped) position.relateActiveSkipped = true
       if (mirror.relateTrial) position.relateTrial = mirror.relateTrial
     }
-    lane.open = position; lane.lastTimestamp = candle.timestamp; lane.admittedAt ??= candle.timestamp; lane.admissionCount++
+    lane.open = position
+    if (!trainingOnly) { lane.lastTimestamp = candle.timestamp; lane.admittedAt ??= candle.timestamp; lane.admissionCount++ }
     this.activate(lane)
     return position
   }
@@ -860,6 +862,14 @@ export class TradingEngine {
       openedAt: open.openedAt, closedAt: candle.timestamp, entryPrice: open.entryPrice, exitPrice: candle.close,
       quantity: open.quantity, notional: open.notional, grossPnl, cost, netPnl, netReturnPct, reason, fills: open.fills.map(f=>({...f})), source: "paper",...(open.executed?{executed:true}:{}),...(open.executionProof?{executionProof:open.executionProof}:{}),...(open.progressionProof?{progressionProof:open.progressionProof}:{}),...(open.admission?{admission:open.admission.map(p=>({...p}))}:{}),...(open.parentPositionId?{parentPositionId:open.parentPositionId}:{}) }
     if (open.relateActiveSkipped) trade.relateActiveSkipped = true
+    lane.open = undefined; this.active.get(lane.symbol)?.delete(lane.id)
+    this.activeMicro.get(lane.symbol)?.delete(lane.id);this.activeMinute.get(lane.symbol)?.delete(lane.id)
+    if (open.trainingOnly) {
+      trade.trainingOnly = true
+      lane.trainingOnlyClosed = (lane.trainingOnlyClosed ?? 0) + 1
+      if (!lane.calculationOnly) this.stageCloseObserver?.(trade)
+      return trade
+    }
     if (open.relateTrial) trade.relateTrial = open.relateTrial
     if (lane.coordination === "block") {
       if (open.sizing?.block.behavior === "rounds" && !(this.processedSets && lane.stage === "live")) settleBlockRound(lane, netPnl, open.sizing.block)
@@ -891,8 +901,6 @@ export class TradingEngine {
       cohort.loss += Math.max(0, -netReturnPct)
       cohort.netPnl += netPnl
     }
-    lane.open = undefined; this.active.get(lane.symbol)?.delete(lane.id)
-    this.activeMicro.get(lane.symbol)?.delete(lane.id);this.activeMinute.get(lane.symbol)?.delete(lane.id)
     if (!lane.calculationOnly) { this.state.recentTrades.unshift(trade); this.state.recentTrades.length = Math.min(this.state.recentTrades.length, this.maxRecentTrades) }
     if (lane.stage === "live") this.livePositions.delete(open.id)
     if (lane.stage === "live" && !lane.calculationOnly && !open.relateActiveSkipped) {
@@ -909,9 +917,12 @@ export class TradingEngine {
   }
   private mark(lane: LaneState, candle: Candle, ordered=false): EngineEvent | undefined {
     const open = lane.open
-    if (!open || candle.timestamp<open.openedAt || (!ordered&&candle.timestamp===open.openedAt) || candle.timestamp<lane.lastTimestamp || (!ordered&&candle.timestamp===lane.lastTimestamp)) return
+    if (!open) return
+    const lastMark = open.trainingOnly ? open.trainingMarkedAt ?? open.openedAt : Math.max(open.openedAt,lane.lastTimestamp)
+    if (candle.timestamp<lastMark || (!ordered&&candle.timestamp===lastMark)) return
     this.dirtyLaneIds.add(lane.id)
-    lane.lastTimestamp = candle.timestamp
+    if (open.trainingOnly) open.trainingMarkedAt = candle.timestamp
+    else lane.lastTimestamp = candle.timestamp
     const sign = lane.direction === "long" ? 1 : -1
     const acceptedExec = open.executed || lane.stage === "live" && lane.config.branch?.windows
     const trailingEnabled = Boolean(acceptedExec) || strategyProcessing(this.state.settings.catalog,lane.config).trailing
@@ -1008,20 +1019,45 @@ export class TradingEngine {
     coordinations: readonly Coordination[], allowExecution: boolean, emit: (event: EngineEvent) => void): void {
     const plan = this.branches!, s = this.state.settings
     const enabled = geometry.execProfile ? PROFILE_BASE_COORDINATIONS : coordinations
-    const visit = (config: StrategyConfig, coordination: Coordination, stage: Stage, parent?: PaperPosition, entryProof?: GateProof[], baseGate?:WindowResult) => {
-      let lane = this.cachedLane(symbol,config.id,direction,coordination,stage)
-      if (lane?.open || lane && (lane.lastTimestamp >= candle.timestamp || !this.validLineage(lane))) return
-      if (coordination === "axis" && !(plan.exec && stage === "live") && !this.axisAllows(symbol,config,direction,stage,candle.timestamp)) return
-      const created = !lane
-      lane ??= this.lane(symbol,config,direction,coordination,stage)
-      if (coordination === "block" && stage !== "live" && s.coordinations.block.behavior === "rounds" &&
+    const prepare = (lane: LaneState) => {
+      if (lane.coordination === "block" && lane.stage !== "live" && s.coordinations.block.behavior === "rounds" &&
           consumeBlockPause(lane,s.coordinations.block)) {
         this.dirtyLaneIds.add(lane.id)
+        return false
+      }
+      return true
+    }
+    const continueEstablished = (parent: LaneState) => {
+      const children = this.childrenByLane.get(parent.id)
+      if (!children) return
+      for (const child of children) {
+        if (!this.currentLane(child) || !this.validLineage(child)) continue
+        if (!child.open && child.lastTimestamp < candle.timestamp &&
+            (child.coordination !== "axis" || this.axisAllows(symbol,child.config,direction,child.stage,candle.timestamp)) &&
+            (child.coordination !== "block" || !child.blockRound?.pauseRemaining)) this.open(child,candle,undefined,undefined,true)
+        continueEstablished(child)
+      }
+    }
+    const visit = (config: StrategyConfig, coordination: Coordination, stage: Stage, parent?: PaperPosition, entryProof?: GateProof[], baseGate?:WindowResult) => {
+      let lane = this.cachedLane(symbol,config.id,direction,coordination,stage)
+      const canReplaceTraining = lane?.open?.trainingOnly && lane.open.openedAt < candle.timestamp
+      if (lane && ((!canReplaceTraining && (lane.open || lane.lastTimestamp >= candle.timestamp)) || !this.validLineage(lane))) {
+        if (plan.exec && lane.open?.openedAt !== candle.timestamp && this.validLineage(lane)) continueEstablished(lane)
+        return
+      }
+      if (coordination === "axis" && !(plan.exec && stage === "live") && !this.axisAllows(symbol,config,direction,stage,candle.timestamp)) {
+        if (plan.exec && lane) continueEstablished(lane)
+        return
+      }
+      const created = !lane
+      lane ??= this.lane(symbol,config,direction,coordination,stage)
+      if (!prepare(lane)) {
+        if (plan.exec) continueEstablished(lane)
         return
       }
       const position = this.open(lane,candle,stage === "live" ? parent : undefined,entryProof)
       if (parent) position.parentPositionId = parent.id
-      if (!plan.exec && created && lane.parentProof && stage !== "live") this.registerChild(lane)
+      if (created && lane.parentProof && stage !== "live") this.registerChild(lane)
       if (!lane.calculationOnly) emit({type:"opened",laneId:lane.id,timestamp:candle.timestamp,stage})
       if (lane.calculationOnly) return
       if (stage === "live") {
@@ -1037,7 +1073,10 @@ export class TradingEngine {
         return
       }
       if (plan.exec && parent && entryProof) parent.progressionProof ??= entryProof.at(-1)
-      if (plan.exec && !baseGate && lane.samples.length < blockRequired(config.branch!.windows![stage]!)) return
+      if (plan.exec && !baseGate && lane.samples.length < blockRequired(config.branch!.windows![stage]!)) {
+        continueEstablished(lane)
+        return
+      }
       const scope = this.stageScope(config)
       const exact = baseGate ?? this.stageWindow(lane,stage,candle.timestamp,true)
       const qualified = exact.qualified &&
@@ -1057,7 +1096,9 @@ export class TradingEngine {
         for (const child of plan.variants(config,coordination,next)) {
           for (const c of targets) visit(child,c,next,position,nextProof)
         }
-      } else if (!plan.exec) {
+      } else if (plan.exec) {
+        continueEstablished(lane)
+      } else {
         // Preserve the independent processing of previously admitted legacy Sets.
         for (const child of this.childrenByLane.get(lane.id) ?? []) {
           visit(child.config,child.coordination,next,position)
@@ -1143,7 +1184,7 @@ export class TradingEngine {
         if(micro!==((lane.config.signalTimeframeMinutes??1)<1))continue
         const event = this.mark(lane, candle)
         if (event) {
-          if (!lane.calculationOnly) emit(event)
+          if (!lane.calculationOnly && !position.trainingOnly) emit(event)
           if (lane.stage === "live" && position.executionEligible) {
             if (event.type === "closed") this.enqueueIntent(lane, position, candle, "close", position.quantity)
             if (event.type === "added") this.enqueueIntent(lane, position, candle, "add", position.fills.at(-1)!.quantity)
@@ -1238,7 +1279,7 @@ export class TradingEngine {
       if(scope==="micro"&&(lane.config.signalTimeframeMinutes??1)>=1)continue
       const event = this.mark(lane, candle, ordered)
       if (!event) continue
-      if (!lane.calculationOnly) events.push(event)
+      if (!lane.calculationOnly && !position.trainingOnly) events.push(event)
       if (lane.stage === "live" && position.executionEligible) {
         if (event.type === "closed") this.enqueueIntent(lane, position, candle, "close", position.quantity)
         if (event.type === "added") this.enqueueIntent(lane, position, candle, "add", position.fills.at(-1)!.quantity)
@@ -1337,7 +1378,9 @@ export class TradingEngine {
         : current ? this.stageWindow(lane,source,Infinity)
         : windowMetrics(lane,policy.required,policy.minPF,policy.blocks)
       const stats = stageStats[lane.stage]
-      stats.lanes++; stats.open += lane.open ? 1 : 0; stats.closed += lane.closedCount
+      const ordinaryOpen = lane.open?.trainingOnly ? undefined : lane.open
+      stats.lanes++; stats.open += ordinaryOpen ? 1 : 0; stats.closed += lane.closedCount
+      if (lane.trainingOnlyClosed) stats.trainingOnlyClosed = (stats.trainingOnlyClosed ?? 0) + lane.trainingOnlyClosed
       stats.enoughSamples += metrics.enoughSamples ? 1 : 0; stats.qualified += metrics.qualified ? 1 : 0
       stats.profit += lane.grossProfit; stats.loss += lane.grossLoss; stats.netPnl += lane.netPnl
       stats.wins+=lane.wins
@@ -1365,7 +1408,7 @@ export class TradingEngine {
       }
       stats.admittedCount+=lane.admittedClosed??0;stats.admittedProfit+=lane.admittedProfit??0;stats.admittedLoss+=lane.admittedLoss??0;stats.admittedNet+=lane.admittedNetPnl??0
       if(stats.fees!==null){if(lane.closedCount&&lane.costTotal===undefined)stats.fees=null;else stats.fees+=lane.costTotal??0}
-      if(lane.open)stats[lane.direction==="long"?"longOpen":"shortOpen"]++
+      if(ordinaryOpen)stats[lane.direction==="long"?"longOpen":"shortOpen"]++
       const parentReady=current&&this.hasParentEvidence(lane.symbol,lane.config,lane.direction,lane.coordination,lane.stage)&&
         (!lane.config.branch?.windows||lane.stage==="base"||directMirror||freshAncestors(lane))
       const axisReady=current&&(directMirror||lane.coordination!=="axis"||this.axisAllows(lane.symbol,lane.config,lane.direction,lane.stage))
@@ -1392,8 +1435,8 @@ export class TradingEngine {
           else {stats.currentProfit+=metrics.profit??0;stats.currentLoss+=metrics.loss??0;stats.currentCount+=metrics.pfSampleCount??metrics.count}
         }
       }
-      if (lanes.length < laneLimit && (!options.laneStage || options.laneStage === lane.stage)) lanes.push({ id: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, direction: lane.direction, coordination: lane.coordination, ...metrics, current,admissionReady:parentReady&&axisReady,validated,isOpen:Boolean(lane.open),netPnl: lane.netPnl })
-      if (lane.open && (!options.positionStage || options.positionStage === lane.stage) && positions.length < positionLimit) positions.push({ ...lane.open, laneId: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, coordination: lane.coordination })
+      if (lanes.length < laneLimit && (!options.laneStage || options.laneStage === lane.stage)) lanes.push({ id: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, direction: lane.direction, coordination: lane.coordination, ...metrics, current,admissionReady:parentReady&&axisReady,validated,isOpen:Boolean(ordinaryOpen),netPnl: lane.netPnl })
+      if (ordinaryOpen && (!options.positionStage || options.positionStage === lane.stage) && positions.length < positionLimit) positions.push({ ...ordinaryOpen, laneId: lane.id, symbol: lane.symbol, configId: lane.configId, stage: lane.stage, coordination: lane.coordination })
     }
     const stages = STAGES.filter(stage=>stage!=="exec"||this.branches?.exec||stageStats.exec.lanes>0).map(stage => {
       const { profit, loss,currentProfit,currentLoss,currentCount,currentUnknown,validatedProfit,validatedLoss,validatedCount,validatedSets,admittedCount,admittedProfit,admittedLoss,admittedNet, ...stats } = stageStats[stage]
