@@ -182,6 +182,15 @@ try{
  assert.equal(await replay.getByRole('columnheader',{name:'Cash PF',exact:true}).count(),2)
  await replay.getByText(/^bingx:public ·/).waitFor()
 
+ await page.getByRole('button',{name:'Prepare Trend + SAR reference',exact:true}).click()
+ assert.ok(await page.getByLabel('One funded Exec sibling per signal',{exact:true}).isChecked())
+ await page.getByRole('button',{name:'Save configuration',exact:true}).click()
+ await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
+ const reference=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
+ assert.deepEqual([reference.historyCandles,reference.strategyExecSingleEntry,reference.strategyTrendDcaEnabled,
+   reference.strategySarDcaEnabled,reference.strategySar04DcaEnabled],['14400','true','true','true','false'])
+ assert.deepEqual(JSON.parse(reference.strategyEnabledRanges),['Minimal'])
+
  await page.getByRole('button',{name:'Integrations',exact:true}).click();await page.getByLabel('Search integrations').fill('unmatched');await page.getByText('No integration matches this search.').waitFor()
  await page.getByRole('button',{name:'Command center',exact:true}).click()
  await page.getByRole('heading',{name:'Execution comparison',exact:true}).waitFor()

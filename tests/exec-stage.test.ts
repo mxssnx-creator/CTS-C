@@ -9,6 +9,7 @@ import { BRANCH_COORDINATIONS, ParentBranches } from "../core/stage-branches"
 import { generateStrategyCatalog } from "../core/catalog"
 import { runExecProgressionReplay } from "../core/terminal-replay"
 import { describeProfitFactor } from "../core/metrics"
+import { DEFAULTS, hydrate, validateConfiguration } from "../core/settings-schema"
 
 const symbol = "BTC-USDT"
 const makeBar = (index: number): Candle => {
@@ -132,6 +133,43 @@ test("additional signals reuse an unchanged Base observation", (t) => {
   const after = engine.exportState().lanes[before.id]
   assert.equal(after.open!.id,before.open.id)
   assert.equal(cache.mock.callCount(),0,"no identity or registration work for the open probe")
+})
+
+test("funding one Exec sibling retains all exact Set samples and mirrors a complete proof after restart", () => {
+  const limitedCatalog = {...settings.catalog,strategyExecSingleEntry:true}
+  assert.equal(validateConfiguration({strategyExecSingleEntry:true},{partial:true}).strategyExecSingleEntry,true)
+  assert.equal(hydrate({strategyExecSingleEntry:"true"}).strategyExecSingleEntry,true)
+  assert.equal(validateConfiguration(DEFAULTS).strategyExecSingleEntry,false)
+  assert.throws(()=>new TradingEngine({...settings,catalog:{...limitedCatalog,strategyExecSingleEntry:"true"}}),/Exec single entry/)
+
+  const all = new TradingEngine(settings)
+  const limited = new TradingEngine({...settings,catalog:limitedCatalog})
+  const closing: Record<"all"|"limited",ClosedTrade[]> = {all:[],limited:[]}
+  all.observeStageCloses(trade=>closing.all.push(trade))
+  limited.observeStageCloses(trade=>closing.limited.push(trade))
+  for (const engine of [all,limited]) engine.processCandles(symbol,bars.slice(0,166),{eventLimit:0})
+  const reloaded = TradingEngine.fromSerialized(limited.serializeState())
+  reloaded.observeStageCloses(trade=>closing.limited.push(trade))
+  all.processCandles(symbol,bars.slice(166),{allowExecution:true,eventLimit:0})
+  reloaded.processCandles(symbol,bars.slice(165),{allowExecution:true,eventLimit:0})
+  const execBook = (book:ClosedTrade[])=>book.filter(trade=>trade.stage==="exec")
+    .map(trade=>[trade.id,trade.openedAt,trade.closedAt,trade.netReturnPct,trade.netPnl,trade.admission])
+  assert.deepEqual(execBook(closing.limited),execBook(closing.all),"all Exec Sets still maintain their own close and gate history")
+  const potential = closing.all.filter(trade=>trade.executed)
+  const mirrored = closing.limited.filter(trade=>trade.executed)
+  assert.ok(mirrored.length>0 && mirrored.length<potential.length)
+  assert.equal(mirrored.length,new Set(mirrored.map(trade=>trade.openedAt)).size)
+  assert.equal(mirrored.length,new Set(potential.map(trade=>trade.openedAt)).size)
+  for (const trade of mirrored) {
+    const available = potential.filter(candidate=>candidate.openedAt===trade.openedAt)
+    assert.equal(trade.executionProof!.count,Math.max(...available.map(candidate=>candidate.executionProof!.count)))
+    const live = closing.limited.find(candidate=>candidate.stage==="live"&&candidate.parentPositionId===trade.id)
+    assert.equal(live?.netPnl,trade.netPnl)
+    assert.deepEqual(live?.admission,[...trade.admission!,trade.executionProof])
+  }
+  const intents = reloaded.pendingIntents().filter(intent=>intent.kind==="entry")
+  assert.ok(intents.length>0)
+  assert.equal(intents.length,new Set(intents.map(intent=>intent.timestamp)).size)
 })
 
 test("post-stage cash PF uses funded settled P&L and preserves legacy coverage", () => {

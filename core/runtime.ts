@@ -490,7 +490,7 @@ export class TerminalRuntime {
       if(key==='stageWindowScope'){next.stageWindowScope=value as EngineSettings['stageWindowScope'];continue}
       if(key==='microStageWindowScope'){next.microStageWindowScope=value as EngineSettings['microStageWindowScope'];continue}
       if(key==='liveEntryMode'){next.liveEntryMode=value as EngineSettings['liveEntryMode'];continue}
-      if(EXEC_PROFILES.some(profile=>profile.setting===key)||catalogKeys.includes(key)){next.catalog[key]=value;continue}
+      if(key==='strategyExecSingleEntry'||EXEC_PROFILES.some(profile=>profile.setting===key)||catalogKeys.includes(key)){next.catalog[key]=value;continue}
       if(gateMap[key]){const[group,stage]=gateMap[key];next[group][stage]=Number(value);continue}
       if(key==='historyCandles')continue
       if(key==='symbolCount'){if(!Number.isInteger(value)||Number(value)<1||Number(value)>500)throw new Error('Symbol count must be1..500');continue}

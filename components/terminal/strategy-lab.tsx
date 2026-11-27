@@ -7,6 +7,7 @@ import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES } from "@/shared/cts-indicat
 import { INVERSE_CONTINUATION_SOURCES } from "@/shared/cts-indications/inverse-sources"
 import { EXEC_PROFILES } from "@/core/exec-profile"
 import execDcaTrendPreset from "@/research-data/exec-dca-trend-preset.json"
+import trendSarReference from "@/research-data/exec-trend-sar-reference.json"
 import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, RSI_CONTINUATION_SOURCES, SAR_CONTINUATION_SOURCES, THIN_OSCILLATOR_SOURCE_IDS } from "@/shared/cts-indications/oscillator-sources"
 import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES,SIGNAL_SOURCES} from '@/shared/cts-indications/signals-catalog'
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_CATALOG } from "@/shared/cts-indications/low-range-catalog"
@@ -244,6 +245,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             setDraft(current=>({...current,...structuredClone(execDcaTrendPreset)}))
             setMessage("Trend + DCA replay draft prepared with 10 days of warm-up. Review the settings before saving.")
           }}>Prepare Trend + DCA replay preset</button>
+          <button type="button" className="terminal-button" disabled={busy || saving} onClick={()=>{
+            dirtyRef.current=true; setDirty(true); setError(null)
+            setDraft(current=>({...current,...structuredClone(trendSarReference)}))
+            setMessage("Trend + SAR reference prepared with 10 days of warm-up. Save to apply the draft.")
+          }}>Prepare Trend + SAR reference</button>
           <button type="button" onClick={() => preset("balanced")} className="terminal-button" disabled={busy || saving}>Balanced · 252</button>
           <button type="button" onClick={() => preset("micro")} className="terminal-button" disabled={busy || saving}><Layers3 className="mr-2 inline h-4 w-4" />Micro + Low-Range</button>
           <button type="button" onClick={() => preset("full")} className="terminal-button" disabled={busy || saving}>Full catalog</button>
@@ -283,6 +289,13 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <div className="mb-5">{enumField("liveEntryMode", "Live entries", [{ value: "independent", label: "Independent signal entries · legacy baseline" }, { value: "real-mirror", label: "Mirror fresh qualified Real entries" }])}</div>
             <p className="terminal-muted mb-5 text-xs">Real remains the final current PF gate. Mirroring links each new Live position to its fresh Real entry and uses Real evidence for Axis, without another Live evidence gate. Independent processed sets always mirror Real. These progression modes use Real as their final gate.</p></>}
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{(execEnabled ? [...NUMERIC_FIELDS.slice(0,3),EXEC_PF_FIELD] : NUMERIC_FIELDS).map(numberField)}</div>
+            {execEnabled && <div className="mt-4 space-y-1 text-xs">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={draft.strategyExecSingleEntry === true} onChange={event=>change("strategyExecSingleEntry",event.target.checked)}/>
+                One funded Exec sibling per signal
+              </label>
+              <p className="terminal-muted">All Sets still qualify independently. When the same symbol, side, configuration and coordination qualify together, the largest complete Exec window gets the order.</p>
+            </div>}
             {!execEnabled&&(["base","main","real"] as const).map(stage=><BlockPolicyFields key={stage} label={stage+" Last-N blocks"} value={(draft.stageBlocks as Partial<Record<string,BlockPolicy>>|undefined)?.[stage]} onChange={policy=>{const next={...(draft.stageBlocks as Partial<Record<string,BlockPolicy>>??{})};if(policy)next[stage]=policy;else delete next[stage];change("stageBlocks",next)}}/>)}
             <details className="mt-5 space-y-4">
               <summary className="cursor-pointer text-sm font-semibold">Independent Last-N Sets</summary>
