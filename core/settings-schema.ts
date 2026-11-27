@@ -1,3 +1,4 @@
+import { REVERSAL_SOURCES } from "../shared/cts-reversal/reversal.ts"
 import { checkStageCoordinations } from "./stage-branches"
 import {checkBlockPolicy,type BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 import {relationalVolumeSettings,DEFAULT_RELATIONAL_VOLUME} from "../shared/cts-volume/ratios.ts";
@@ -10,7 +11,7 @@ import { EXPANDED_CATALOG_MAX, STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS, SELECTAB
 import { LAST_N_STAGES, DEFAULT_EXEC_MIN_PF, DEFAULT_EXEC_WINDOWS, checkExecWindows, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TIMEFRAMES } from "../shared/cts-indications/low-range-catalog.ts"
 import { DEFAULT_STEP_AUTO } from "./step-evidence"
-import { DEFAULT_RELATE } from "./relate"
+import { DEFAULT_RELATE, DEFAULT_RELATE_AUTO } from "./relate"
 import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
 import { MAX_WARMUP_CANDLES } from "./history"
@@ -45,8 +46,11 @@ export const DEFAULTS: Record<string, unknown> = {
   dcaAutoEnabled: DEFAULT_STEP_AUTO.enabled, dcaAutoLastN: DEFAULT_STEP_AUTO.lastN,
   dcaAutoMinSamples: DEFAULT_STEP_AUTO.minSamples, dcaAutoMinPF: DEFAULT_STEP_AUTO.minPF,
   relateEnabled: DEFAULT_RELATE.enabled, relateSteps: DEFAULT_RELATE.steps, relateRatio: DEFAULT_RELATE.ratio,
+  relateStepMode: DEFAULT_RELATE.stepMode,
   relateLastN: DEFAULT_RELATE.lastN, relateMinTrades: DEFAULT_RELATE.minTrades, relateMinPF: DEFAULT_RELATE.minPF,
   relateMaxMultiplier: DEFAULT_RELATE.maxMultiplier, relateMaxSlRatio: DEFAULT_RELATE.maxSlRatio,
+  relateAutoEnabled: DEFAULT_RELATE_AUTO.enabled, relateAutoLastN: DEFAULT_RELATE_AUTO.lastN, relateAutoMinSamples: DEFAULT_RELATE_AUTO.minSamples,
+  relateAutoMinPF: DEFAULT_RELATE_AUTO.minPF, relateAutoConfidence: DEFAULT_RELATE_AUTO.confidence, relateAutoInherit: DEFAULT_RELATE_AUTO.inherit,
   normalVolumeRatio: 1, axisVolumeRatio: 1, blockVolumeFactor: 1, dcaVolumeRatio: 1, relateVolumeRatio: 1, maxOrderNotional: 0,
   microTrailRatio: .5, microMinSlDistancePct: .1, microMinTrailDistancePct: .05, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
   blockVolumeRatio: 0.2, makerFeePct: 0.02, takerFeePct: 0.05, slippagePctOfFees: 10,
@@ -97,16 +101,20 @@ export const COORDINATION_FIELDS = [
   { key: "dcaAutoLastN", label: "DCA Auto recent observations", min: 3, max: 100, step: 1 },
   { key: "dcaAutoMinSamples", label: "DCA Auto minimum observations", min: 3, max: 100, step: 1 },
   { key: "dcaAutoMinPF", label: "DCA Auto minimum add PF", min: 1.01, max: 10, step: .01 },
-  { key: "relateSteps", label: "Relate winning steps", min: 2, max: 15, step: 1 },
-  { key: "relateRatio", label: "Relate increase per step", min: .2, max: 6, step: .2 },
+  { key: "relateSteps", label: "Relate steps N (most increases)", min: 2, max: 15, step: 1 },
+  { key: "relateRatio", label: "Relate volume factor X per step", min: .2, max: 6, step: .2 },
   { key: "relateLastN", label: "Relate recent samples", min: 60, max: 250, step: 1 },
   { key: "relateMinTrades", label: "Relate minimum samples", min: 60, max: 250, step: 1 },
   { key: "relateMinPF", label: "Relate minimum PF", min: 1.01, max: 100, step: .01 },
   { key: "relateMaxMultiplier", label: "Relate maximum multiplier", min: 1, max: 8, step: .1 },
   { key: "relateMaxSlRatio", label: "Relate maximum SL-to-TP ratio", min: .01, max: .5, step: .01 },
+  { key: "relateAutoLastN", label: "Relate Auto recent returns", min: 3, max: 100, step: 1 },
+  { key: "relateAutoMinSamples", label: "Relate Auto minimum returns", min: 3, max: 100, step: 1 },
+  { key: "relateAutoMinPF", label: "Relate Auto minimum PF", min: 1.01, max: 10, step: .01 },
+  { key: "relateAutoConfidence", label: "Relate Auto confidence (standard errors)", min: 0, max: 3, step: .01 },
 ]
 const WINDOW_SCOPES = ["context", "config", "both"] as const
-const ENUM_FIELDS: Record<string, readonly string[]> = { autoPfMode:["set-history","tp-distance"],blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches','exec-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
+const ENUM_FIELDS: Record<string, readonly string[]> = { autoPfMode:["set-history","tp-distance"],relateStepMode:["loss","wins"],blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches','exec-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
@@ -118,7 +126,7 @@ const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
   strategyStopDistancePcts: SELECTABLE_STOP_DISTANCE_PCTS, strategyTrailDistancePcts: SELECTABLE_TRAIL_DISTANCE_PCTS,
   strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
-  strategyIndicationSources:[...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES].map(s=>s.id),
+  strategyIndicationSources:[...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES,...REVERSAL_SOURCES].map(s=>s.id),
   strategyLowRangeSources:LOW_RANGE_IDS,
   strategySignalsSources:SIGNALS_CATALOG.map(s=>s.id),
   strategySignalPeriods:[10,14,20,40,60],strategyCoreSignalPeriods:CORE_SIGNAL_PERIODS,strategySignalTimeframes:SIGNAL_TIMEFRAMES,
@@ -140,7 +148,7 @@ export const FACTOR_FIELDS = [
 ]
 export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, EXEC_PF_FIELD, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
 
-const sourceKinds=new Map([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES].map(s=>[s.id,s.kind]))
+const sourceKinds=new Map([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES,...REVERSAL_SOURCES].map(s=>[s.id,s.kind]))
 export function configurationCount(values: Record<string, unknown>) {
   const ranges = values.strategyEnabledRanges as string[]
   const types=values.strategyIndicationTypes as string[]
@@ -158,19 +166,21 @@ export function configurationCount(values: Record<string, unknown>) {
     cells += count
     if (range === "Low-Range" && LOW_RANGE_STEPS.some(candidate => candidate === step)) lowRangeCells += count
   }
-  const portedTypes=types.filter(t=>t==='Tactic'||t==='Inverse')
+  const portedTypes=types.filter(t=>["Tactic","Inverse","Trend-Reversal"].includes(t))
   const sourceIds=values.strategyIndicationSources as string[]
   const timeframes = values.strategySignalTimeframes as number[]
   const extra=portedTypes.reduce((n,t)=>n+sourceIds.filter(id=>sourceKinds.get(id)===t.toLowerCase())
-    .reduce((sum,id)=>sum+timeframes.filter(tf=>t==='Inverse'?[1,5,15].includes(tf):supportsTacticTimeframe(id,tf)).length,0),0)
-  const signals=types.includes('Signals')?1:0,signalSources=(values.strategySignalsSources??DEFAULT_SIGNALS_SOURCES) as string[]
+    .reduce((sum,id)=>sum+timeframes.filter(tf=>t==='Inverse'?[1,5,15].includes(tf):t==='Trend-Reversal'?[1,5,15,30].includes(tf):supportsTacticTimeframe(id,tf)).length,0),0)
+  const signalSources=(values.strategySignalsSources??DEFAULT_SIGNALS_SOURCES) as string[]
+  const signals=types.includes("Signals") ? signalSources.reduce((n,id) =>
+    n + timeframes.filter(tf => !id.startsWith("sig-trend-reversal-") || [1,5,15,30].includes(tf)).length, 0) : 0
   const hasLowRange = types.includes("Low-Range")
   const lowRangeSources = (values.strategyLowRangeSources ?? DEFAULT_LOW_RANGE_SOURCES) as string[]
   const lowRangeCount = hasLowRange
     ? lowRangeCells * lowRangeSources.length * timeframes.filter(tf => LOW_RANGE_TIMEFRAMES.some(minutes => tf === minutes)).length : 0
-  const native = types.filter(type=>!["Tactic","Inverse","Signals","Low-Range"].includes(type)).reduce((count,type)=>
+  const native = types.filter(type=>!["Tactic","Inverse","Trend-Reversal","Signals","Low-Range"].includes(type)).reduce((count,type)=>
     count+indicationPeriods(type,values.strategySignalPeriods as number[],(values.strategyCoreSignalPeriods??[0]) as number[]).length,0)
-  const count = lowRangeCount + cells * ((native+signals*signalSources.length)*timeframes.length+extra)
+  const count = lowRangeCount + cells * (native*timeframes.length+signals+extra)
   return values.stageGateMode === "exec-branches" ? count : count * lastNVariantCount((values.strategyLastNGrid ?? {}) as LastNGrid)
 }
 
@@ -227,6 +237,10 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
   if (!partial) {
     autoPfPolicy(output)
     if (output.axisPrevEnabled && Number(output.axisPrevious) + Number(output.axisLast) > 250) throw new Error("Axis previous and recent windows must total 250 samples or fewer.")
+    if ((output.strategyIndicationTypes as string[]).includes("Trend-Reversal")) {
+      if (!(output.strategyIndicationSources as string[]).some(id => sourceKinds.get(id) === "trend-reversal")) throw new Error("Choose at least one Trend-Reversal source.")
+      if (!(output.strategySignalTimeframes as number[]).some(tf => [1, 5, 15, 30].includes(tf))) throw new Error("Trend-Reversal requires a 1, 5, 15 or 30 minute timeframe.")
+    }
     const count = configurationCount(output)
     if (count === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
     const windows = output.strategyLastNGrid as LastNGrid
@@ -242,6 +256,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     ["Block Auto", output.blockAutoMinSamples, output.blockAutoLastN],
     ["DCA Auto", output.dcaAutoMinSamples, output.dcaAutoLastN],
     ["Relate", output.relateMinTrades, output.relateLastN],
+    ["Relate Auto", output.relateAutoMinSamples, output.relateAutoLastN],
   ]) {
     if (typeof minimum === "number" && typeof window === "number" && minimum > window) {
       throw new Error(`${label} minimum observations cannot exceed its recent observation window.`)
@@ -280,6 +295,7 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
   const blockAuto = s.coordinations.block.auto ?? DEFAULT_STEP_AUTO
   const dcaAuto = s.coordinations.dca.auto ?? DEFAULT_STEP_AUTO
   const relate = s.coordinations.relate ?? DEFAULT_RELATE
+  const relateAuto = relate.auto ?? DEFAULT_RELATE_AUTO
   for(const [key,value] of Object.entries(s.catalog))if(Object.hasOwn(DEFAULTS,key))values[key]=value
   values.autoPfEnabled = s.catalog.autoPfEnabled === true
   if (values.autoPfEnabled && s.catalog.autoPfMode === undefined) values.autoPfMode = "tp-distance"
@@ -294,7 +310,9 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
     blockAutoEnabled:blockAuto.enabled,blockAutoLastN:blockAuto.lastN,blockAutoMinSamples:blockAuto.minSamples,blockAutoMinPF:blockAuto.minPF,
     blockSteps:s.coordinations.block.steps,blockMode:s.coordinations.block.mode,dcaSteps:s.coordinations.dca.steps,dcaDistancePct:s.coordinations.dca.distancePct,dcaMultiplier:s.coordinations.dca.multiplier,
     dcaAutoEnabled:dcaAuto.enabled,dcaAutoLastN:dcaAuto.lastN,dcaAutoMinSamples:dcaAuto.minSamples,dcaAutoMinPF:dcaAuto.minPF,
-    relateEnabled:relate.enabled,relateSteps:relate.steps,relateRatio:relate.ratio,relateLastN:relate.lastN,relateMinTrades:relate.minTrades,
-    relateMinPF:relate.minPF,relateMaxMultiplier:relate.maxMultiplier,relateMaxSlRatio:relate.maxSlRatio}
+    relateEnabled:relate.enabled,relateSteps:relate.steps,relateRatio:relate.ratio,relateStepMode:relate.stepMode??"wins",relateLastN:relate.lastN,relateMinTrades:relate.minTrades,
+    relateMinPF:relate.minPF,relateMaxMultiplier:relate.maxMultiplier,relateMaxSlRatio:relate.maxSlRatio,
+    relateAutoEnabled:relateAuto.enabled,relateAutoLastN:relateAuto.lastN,relateAutoMinSamples:relateAuto.minSamples,
+    relateAutoMinPF:relateAuto.minPF,relateAutoConfidence:relateAuto.confidence,relateAutoInherit:relateAuto.inherit}
 }
 

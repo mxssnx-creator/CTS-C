@@ -1,3 +1,4 @@
+import { REVERSAL_BY_ID, trendReversalAt, trendReversalSeries } from "../cts-reversal/reversal.ts";
 import {StreamMath} from "./origin/indications/stream-math.ts";
 export {StreamMath};
 import {INDICATIONS,indicationState} from "./origin/indications/registry.ts";
@@ -9,6 +10,7 @@ import { LOW_RANGE_IDS, LOW_RANGE_TIMEFRAMES } from "./low-range-catalog.ts";
 import { isResearchTacticSource, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "./research-sources.ts";
 import { oscillatorContinuationBase } from "./oscillator-sources.ts";
 import { inverseContinuationBase } from "./inverse-sources.ts";
+import { RANGE_COMPRESSION_BY_ID, rangeCompressionState } from "./range-compression.ts";
 
 export type PortedBar={timestamp:number;open:number;high:number;low:number;close:number;volume:number};
 export const PORTED_INDICATIONS=INDICATIONS.filter(s=>s.kind==="inverse"||s.kind==="tactic");
@@ -32,6 +34,22 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
  k.setMarket(new MarketSource(marketBars));
  const states:Record<string,Int8Array>={},available:Record<string,boolean>={};
  for(const id of new Set(ids)){
+   const compression = RANGE_COMPRESSION_BY_ID.get(id);
+   if (compression) {
+     available[id] = supportsTacticTimeframe(id, tfMin);
+     states[id] = available[id] ? rangeCompressionState(compression, k) : new Int8Array(b.n);
+     continue;
+   }
+   const reversal = REVERSAL_BY_ID.get(id.startsWith("sig-trend-reversal-") ? id.slice(4) : id);
+   if (reversal) {
+     available[id] = [1, 5, 15, 30].includes(tfMin);
+     states[id] = !available[id] ? new Int8Array(b.n) : stream ? stream.run<{ value: Int8Array }, null>(
+       id, b.n, ["value"], () => null,
+       (i, out) => { out.value[i] = trendReversalAt(b, i, reversal.period, reversal.tactic, tfMin * 60_000); },
+       ["value"],
+     ).value : trendReversalSeries(b, reversal.period, reversal.tactic, tfMin * 60_000);
+     continue;
+   }
    const lowRange = lowRangeIds.has(id);
    const inverse = inverseContinuationBase(id);
    if(!PORTED_BY_ID.has(id)&&!SIGNALS_BY_ID.has(id)&&!lowRange&&!isResearchTacticSource(id)&&!inverse)throw new Error(`Unknown indication source ${id}`);

@@ -1,4 +1,5 @@
 import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, RSI_CONTINUATION_SOURCES, SAR_CONTINUATION_SOURCES } from "./oscillator-sources"
+import { RANGE_COMPRESSION_SOURCES } from "./range-compression"
 
 export const SIGNAL_TIMEFRAMES = [1/6, 1, 5, 15, 30, 60] as const
 
@@ -24,6 +25,9 @@ export const RESEARCH_TACTIC_SOURCES: readonly { id:string; label:string; kind:"
   {id:"r-qh-flow-m",kind:"tactic",label:"Quarter-hour order flow · medium",timeframes:[1,5,15]},
   {id:"r-qh-rev",kind:"tactic",label:"Quarter-hour burst reversal · short",timeframes:[1,5,15]},
   {id:"r-qh-rev-m",kind:"tactic",label:"Quarter-hour burst reversal · medium",timeframes:[1,5,15]},
+  {id:"r-nr-break-m",kind:"tactic",label:"Narrow-range breakout · NR4",timeframes:[1,5,15,30]},
+  {id:"r-nr-break",kind:"tactic",label:"Narrow-range breakout · NR7",timeframes:[1,5,15,30]},
+  ...RANGE_COMPRESSION_SOURCES,
 ]
 
 const framesById = new Map(RESEARCH_TACTIC_SOURCES.map(source => [source.id,source.timeframes]))

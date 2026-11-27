@@ -86,16 +86,16 @@ export function ReplayStudy({connectionId="bingx-x02"}:{connectionId?:string}) {
         <p className="terminal-muted text-xs leading-relaxed">{result.note}</p>
         {result.progression&&<section className="space-y-3">
           <h3 className="text-sm font-semibold">Saved stage progression on holdout</h3>
-          <div className="terminal-table-wrap"><table className="terminal-table"><thead><tr>{["Stage","Settled","Net return PF","Post-stage PF / settled","Win rate","Net P&L","Modeled costs"].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
-            <tbody>{result.progression.map(row=><tr key={row.stage}><th className="capitalize" scope="row">{row.stage}</th><td>{stat(row.closed)}</td><td>{formatProfitFactor(row.profitFactor,row.pfState)}</td><td>{row.postStage?`${formatProfitFactor(row.postStage.profitFactor,row.postStage.pfState)} / ${stat(row.postStage.closed)}`:"—"}</td><td>{row.closed?`${decimal(100*row.wins/row.closed,1)}%`:"—"}</td><td>{decimal(row.net,4)}</td><td>{decimal(row.cost,4)}</td></tr>)}</tbody>
+          <div className="terminal-table-wrap"><table className="terminal-table"><thead><tr>{["Stage","Settled","Net return PF","Cash PF","Post-stage PF / settled","Win rate","Net P&L","Modeled costs"].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
+            <tbody>{result.progression.map(row=><tr key={row.stage}><th className="capitalize" scope="row">{row.stage}</th><td>{stat(row.closed)}</td><td>{formatProfitFactor(row.profitFactor,row.pfState)}</td><td>{formatProfitFactor(row.cashProfitFactor,row.cashPfState)}</td><td>{row.postStage?<>{formatProfitFactor(row.postStage.profitFactor,row.postStage.pfState)} / {stat(row.postStage.closed)}<small>Cash PF {formatProfitFactor(row.postStage.cashProfitFactor,row.postStage.cashPfState)}</small></>:"—"}</td><td>{row.closed?`${decimal(100*row.wins/row.closed,1)}%`:"—"}</td><td>{decimal(row.net,4)}</td><td>{decimal(row.cost,4)}</td></tr>)}</tbody>
           </table></div>
         </section>}
         {indications?.length ? <details className="space-y-3">
           <summary className="cursor-pointer text-sm font-semibold">Exec orders by indication</summary>
           <p className="terminal-muted text-xs">Exec samples include the positions used to evaluate each Set. Open and settled orders count entries that passed all four stages in the holdout.</p>
-          <div className="terminal-table-wrap max-h-96 overflow-auto"><table className="terminal-table"><thead><tr>{["Indication","Timeframe","Exec samples","Open orders","Settled orders","Executed PF"].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
+          <div className="terminal-table-wrap max-h-96 overflow-auto"><table className="terminal-table"><thead><tr>{["Indication","Timeframe","Exec samples","Open orders","Settled orders","Executed PF","Cash PF"].map(label=><th key={label} scope="col">{label}</th>)}</tr></thead>
             <tbody>{indications.map(row=><tr key={JSON.stringify([row.source,row.profile,row.timeframe,row.period])}>
-              <th scope="row">{row.source}{row.period ? ` · period ${row.period}` : ""}{row.profile ? <small className="terminal-muted block">{row.profile}</small> : null}</th><td>{row.timeframe}m</td><td>{stat(row.execCloses)}</td><td>{stat(row.open)}</td><td>{stat(row.closed)}</td><td>{formatProfitFactor(row.profitFactor,row.pfState)}</td>
+              <th scope="row">{row.source}{row.period ? ` · period ${row.period}` : ""}{row.profile ? <small className="terminal-muted block">{row.profile}</small> : null}</th><td>{row.timeframe}m</td><td>{stat(row.execCloses)}</td><td>{stat(row.open)}</td><td>{stat(row.closed)}</td><td>{formatProfitFactor(row.profitFactor,row.pfState)}</td><td>{formatProfitFactor(row.cashProfitFactor,row.cashPfState)}</td>
             </tr>)}</tbody>
           </table></div>
         </details> : null}

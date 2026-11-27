@@ -13,6 +13,13 @@ export function observedExit(input:ExitInput):ExitResult
 export function observedExit(input:Omit<ExitInput,'price'|'timestamp'>,observation:Observation):ExitResult
 export function observedExit(input:Omit<ExitInput,'price'|'timestamp'>&Partial<ExitInput>,observation?:Observation):ExitResult {
   const price=observation?.price??input.price!,timestamp=observation?.timestamp??input.timestamp!,trailingEnabled=observation?.trailingEnabled??input.trailingEnabled,basis=observation?.trailingBasis??input.trailingBasis
+  return evaluateExit({peak:0,stop:0,trailingActive:false,reason:undefined},input,price,timestamp,trailingEnabled,basis)
+}
+/** Same policy as observedExit without allocating: `out` is overwritten and returned. For the per-candle hot path only. */
+export function observedExitInto(out:ExitResult,input:Omit<ExitInput,'price'|'timestamp'>,price:number,timestamp:number,trailingEnabled:boolean,basis:"peak"|"entry"|undefined):ExitResult {
+  return evaluateExit(out,input,price,timestamp,trailingEnabled,basis)
+}
+function evaluateExit(out:ExitResult,input:Omit<ExitInput,'price'|'timestamp'>&Partial<ExitInput>,price:number,timestamp:number,trailingEnabled:boolean|undefined,basis:"peak"|"entry"|undefined):ExitResult {
   const sign=input.direction==="long"?1:-1
   const peak=trailingEnabled===false?input.peak:sign===1?Math.max(input.peak,price):Math.min(input.peak,price)
   const move=sign*(price-input.entryPrice)/input.entryPrice*100
@@ -29,5 +36,6 @@ export function observedExit(input:Omit<ExitInput,'price'|'timestamp'>&Partial<E
   const reason:ExitReason|undefined=sign*(price-stop)<=0?(trailingActive?"trailing_stop":"stop_loss")
     :input.exitMode==="fixed"&&move>=input.takeProfitPct?"take_profit"
     :input.maxHoldMinutes>0&&timestamp-input.openedAt>=input.maxHoldMinutes*60_000?"max_hold":undefined
-  return {peak,stop,trailingActive,reason}
+  out.peak=peak;out.stop=stop;out.trailingActive=trailingActive;out.reason=reason
+  return out
 }

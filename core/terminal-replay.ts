@@ -90,7 +90,7 @@ export async function runExecProgressionReplay(symbol: string, candles: MarketCa
   const split = Math.floor(candles.length * .65)
   const holdout = (candles[split].time + 60) * 1000
   const engine = new TradingEngine({ ...settings, symbols: [symbol] })
-  const totals = () => ({ closed:0, wins:0, profit:0, loss:0, net:0, cost:0 })
+  const totals = () => ({ closed:0, wins:0, profit:0, loss:0, net:0, cost:0, cashProfit:0, cashLoss:0 })
   const books = Object.fromEntries([...STAGES, "executed"].map(stage=>[stage,totals()]))
   const forwarded = new Map(STAGES.filter(stage=>stage!=="live").map(stage=>[stage,totals()]))
   const labels = new Map(EXEC_PROFILES.map(profile=>[profile.id,profile.label]))
@@ -118,8 +118,13 @@ export async function runExecProgressionReplay(symbol: string, candles: MarketCa
     row.loss += Math.max(0,-trade.netReturnPct)
     row.net += trade.netPnl
     row.cost += trade.cost
+    row.cashProfit += Math.max(0,trade.netPnl)
+    row.cashLoss += Math.max(0,-trade.netPnl)
   }
-  const summarize = ({profit,loss,...row}: ReturnType<typeof totals>) => ({...row,...describeProfitFactor(profit,loss,row.closed)})
+  const summarize = ({profit,loss,cashProfit,cashLoss,...row}: ReturnType<typeof totals>) => {
+    const cash = describeProfitFactor(cashProfit,cashLoss,row.closed)
+    return {...row,...describeProfitFactor(profit,loss,row.closed),cashProfitFactor:cash.profitFactor,cashPfState:cash.pfState}
+  }
   engine.observeStageCloses(trade=>{
     if (trade.openedAt < holdout) return
     record(books[trade.stage],trade)

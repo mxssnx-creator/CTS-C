@@ -1,4 +1,5 @@
 "use client"
+import { REVERSAL_SOURCES } from "@/shared/cts-reversal/reversal"
 import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
@@ -31,7 +32,7 @@ const EXIT_LABELS: Record<ExitMode, string> = {
   "trailing-fixed": "Fixed-distance trailing",
   "trailing-only-fixed": "Fixed-distance trailing-only",
 }
-const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES]
+const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES,...REVERSAL_SOURCES]
 const OSCILLATOR_FAMILIES = [["RSI configurations",[...RSI_VARIANTS,...RSI_CONTINUATION_SOURCES]],["Parabolic SAR configurations",[...PARABOLIC_SAR_VARIANTS,...SAR_CONTINUATION_SOURCES]]] as const
 const OSCILLATOR_IDS = new Set<string>(OSCILLATOR_FAMILIES.flatMap(([,sources])=>sources.map(source=>source.id)))
 
@@ -108,7 +109,8 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
     dirtyRef.current = true; setDirty(true); setError(null); setMessage(`${name} preset prepared. Save to apply it to ${connectionName}.`)
     setDraft(current => ({ ...current, strategyEnabledRanges: kind === "micro" ? ["Micro", "Low-Range"] : kind === "balanced" ? RANGES.filter(r=>r!=="Low-Range") : [...RANGES],
       strategyPriceDistancesEnabled: false, strategyLastNGrid: {}, strategyTpSteps: kind === "micro" ? [2, 3, 4, 5] : kind === "balanced" ? [...BALANCED_STEPS] : [...STEPS],
-      strategySlRatios: kind === "balanced" ? [...BALANCED_RATIOS] : kind === "micro" ? RATIOS.filter(r=>r<=1.6) : [...RATIOS], strategyExitModes: kind === "full" ? [...MODES] : [...DEFAULT_EXIT_MODES], strategyIndicationTypes: kind==="full"?[...INDICATIONS]:[...CORE_INDICATIONS],
+      strategySlRatios: kind === "balanced" ? [...BALANCED_RATIOS] : kind === "micro" ? RATIOS.filter(r=>r<=1.6) : [...RATIOS], strategyExitModes: kind === "full" ? [...MODES] : [...DEFAULT_EXIT_MODES],
+      strategyIndicationTypes: kind==="full"?INDICATIONS.filter(type=>type!=="Trend-Reversal"||(current.strategyIndicationSources as string[]).some(id=>id.startsWith("trend-reversal-"))):[...CORE_INDICATIONS],
       baseProfitFactor: 1.1, mainProfitFactor: 1.1, realProfitFactor: 1.1,
       mainEvalPosCount: 8, realEvalPosCount: 8, prevPosWindow: 20, ...(kind==="micro"?{autoPfEnabled:true,blockBehavior:"rounds",microTradeStream:true,strategySignalTimeframes:[1/6,1],microTrailRatio:.5}:{} ) }))
   }
@@ -170,11 +172,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
     <>
     <form onSubmit={save} className="space-y-5">
       <fieldset disabled={busy || saving || importing} className="min-w-0 space-y-5">
-      <section className="terminal-panel space-y-3 p-5"><h3 className="text-sm font-semibold">Tactic & Inverse · independent indication sources</h3><p className="terminal-muted text-xs">Tactic includes conventional indicators, RSI momentum, quarter-hour order flow and DCA recovery. Inverse qualifies its own results. Market and pair sources require observed reference symbols.</p>
-        <button type="button" className="terminal-button" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic','Inverse'])]);change('strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES])}}>Prepare Tactic + Inverse</button>
+      <section className="terminal-panel space-y-3 p-5"><h3 className="text-sm font-semibold">Tactic, Inverse and Trend-Reversal sources</h3><p className="terminal-muted text-xs">Tactic includes conventional indicators, RSI momentum, quarter-hour order flow and DCA recovery. Inverse qualifies its own results. Market and pair sources require observed reference symbols.</p>
+        <button type="button" className="terminal-button" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic','Inverse'])]);change('strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES,...(draft.strategyIndicationSources as string[]).filter(id=>id.startsWith("trend-reversal-"))])}}>Prepare Tactic + Inverse</button>
         <button type="button" className="terminal-button ml-2" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic'])]);change('strategyIndicationSources',[...new Set([...(draft.strategyIndicationSources as string[]),...RESEARCH_TACTIC_SOURCES.filter(source=>!OSCILLATOR_IDS.has(source.id)).map(source=>source.id)])])}}>Add indicator variants</button>
         <label className="block text-xs">Search source configurations<input className="terminal-input mt-2 w-full" value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} placeholder="Decline, recovery, trend, pair…" /></label>
-        <label className="block text-xs">Independent source configurations<select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Tactic and Inverse source configurations" value={draft.strategyIndicationSources as string[]} onChange={e=>change('strategyIndicationSources',Array.from(e.target.selectedOptions,o=>o.value))}>{sourceChoices.map(s=><option key={s.id} value={s.id}>{s.label} · {s.id}</option>)}</select></label>
+        <label className="block text-xs">Independent source configurations<select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Independent indication source configurations" value={draft.strategyIndicationSources as string[]} onChange={e=>change('strategyIndicationSources',Array.from(e.target.selectedOptions,o=>o.value))}>{sourceChoices.map(s=><option key={s.id} value={s.id}>{s.label} · {s.id}</option>)}</select></label>
         <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {STRATEGY_SOURCES.length} available. Conventional and RSI momentum variants also support 60m. Inverse and quarter-hour sources use 1/5/15m.</p>
         <details className="space-y-3 border-t border-[var(--terminal-border)] pt-4">
           <summary className="cursor-pointer text-sm font-semibold">RSI and Parabolic SAR</summary>
@@ -300,8 +302,8 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
                   <MultiChoice title={label+" Long"} description={stage==="base"?"Completed positions in the oldest block.":"Inherit the originating Base Set’s Long count or omit the block."} values={stage==="base"?[...EXEC_LONG_COUNTS]:[...EXEC_LONG_MODES]} selected={[...windows.long]} onChange={value=>updateExecBlock(stage,"long",value)} format={value=>value==="none"?"No Long":value==="inherit"?"Base Long":String(value)}/>
                   <MultiChoice title={label+" Short"} description="Completed positions immediately before Last." values={[...stageShortCounts(stage)]} selected={[...windows.short]} onChange={value=>updateExecBlock(stage,"short",value)}/>
                   <MultiChoice title={label+" Last"} description="Most recent completed positions." values={[...EXEC_LAST_COUNTS]} selected={[...windows.last]} onChange={value=>updateExecBlock(stage,"last",value)}/>
-                  <MultiChoice title={label+" Short outcomes"} description="Each selected Short size runs every selected outcome. The full window must pass PF." values={EXEC_OUTCOMES} selected={[...(windows.shortOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"shortOutcomes",value)}/>
-                  <MultiChoice title={label+" Last outcomes"} description="Each outcome is an independent Set. A negative Last must sit inside a profitable full window." values={EXEC_OUTCOMES} selected={[...(windows.lastOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"lastOutcomes",value)}/>
+                  <MultiChoice title={label+" Short outcomes"} description="Each size and outcome has its own Set. The full window must pass its PF gate." values={EXEC_OUTCOMES} selected={[...(windows.shortOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"shortOutcomes",value)}/>
+                  <MultiChoice title={label+" Last outcomes"} description="Each outcome has its own Set. Short and Last can both be negative when Long supplies enough profit for the full window to pass." values={EXEC_OUTCOMES} selected={[...(windows.lastOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"lastOutcomes",value)}/>
                 </section>
               }) : LAST_N_STAGES.map(stage => {
                 const grid = (draft.strategyLastNGrid ?? {}) as LastNGrid
@@ -374,8 +376,23 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
           </section>
           {draft.relateEnabled === true && <section className="terminal-panel space-y-4 p-5">
             <h3 className="text-sm font-semibold">Relate allocation</h3>
-            <p className="terminal-muted text-xs">Each post-Base Set sizes from its own recent returns, consecutive wins and stop-to-target ratio.</p>
-            <div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("relate")).map(numberField)}</div>
+            <p className="terminal-muted text-xs leading-relaxed">Loss series: after every losing order a relation (one Set's consecutive positions) raises its next order by the volume factor X until a win ends the series, for at most N rounds and never above the maximum multiplier. A series that loses all N rounds restarts at base volume. Raising happens only while the relation's own recent returns still qualify. Win run: the same ladder climbed by consecutive wins.</p>
+            {enumField("relateStepMode", "Step rule", [{ value: "loss", label: "Loss series: raise after each loss until a win, N rounds at most" }, { value: "wins", label: "Win run: raise after each consecutive win, N steps at most" }])}
+            <div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("relate") && !field.key.startsWith("relateAuto")).map(numberField)}</div>
+            <div className="space-y-4 border-t border-[var(--terminal-border)] pt-5">
+              <label className="flex items-center justify-between gap-4">
+                <span className="text-xs font-medium">Size from a few recent returns (Auto)</span>
+                <input type="checkbox" className="h-4 w-4 accent-cyan-400" checked={draft.relateAutoEnabled === true} onChange={event => change("relateAutoEnabled", event.target.checked)} />
+              </label>
+              {draft.relateAutoEnabled === true && <>
+                <p className="terminal-muted text-xs leading-relaxed">Volume follows the step rule above in every qualifying relation. A relation qualifies once it has the minimum returns, a PF above the larger of this minimum, the config floor and its Auto PF floor, and a positive mean that clears the confidence in standard errors. It applies to every relation, including stops larger than half the target, and the manual 60-return window and stop cap are not used.</p>
+                <div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("relateAuto")).map(numberField)}</div>
+                <label className="flex items-center justify-between gap-4">
+                  <span className="text-xs font-medium">Extend a short tape with older returns of the ancestor Sets</span>
+                  <input type="checkbox" className="h-4 w-4 accent-cyan-400" checked={draft.relateAutoInherit !== false} onChange={event => change("relateAutoInherit", event.target.checked)} />
+                </label>
+              </>}
+            </div>
           </section>}
           <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Market universe & position sizing</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Scan up to this many available contracts. The model divides the configured volume factor by five before applying coordination adjustments. Exchange minimums and quantity precision still apply.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{EXECUTION_FIELDS.map(numberField)}</div><p className="terminal-muted mt-5 border-t border-[var(--terminal-border)] pt-4 text-xs">Initial sizing budget: <span className="font-mono text-[var(--terminal-fg)]">{Number.isFinite(budget) ? budget.toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—"} USDT</span></p></section>
           <section className="terminal-panel p-5"><h3 className="mb-2 text-sm font-semibold">Fee & slippage estimate</h3><p className="terminal-muted mb-5 text-xs leading-relaxed">Default taker 0.05% per side gives 0.10% round-trip fees; 10% fee-relative slippage gives 0.11% total modeled cost. The account’s exchange commission pair applies to the selected perpetual symbols. A failed refresh retains the last verified pair. Fee fields below apply when no verified pair is available. Slippage applies to the fee sum. Open positions retain their entry cost model.</p><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">{COST_FIELDS.map(numberField)}</div><details className="mt-5 text-xs"><summary className="cursor-pointer">Exchange fee coverage · {Object.keys(symbolFees).length} symbols</summary><p className="terminal-muted my-3">{!feeCheckedAt?"No startup commission check has been recorded.":feeReadFailures.length?`${feeReadFailures.length} symbol reads failed at the latest refresh. Cached pairs are labeled below; symbols without a known pair use configured fallbacks.`:"Latest startup commission reads completed without errors."}</p><div className="mt-3 max-h-60 overflow-auto"><table className="w-full text-left"><thead><tr><th>Symbol</th><th>Maker %</th><th>Taker %</th><th>Source</th></tr></thead><tbody>{Object.entries(symbolFees).map(([symbol,fee])=><tr key={symbol}><th className="py-1 font-normal">{symbol}</th><td>{fee.makerFeePct}</td><td>{fee.takerFeePct}</td><td>{feeReadFailures.includes(symbol)?"Last verified":feeCheckedAt?"Latest refresh":"Recorded"}</td></tr>)}</tbody></table></div></details></section>

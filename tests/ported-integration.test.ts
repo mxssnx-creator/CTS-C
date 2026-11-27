@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {TradingEngine,validateEngineSettings} from '../core/engine'
+import {REVERSAL_SOURCES} from '../shared/cts-reversal/reversal'
 import {generateStrategyCatalog} from '../core/catalog'
 import {advancePortedSources,advanceConfiguredSignal,historicalPortedSignals,newSignalState,PORTED_HISTORY_LIMIT,replayStrategy} from '../core/replay'
 import {DEFAULTS,configurationCount,validateConfiguration} from '../core/settings-schema'
@@ -32,7 +33,7 @@ test('genuine ten-second Tactic candles share calculation history without touchi
 })
 
 test('historical vectors preserve source ticks through rebases, higher frames, duplicate overlap and future extensions',()=>{
- const ids=['inverse-known-ema-9-21','tactic-dca-bounce-8-percent-0.5-1-0.25','rsi-reclaim-5-25','rsi-mom-5-35-follow','parabolic-sar-0.01-0.15','sar-fast-follow']
+ const ids=['inverse-known-ema-9-21','tactic-dca-bounce-8-percent-0.5-1-0.25','rsi-reclaim-5-25','rsi-mom-5-35-follow','parabolic-sar-0.01-0.15','sar-fast-follow','range-compression-breakout-6-18','range-compression-rejection-10-30']
  for(const minutes of [1,5,15]){
   const input=waveBars(minutes===1?PORTED_HISTORY_LIMIT+12:720).map(b=>({...b,timestamp:b.timestamp+60000})),ticks=newSignalState(),expected=input.map(bar=>advancePortedSources(ticks,bar,minutes,ids,{symbol:'SOL-USDT'})),batch=newSignalState(),actual=historicalPortedSignals(batch,input,minutes,ids,'SOL-USDT')
   for(const [i,bar] of input.entries())for(const id of ids)assert.equal(actual.get(bar.timestamp)?.get(id),expected[i].get(id),id+'/'+minutes+'/'+i)
@@ -51,12 +52,13 @@ test('every indication source, range, exit, ratio, period and supported timefram
  const ranges=['Micro','Low-Range','Minimal','Short','Normal','Long','Wide'],steps=[3,5,8,12,18,24,30]
  const exits=['fixed','trailing','trailing-only','trailing-fixed','trailing-only-fixed']
  for(const [i,range] of ranges.entries()){
-  const settings={...DEFAULTS,strategyEnabledRanges:[range],strategyTpSteps:[steps[i]],strategySlRatios:[.2,1,2.2],strategyExitModes:exits,strategyIndicationTypes:[...INDICATIONS],strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1,5,15,30]}
+  const selected=[...PORTED_CATALOG,...REVERSAL_SOURCES].map(s=>s.id)
+  const settings={...DEFAULTS,strategyEnabledRanges:[range],strategyTpSteps:[steps[i]],strategySlRatios:[.2,1,2.2],strategyExitModes:exits,strategyIndicationTypes:[...INDICATIONS],strategyIndicationSources:selected,strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1,5,15,30]}
   const configs=generateStrategyCatalog('bingx-x02',settings)
   assert.equal(configs.length,configurationCount(settings));assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)
   assert.ok(configs.every(c=>c.range===range&&c.takeprofit>0&&c.stoploss>0))
   const sources=new Set(configs.map(c=>c.indicationSourceId).filter(Boolean))
-  for(const source of PORTED_CATALOG)assert.ok(sources.has(source.id),source.id+'/'+range)
+  for(const id of selected)assert.ok(sources.has(id),id+'/'+range)
   for(const type of INDICATIONS)for(const exit of exits)assert.equal(configs.some(c=>c.type===type&&c.exitMode===exit),type!=='Low-Range'||range==='Low-Range',type+'/'+range+'/'+exit)
  }
 })

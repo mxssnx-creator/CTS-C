@@ -55,25 +55,45 @@ export interface EngineSettings {
   /** Retention ceiling; each lane keeps only the samples its stage/Axis windows need. Lifetime metrics are retained separately. */
   maxSamples: number
 }
+export type RelateStepMode = "loss" | "wins"
 export interface RelateSettings {
   enabled: boolean
+  /** N: most increases a relation can accumulate. */
   steps: number
+  /** X: volume added per step, as a fraction of the base allocation. */
   ratio: number
+  /** "loss": every losing order raises the next one by X until a win, at most N rounds; a series that loses all N rounds restarts at base. "wins": the same ladder climbed by consecutive wins. Absent means "wins" (checkpoints from before this setting). */
+  stepMode?: RelateStepMode
   lastN: number
   minTrades: number
   minPF: number
   maxMultiplier: number
   maxSlRatio: number
+  /** Evidence-adaptive sizing for short tapes; replaces the 60-sample manual gate when enabled. */
+  auto?: RelateAutoSettings
 }
 export interface StepAutoPolicy { enabled: boolean; lastN: number; minSamples: number; minPF: number }
+export interface RelateAutoSettings extends StepAutoPolicy {
+  /** One-sided z-score the mean return must clear over its standard error; 0 disables the check. */
+  confidence: number
+  /** Extend a short own tape with older, non-overlapping returns of the same trade stream in ancestor Sets. */
+  inherit: boolean
+}
 export type DcaAutoPolicy = StepAutoPolicy
 export interface StepVerdict {
   step: number; samples: number; required: number; profitFactor: number | null; state: "warming" | "unknown" | "held" | "qualified"
 }
 export interface EntryFill { price: number; quantity: number; timestamp: number; kind: "entry" | "block" | "dca" }
 export interface GateProof {stage:Stage;laneId:string;count:number;required:number;minPF:number;profitFactor:number|null;pfState:ProfitFactorState;qualified:boolean;checkedAt:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number;windowScope?:StageWindowScope;configWindow?:{count:number;profitFactor:number|null;qualified:boolean};autoPf?:AutoPfEvidence}
-interface SettledCohort {closed:number;profit:number;loss:number;netPnl:number}
-type ForwardMetrics = Omit<SettledCohort,"profit"|"loss"> & {open:number;profitFactor:number;pfState:ProfitFactorState}
+interface SettledCohort {
+  closed:number;profit:number;loss:number;netPnl:number
+  /** Optional because earlier checkpoints only kept net cash, not gross cash gains and losses. */
+  cashClosed?:number;cashProfit?:number;cashLoss?:number
+}
+type ForwardMetrics = Pick<SettledCohort,"closed"|"netPnl"> & {
+  open:number;profitFactor:number;pfState:ProfitFactorState
+  cashPF?:{samples:number;profitFactor:number|null;pfState:ProfitFactorState}
+}
 export interface PaperPosition {
   id: string; openedAt: number; direction: Direction; fills: EntryFill[]; quantity: number; entryPrice: number
   activationOrder?:number

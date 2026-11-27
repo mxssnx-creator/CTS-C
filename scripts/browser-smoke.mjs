@@ -39,7 +39,7 @@ try{
  await page.getByRole('button',{name:'Strategy lab',exact:true}).click()
  const main=page.getByLabel('Main completed samples',{exact:true})
  await page.getByRole('button',{name:'Prepare Tactic + Inverse',exact:true}).click()
- await page.getByLabel('Tactic and Inverse source configurations',{exact:true}).selectOption(['tactic-dca-bounce-8-percent-0.5-1-0.25','inverse-known-ema-9-21'])
+ await page.getByLabel('Independent indication source configurations',{exact:true}).selectOption(['tactic-dca-bounce-8-percent-0.5-1-0.25','inverse-known-ema-9-21'])
  await page.getByLabel('Micro normal processing',{exact:true}).uncheck()
  await page.getByLabel('Micro trailing processing',{exact:true}).uncheck()
  await page.getByLabel('Live entries',{exact:true}).selectOption('real-mirror')
@@ -101,7 +101,10 @@ try{
  assert.equal(await dynamicTrailing.getAttribute('aria-pressed'),'true')
  await fixedTrailing.click()
  await page.getByRole('checkbox',{name:'Relate',exact:true}).check()
- await page.getByLabel('Relate winning steps',{exact:true}).fill('10')
+ await page.getByLabel('Relate steps N (most increases)',{exact:true}).fill('10')
+ await page.getByLabel('Step rule',{exact:true}).selectOption('wins')
+ await page.getByRole('checkbox',{name:'Size from a few recent returns (Auto)',exact:true}).check()
+ await page.getByLabel('Relate Auto minimum returns',{exact:true}).fill('12')
  await page.getByRole('button',{name:'Save configuration',exact:true}).click()
  await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
  const lowRange=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
@@ -110,6 +113,7 @@ try{
  assert.deepEqual(JSON.parse(lowRange.strategyLowRangeSources),lowRangeSources)
  assert.ok(JSON.parse(lowRange.strategyExitModes).includes('trailing-fixed'))
  assert.deepEqual([lowRange.relateEnabled,lowRange.relateSteps],['true','10'])
+ assert.deepEqual([lowRange.relateStepMode,lowRange.relateAutoEnabled,lowRange.relateAutoMinSamples],['wins','true','12'])
 
  await page.getByLabel('Stage progression',{exact:true}).selectOption('exec-branches')
  const trendDca=page.getByRole('checkbox',{name:'Trend + DCA execution profile',exact:true})
@@ -175,6 +179,7 @@ try{
  assert.ok(replayResult.progression.find(row=>row.stage==='executed').indications.some(row=>row.source==='Trend'))
  await replay.getByText('Exec orders by indication',{exact:true}).click()
  await replay.getByRole('columnheader',{name:'Executed PF',exact:true}).waitFor()
+ assert.equal(await replay.getByRole('columnheader',{name:'Cash PF',exact:true}).count(),2)
  await replay.getByText(/^bingx:public ·/).waitFor()
 
  await page.getByRole('button',{name:'Integrations',exact:true}).click();await page.getByLabel('Search integrations').fill('unmatched');await page.getByText('No integration matches this search.').waitFor()

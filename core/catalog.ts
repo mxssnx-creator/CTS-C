@@ -1,3 +1,4 @@
+import { REVERSAL_BY_ID, REVERSAL_SOURCES } from "../shared/cts-reversal/reversal.ts"
 import { PORTED_CATALOG, DEFAULT_TACTIC_SOURCES, DEFAULT_INVERSE_SOURCES } from "../shared/cts-indications/catalog.ts"
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TIMEFRAMES } from "../shared/cts-indications/low-range-catalog.ts"
 import {checkedSignalsSources} from '../shared/cts-indications/signals-catalog'
@@ -70,13 +71,13 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   const microDistance=(key:string,fallback:number)=>{const value=Number(settings[key]??fallback);if(!Number.isFinite(value)||value<0||value>10)throw new Error(`Invalid ${key}`);return value}
   const microMinSl=microDistance('microMinSlDistancePct',.1)/100,microMinTrail=microDistance('microMinTrailDistancePct',.05)
   const selectedSources=values(settings,'strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES]).map(String)
-  const sourceKinds=new Map<string,string>([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES].map(s=>[s.id,s.kind]))
-  if(selectedSources.some(id=>!sourceKinds.has(id)))throw new Error('Unknown Tactic / Inverse source')
+  const sourceKinds=new Map<string,string>([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES,...REVERSAL_SOURCES].map(s=>[s.id,s.kind]))
+  if(selectedSources.some(id=>!sourceKinds.has(id)))throw new Error('Unknown indication source')
   const signalsSources=checkedSignalsSources(settings.strategySignalsSources)
   const lowRangeSources = selected(settings, "strategyLowRangeSources", LOW_RANGE_IDS, DEFAULT_LOW_RANGE_SOURCES)
   const maxWindowDrawdownPct=Number(settings.signalsMaxWindowDrawdownPct??3)
   if(!Number.isFinite(maxWindowDrawdownPct)||maxWindowDrawdownPct<0||maxWindowDrawdownPct>50)throw Error('Invalid Signals return drawdown limit')
-  const sourceList=(type:string)=>type==='Signals'?signalsSources:type==='Low-Range'?lowRangeSources:(type==='Tactic'||type==='Inverse')?selectedSources.filter(id=>sourceKinds.get(id)===type.toLowerCase()):[undefined]
+  const sourceList=(type:string)=>type==='Signals'?signalsSources:type==='Low-Range'?lowRangeSources:(["Tactic","Inverse","Trend-Reversal"].includes(type))?selectedSources.filter(id=>sourceKinds.get(id)===type.toLowerCase()):[undefined]
   for(const type of types)if(!sourceList(type).length)throw new Error(`Choose at least one ${type} source`)
   const periodsByType = new Map(types.map(type=>[type,indicationPeriods(type,periods,commonPeriods)]))
   const adaptivePf = autoPfPolicy(settings)
@@ -96,6 +97,7 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
      for(const period of periodsByType.get(type)!)for(const timeframe of timeframes){
       if(type==='Inverse'&&![1,5,15].includes(timeframe))continue
       if(type==='Tactic'&&!supportsTacticTimeframe(indicationSourceId!,timeframe))continue
+      if(indicationSourceId?.includes("trend-reversal-") && ![1,5,15,30].includes(timeframe))continue
       if (type === "Low-Range" && !LOW_RANGE_TIMEFRAMES.some(minutes => minutes === timeframe)) continue
       const takeprofit = cost / 100 * step*tpFactor
       const micro=range==="Micro"||range==="Low-Range"
@@ -103,7 +105,8 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
       const ratio = geometry.ratio ?? stoploss / takeprofit
       const trailDistancePct = trailPct ?? Math.max(stoploss*100*trailRatio*(micro?microTrailRatio:1),micro?microMinTrail:0)
       if(takeprofit>=1||stoploss>=1||trailDistancePct>=100)throw new Error('TP, SL and trailing distances must be below 100%')
-      const lookback = period
+      const reversalId = indicationSourceId?.replace(/^sig-(?=trend-reversal-)/, "")
+      const lookback = (reversalId && REVERSAL_BY_ID.get(reversalId)?.period) || period
       const maxHoldMinutes = (range==="Low-Range"?15:holdMinutes[STRATEGY_RANGES.indexOf(range)])*holdFactor
       const autoPfFloor=distancePf?Math.max(1.01,Math.min(autoPfMax,1+Math.floor(takeprofit*1000+1e-9)/10*autoPfRatio)):undefined
       const economics = createHash("sha256").update(JSON.stringify([type, takeprofit, stoploss, cost, maxHoldMinutes, lookback, exitMode,trailDistancePct, "ratcheted-trailing-v2",...(indicationSourceId?[indicationSourceId]:[]),...(timeframe!==1||technical||ported?[timeframe,'closed-ohlcv-v1']:[]),autoPfFloor,...(adaptivePf?["set-auto-pf-v1",adaptivePf]:[]),...(type==='Signals'?['signals-risk-v1',maxWindowDrawdownPct]:[])])).digest("hex").slice(0, 20)

@@ -55,7 +55,7 @@ export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindo
     if (stage === "base") result.base = { ...windows, long: choices(fields.long, EXEC_LONG_COUNTS) }
     else result[stage] = { ...windows, long: choices(fields.long, EXEC_LONG_MODES) }
     const baseLong = stage === "base" || result[stage].long.includes("inherit") ? Math.max(...result.base.long) : 0
-    if (baseLong + Math.max(...short) + Math.max(...last) > maxSamples) throw new Error(`Exec ${stage} windows exceed retained samples`)
+    if (baseLong + short.at(-1)! + Math.max(...last) > maxSamples) throw new Error(`Exec ${stage} windows exceed retained samples`)
   }
   return result
 }
@@ -63,8 +63,12 @@ export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindo
 export function execPathCount(windows: ExecWindows): number {
   return EXEC_EVALUATION_STAGES.reduce((count, stage) => {
     const w = windows[stage]
-    return count * w.long.length * w.short.length * (w.shortOutcomes?.length ?? 1) * w.last.length * (w.lastOutcomes?.length ?? 1)
+    return count * w.long.length * w.short.length * execShortOutcomes(w).length * w.last.length * (w.lastOutcomes?.length ?? 1)
   }, 1)
+}
+
+export function execShortOutcomes(windows: ShortLast): readonly Polarity[] {
+  return windows.shortOutcomes ?? POSITIVE_EXEC_OUTCOME
 }
 
 export function execBlockPolicy(long: number, short: number, last: number, shortPolarity:Polarity="positive",minimalPolarity:Polarity="positive"): BlockPolicy {

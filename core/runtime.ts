@@ -10,7 +10,7 @@ import { getStore,type StateStore } from './store'
 import type { Candle, EngineSettings, EngineEvent } from './types'
 import {flatEngineSettings,validateConfiguration} from './settings-schema'
 import { DEFAULT_STEP_AUTO } from './step-evidence'
-import { DEFAULT_RELATE } from './relate'
+import { DEFAULT_RELATE, DEFAULT_RELATE_AUTO } from './relate'
 import { AUTO_PF_DEFAULTS } from './auto-pf'
 import { EXEC_PROFILES, withDefaultExecProfile } from './exec-profile'
 
@@ -518,6 +518,25 @@ export class TerminalRuntime {
         const policy = next.coordinations[coordination].auto ??= { ...DEFAULT_STEP_AUTO }
         if (field === "enabled") policy.enabled = value === true
         else policy[field] = Number(value)
+        continue
+      }
+      if (key === "relateStepMode") {
+        if (value !== "loss" && value !== "wins") throw new Error("Relate step mode must be loss or wins")
+        const policy = next.coordinations.relate ??= { ...DEFAULT_RELATE }
+        policy.stepMode = value
+        continue
+      }
+      if (key.startsWith("relateAuto")) {
+        const policy = next.coordinations.relate ??= { ...DEFAULT_RELATE }
+        const auto = policy.auto ??= { ...DEFAULT_RELATE_AUTO }
+        if (key === "relateAutoEnabled" || key === "relateAutoInherit") {
+          if (typeof value !== "boolean") throw new Error("Boolean required")
+          auto[key === "relateAutoEnabled" ? "enabled" : "inherit"] = value
+        } else {
+          const field = ({ relateAutoLastN: "lastN", relateAutoMinSamples: "minSamples", relateAutoMinPF: "minPF", relateAutoConfidence: "confidence" } as const)[key as "relateAutoLastN"]
+          if (!field) throw new Error(`Unknown setting ${key}`)
+          auto[field] = Number(value)
+        }
         continue
       }
       if (Object.hasOwn(relateFields, key)) {
