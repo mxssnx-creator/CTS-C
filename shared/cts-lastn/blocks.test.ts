@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {blockPolicies,blockPrefix,blockWindow,evaluateBlocks,blockPolicyKey,DEFAULT_BLOCK_POLICY,LONG_COUNTS,SHORT_COUNTS,MINIMAL_COUNTS} from './blocks.ts';
+test('Exec rejects a weak inverse Short or Last even when the entire window is profitable', () => {
+  const policy = { long: 1, short: 2, minimal: 2, shortPolarity: 'negative' as const,
+    minimalPolarity: 'negative' as const, lastRequiresPF: true };
+  const score = (short: number, last: number) => evaluateBlocks(blockPrefix([-last, 1, -short, 1, 20]), policy, 1.5);
+  assert.equal(score(1.25, 2).short.state, 'failed');
+  assert.equal(score(2, 1.25).minimal.state, 'failed');
+  assert.equal(score(1.5, 1.5).state, 'qualified');
+});
 test('20/10/3 uses 33 disjoint closes and a negative tail cannot contaminate the long PF',()=>{
   const v=[-1,-1,-1,...Array(10).fill(-2),...Array(20).fill(3)];
   const p={...DEFAULT_BLOCK_POLICY,shortPolarity:'negative' as const,minimalPolarity:'negative' as const};

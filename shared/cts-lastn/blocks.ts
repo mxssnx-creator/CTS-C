@@ -11,7 +11,7 @@ export function checkBlockPolicy(p:BlockPolicy):void {
     !['positive','negative'].includes(p.shortPolarity)||!['positive','negative'].includes(p.minimalPolarity))throw new Error('Invalid disjoint Last-N policy');
 }
 export const blockRequired=(p:BlockPolicy)=>p.long+p.short+p.minimal;
-export const blockPolicyKey=(p:BlockPolicy)=>JSON.stringify([p.lastRequiresPF?'disjoint-positions-v2':'disjoint-positions-v1',p.long,p.short,p.minimal,p.shortPolarity,p.minimalPolarity]);
+export const blockPolicyKey=(p:BlockPolicy)=>JSON.stringify([p.lastRequiresPF?'disjoint-positions-v3':'disjoint-positions-v1',p.long,p.short,p.minimal,p.shortPolarity,p.minimalPolarity]);
 /** No max(short/long) clipping: every requested combination has its own exact identity. */
 export function* blockPolicies():Generator<Readonly<BlockPolicy>> {
   for(const long of LONG_COUNTS)for(const short of SHORT_COUNTS)for(const minimal of MINIMAL_COUNTS)
@@ -54,14 +54,14 @@ export function blockWindow(pre:BlockPrefix,offset:number,n:number,minPf:number,
   if(Number.isFinite(gp)&&Number.isFinite(gl)&&Math.abs(net)<=Number.EPSILON*(gp+gl)*(count+1))net=directSum(pre.values,start,end,'net');
   const unknown=pre.unknown[end]!==pre.unknown[start]||![gp,gl,net].every(Number.isFinite);
   const pf=unknown||count<n?null:gl>0?gp/gl:gp>0?Infinity:0;
-  const passed=n===0||(polarity==='negative'?net<0:net>0&&(signOnly||pf!==null&&pf>=minPf));
+  const passed=n===0||(polarity==='negative' ? net<0&&(signOnly||gl>=gp*minPf) : net>0&&(signOnly||pf!==null&&pf>=minPf));
   return {offset,requested:n,count,gp,gl,net,pf,state:unknown?'unknown':count<n?'insufficient':passed?'qualified':'failed'};
 }
 /** One prefix per exact configuration can evaluate all 1,560 policies without copying position arrays. */
 export function evaluateBlocks(pre:BlockPrefix,p:BlockPolicy,minPf:number) {
   checkBlockPolicy(p);if(!Number.isFinite(minPf)||minPf<=1)throw new Error('Last-N PF floor must exceed one');
   const minimal=blockWindow(pre,0,p.minimal,minPf,p.minimalPolarity,!p.lastRequiresPF);
-  const short=blockWindow(pre,p.minimal,p.short,minPf,p.shortPolarity);
+  const short=blockWindow(pre,p.minimal,p.short,minPf,p.shortPolarity,!p.lastRequiresPF && p.shortPolarity==='negative');
   const long=blockWindow(pre,p.minimal+p.short,p.long,minPf);
   const rows=[long,short,minimal];
   // A signed Exec block describes a pullback. The full window still needs positive evidence after costs.
