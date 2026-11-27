@@ -35,6 +35,7 @@ export class ParentBranches {
   private readonly configs = new Map<string, StrategyConfig>()
   private readonly children = new Map<string, StrategyConfig[]>()
   private readonly policies = new Map<string, BlockPolicy>()
+  private readonly plans = new WeakMap<ExecWindows, Map<string, readonly BlockPolicy[]>>()
 
   constructor(catalog: Record<string, unknown>, readonly exec = false) {
     this.grid = checkLastNGrid(catalog.strategyLastNGrid)
@@ -58,6 +59,26 @@ export class ParentBranches {
     return policy
   }
 
+  private windowChoices(plan: ExecWindows, stage: EvaluationStage, baseLong: number): readonly BlockPolicy[] {
+    let cache = this.plans.get(plan)
+    if (!cache) { cache = new Map(); this.plans.set(plan, cache) }
+    const count = stage !== "base" && plan[stage].long.includes("inherit") ? baseLong : 0
+    const key = stage + "/" + count
+    const existing = cache.get(key)
+    if (existing) return existing
+    const windows = plan[stage]
+    const longs = stage === "base" ? plan.base.long : plan[stage].long.map(mode => mode === "inherit" ? count : 0)
+    const choices = []
+    for (const long of longs) for (const short of windows.short) for (const last of windows.last) {
+      for (const shortSign of execShortOutcomes(windows)) for (const lastSign of windows.lastOutcomes ?? POSITIVE_EXEC_OUTCOME) {
+        choices.push(this.policy(long, short, last, shortSign, lastSign))
+      }
+    }
+    if (stage === "base") choices.sort((a,b) => blockRequired(a) - blockRequired(b))
+    cache.set(key, choices)
+    return choices
+  }
+
   private make(parent: StrategyConfig, coordination: Coordination | undefined, stage: EvaluationStage, n?: number, policy?: BlockPolicy) {
     const suffix = policy ? `${policy.long}-${policy.short}-${policy.minimal}${policy.shortPolarity==="negative"?"-sn":""}${policy.minimalPolarity==="negative"?"-ln":""}` : n ?? 0
     const id = parent.id + (coordination ? "." + coordination : policy ? ".branch2" : ".branch1") + "." + stage + suffix
@@ -79,15 +100,8 @@ export class ParentBranches {
     if (!configs) {
       const plan = parent.execProfile ? profiles.get(parent.execProfile)!.windows : this.windows
       if (plan) {
-        const windows = plan[stage]
-        const longs = stage === "base" ? plan.base.long : plan[stage].long.map(mode => mode === "none" ? 0 : parent.branch!.windows!.base!.long)
-        configs = []
-        for (const long of longs) for (const s of windows.short) for (const l of windows.last) {
-          for (const shortOutcome of execShortOutcomes(windows)) for (const lastOutcome of windows.lastOutcomes??POSITIVE_EXEC_OUTCOME) {
-            configs.push(this.make(parent, coordination, stage, undefined, this.policy(long,s,l,shortOutcome,lastOutcome)))
-          }
-        }
-        if (stage === "base") configs.sort((a,b) => blockRequired(a.branch!.windows!.base!)-blockRequired(b.branch!.windows!.base!))
+        const baseLong = stage === "base" ? 0 : parent.branch!.windows!.base!.long
+        configs = this.windowChoices(plan, stage, baseLong).map(policy => this.make(parent, coordination, stage, undefined, policy))
       } else {
         const options = this.grid[stage as LegacyEvaluationStage]
         configs = (options?.length ? options : [undefined]).map(n => this.make(parent, coordination, stage, n))

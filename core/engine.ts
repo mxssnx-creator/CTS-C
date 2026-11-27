@@ -10,7 +10,7 @@ import { createHash } from "node:crypto"
 import { generateEngineCatalog } from "./catalog"
 import { EXEC_PROFILES, PROFILE_BASE_COORDINATIONS, PROFILE_DCA_SIZING, execProfileEnabled } from "./exec-profile"
 import { BRANCH_COORDINATIONS as COORDINATIONS, ParentBranches, checkStageCoordinations } from "./stage-branches"
-import { checkExecWindows, checkLastNGrid, DEFAULT_EXEC_MIN_PF, EXEC_EVALUATION_STAGES, LAST_N_STAGES, lastNVariantCount, type EvaluationStage } from "./last-n-grid"
+import { checkExecWindows, checkLastNGrid, DEFAULT_EXEC_MIN_PF, DEFAULT_SIGNAL_MIN_PF, EXEC_EVALUATION_STAGES, LAST_N_STAGES, lastNVariantCount, type EvaluationStage } from "./last-n-grid"
 import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals, newSignalState } from "./replay"
 import { describeProfitFactor, POSITION_COST_PCT_DEFAULT } from "./metrics"
 import { isFixedTrailing, observedExit, observedExitInto } from "./exits"
@@ -124,6 +124,7 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   }
   for(const coordination of COORDINATIONS)finite(settings.volumeRatios![coordination]!,`${coordination} volume ratio`,.001,100)
   finite(settings.maxOrderNotional??0,'maximum order notional',0,1e9)
+  finite(settings.signalMinPF ?? DEFAULT_SIGNAL_MIN_PF, "Signals PF", 1.01, 999)
   for (const stage of ["base", "main", "real"] as const) { finite(settings.stageLastN[stage], `${stage} lastN`, 1, settings.maxSamples, true); finite(settings.stageMinPF[stage], `${stage} PF`, 0, 999) }
   if(settings.stageBlocks)for(const [stage,policy]of Object.entries(settings.stageBlocks)){
     if(!["base","main","real"].includes(stage))throw new Error("Invalid block stage");checkBlockPolicy(policy);
@@ -608,11 +609,13 @@ export class TradingEngine {
   }
   private stageWindowPolicy(config: StrategyConfig | undefined, source: EvaluationStage) {
     const settings = this.state.settings
+    const floor = source === "exec" ? settings.execMinPF ?? DEFAULT_EXEC_MIN_PF : settings.stageMinPF[source]
+    const minPF = config?.type === "Signals" ? Math.max(floor, settings.signalMinPF ?? DEFAULT_SIGNAL_MIN_PF) : floor
     const ownBlocks = config?.branch?.windows?.[source]
-    if (ownBlocks) return { required: blockRequired(ownBlocks), minPF: source === "exec" ? settings.execMinPF ?? DEFAULT_EXEC_MIN_PF : settings.stageMinPF[source], blocks: ownBlocks }
-    if (source === "exec") return { required: 1, minPF: settings.execMinPF ?? DEFAULT_EXEC_MIN_PF, blocks: undefined }
+    if (ownBlocks) return { required: blockRequired(ownBlocks), minPF, blocks: ownBlocks }
+    if (source === "exec") return { required: 1, minPF, blocks: undefined }
     const own = config?.stageLastN?.[source]
-    return { required: own ?? settings.stageLastN[source], minPF: settings.stageMinPF[source],
+    return { required: own ?? settings.stageLastN[source], minPF,
       blocks: own === undefined ? settings.stageBlocks?.[source] : undefined }
   }
   private stageWindow(lane:LaneState | undefined,source:EvaluationStage,before:number,exact=false):StageWindowResult {

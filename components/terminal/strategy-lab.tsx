@@ -19,7 +19,7 @@ import { CORE_INDICATIONS, CORE_SIGNAL_PERIODS } from "@/core/indications"
 import {formatProfitFactor} from './profit-factor'
 import { DEFAULT_EXIT_MODES, type ProfitFactorState, type Stage, type Coordination, type ExitMode } from '@/core/types'
 
-import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, EXEC_PF_FIELD, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
+import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, EXEC_PF_FIELD, SIGNAL_PF_FIELD, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
 import { SELECTABLE_STOP_DISTANCE_PCTS, SELECTABLE_TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
 import { BRANCH_COORDINATIONS, type StageCoordinations } from "@/core/stage-branches"
 import { EXEC_EVALUATION_STAGES, EXEC_LONG_COUNTS, EXEC_LAST_COUNTS, EXEC_LONG_MODES, EXEC_OUTCOMES, POSITIVE_EXEC_OUTCOME, LAST_N_STAGES, execPathCount, stageShortCounts, type ExecWindows, type LastNGrid } from "@/core/last-n-grid"
@@ -219,6 +219,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
       {Object.keys(symbolFees).length>0&&<section className="terminal-panel space-y-4 p-5"><h3 className="text-sm font-semibold">Relational volume · Symbols</h3><VolumeRatioSliders value={draft.relationalVolumeRatios} onChange={v=>change('relationalVolumeRatios',v)} buckets={{symbols:Object.keys(symbolFees)}}/></section>}
       <section className="terminal-panel space-y-4 p-5" aria-label="Signals settings">
         <h3 className="text-sm font-semibold">Signals · sources &amp; independent voting bands</h3>
+        {numberField(SIGNAL_PF_FIELD)}
         <p className="terminal-muted text-xs">{SIGNAL_SOURCES.length} computed source families, short/medium variants and independent category coordinators. Each source votes once; conflicting variants abstain. These use observed exchange candles, not third-party trade recommendations.</p>
         <button type="button" className="terminal-button" onClick={()=>{dirtyRef.current=true;setDirty(true);setDraft(current=>({...current,strategyIndicationTypes:['Signals'],strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],strategyEnabledRanges:['Micro','Low-Range','Minimal','Short'],strategyTpSteps:[2,3,5,8,12],strategySlRatios:[.6,1],strategyExitModes:[...DEFAULT_EXIT_MODES],strategySignalTimeframes:[1],signalsMaxWindowDrawdownPct:3}));setMessage('Signals draft prepared. Save to apply it. Research results do not guarantee profitable execution.')}}>Prepare Signals preset</button>
         <label className="block text-xs">Filter Signals sources<input className="terminal-input mt-2 w-full" aria-label="Filter Signals sources" value={signalsFilter} onChange={e=>setSignalsFilter(e.target.value)} placeholder="Trend, breakout, volume, research, minimum 3..."/></label>

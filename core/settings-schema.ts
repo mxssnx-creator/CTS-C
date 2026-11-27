@@ -8,7 +8,7 @@ import { strategyProcessing, validateProcessingByRange } from "./strategy-proces
 import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS, CORE_SIGNAL_PERIODS, indicationPeriods } from "./indications"
 import { DEFAULT_EXIT_MODES, EXIT_MODES, type EngineSettings, type ExitMode, type StrategyRange } from "./types"
 import { EXPANDED_CATALOG_MAX, STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS, SELECTABLE_STOP_DISTANCE_PCTS, SELECTABLE_TRAIL_DISTANCE_PCTS, protectionVariants } from "./protection-grid"
-import { LAST_N_STAGES, DEFAULT_EXEC_MIN_PF, DEFAULT_EXEC_WINDOWS, checkExecWindows, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
+import { LAST_N_STAGES, DEFAULT_EXEC_MIN_PF, DEFAULT_SIGNAL_MIN_PF, DEFAULT_EXEC_WINDOWS, checkExecWindows, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TIMEFRAMES } from "../shared/cts-indications/low-range-catalog.ts"
 import { DEFAULT_STEP_AUTO } from "./step-evidence"
 import { DEFAULT_RELATE, DEFAULT_RELATE_AUTO } from "./relate"
@@ -59,7 +59,7 @@ export const DEFAULTS: Record<string, unknown> = {
   strategyIndicationSources:[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES],
   strategyLowRangeSources:[...DEFAULT_LOW_RANGE_SOURCES],
   strategySignalPeriods:[20],strategyCoreSignalPeriods:[0],strategySignalTimeframes:[1],
-  strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],signalsMaxWindowDrawdownPct:3,
+  strategySignalsSources:[...DEFAULT_SIGNALS_SOURCES],signalsMaxWindowDrawdownPct:3,signalMinPF:DEFAULT_SIGNAL_MIN_PF,
 }
 export const NUMERIC_FIELDS = [
   { key: "baseProfitFactor", label: "Base → Main minimum PF", min: 0, max: 999, step: 0.01 },
@@ -70,6 +70,7 @@ export const NUMERIC_FIELDS = [
   { key: "realEvalPosCount", label: "Real completed samples", min: 1, max: 250, step: 1 },
 ]
 export const EXEC_PF_FIELD = { key: "execMinPF", label: "Exec → Live minimum PF", min: 1.01, max: 999, step: 0.01 }
+export const SIGNAL_PF_FIELD = { key: "signalMinPF", label: "Signals minimum PF at every stage", min: 1.01, max: 999, step: 0.01 }
 export const COST_FIELDS = [
   { key: "makerFeePct", label: "Maker fee (%)", min: 0, max: 20, step: 0.001 },
   { key: "takerFeePct", label: "Taker fee (%)", min: 0, max: 20, step: 0.001 },
@@ -145,7 +146,7 @@ export const FACTOR_FIELDS = [
   { key: "strategyTrailRatio", label: "Trail / SL distance ratio", min: 0.05, max: 10, step: 0.05 },
   { key: "holdTimeFactor", label: "Maximum hold factor", min: 0.05, max: 10, step: 0.05 },
 ]
-export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, EXEC_PF_FIELD, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
+export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, EXEC_PF_FIELD, SIGNAL_PF_FIELD, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
 
 const sourceKinds=new Map([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...REVERSAL_SOURCES].map(s=>[s.id,s.kind]))
 export function configurationCount(values: Record<string, unknown>) {
@@ -194,7 +195,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if (!Object.prototype.hasOwnProperty.call(values, key)) {
       if (partial) continue
       if (key === "strategyStageCoordinations") { output[key] = {}; continue }
-      if (key === "strategyExecWindows" || key === "execMinPF" || key === "strategyCoreSignalPeriods" || EXEC_PROFILES.some(profile=>profile.setting===key)) { output[key] = structuredClone(DEFAULTS[key]); continue }
+      if (key === "strategyExecWindows" || key === "execMinPF" || key === "signalMinPF" || key === "strategyCoreSignalPeriods" || EXEC_PROFILES.some(profile=>profile.setting===key)) { output[key] = structuredClone(DEFAULTS[key]); continue }
       if (Object.hasOwn(AUTO_PF_DEFAULTS,key)) {
         output[key] = key === "autoPfMode" && values.autoPfEnabled === true ? "tp-distance" : DEFAULTS[key]
         continue
@@ -303,6 +304,7 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
     normalVolumeRatio:s.volumeRatios?.normal??1,axisVolumeRatio:s.volumeRatios?.axis??1,blockVolumeFactor:s.volumeRatios?.block??1,dcaVolumeRatio:s.volumeRatios?.dca??1,relateVolumeRatio:s.volumeRatios?.relate??1,
     prevPosWindow:s.stageLastN.base,mainEvalPosCount:s.stageLastN.main,realEvalPosCount:s.stageLastN.real,
     baseProfitFactor:s.stageMinPF.base,mainProfitFactor:s.stageMinPF.main,realProfitFactor:s.stageMinPF.real,execMinPF:s.execMinPF??DEFAULT_EXEC_MIN_PF,
+    signalMinPF:s.signalMinPF??DEFAULT_SIGNAL_MIN_PF,
     variantBlockEnabled:s.coordinations.block.enabled,variantDcaEnabled:s.coordinations.dca.enabled,axisPrevEnabled:s.coordinations.axis.enabled,
     blockVolumeRatio:s.coordinations.block.ratio,axisPrevious:s.coordinations.axis.previous,axisLast:s.coordinations.axis.last,axisOutcome:s.coordinations.axis.outcome,axisReferenceStage:s.coordinations.axis.reference??'same-stage',
     blockBehavior:s.coordinations.block.behavior??"pyramid",blockSize:s.coordinations.block.size??3,blockPauseRounds:s.coordinations.block.pauseRounds??1,blockMaxMultiplier:s.coordinations.block.maxMultiplier??3,
