@@ -11,8 +11,9 @@ import preset from "../research-data/exec-dca-trend-preset.json"
 
 const symbols = ["UP-USDT","DOWN-USDT"]
 const [trend,sar] = EXEC_PROFILES
+const fixed = {strategyShortStopPcts:[.8],strategyLongStopPcts:[]}
 const configured = { ...DEFAULT_ENGINE_SETTINGS, symbols, stageGateMode:"exec-branches" as const,
-  catalog:{...DEFAULT_ENGINE_SETTINGS.catalog,strategyEnabledRanges:["Minimal"],strategyIndicationTypes:["Trend"],
+  catalog:{...DEFAULT_ENGINE_SETTINGS.catalog,...fixed,strategyEnabledRanges:["Minimal"],strategyIndicationTypes:["Trend"],
     strategyTpSteps:[6],strategySlRatios:[1],strategyExitModes:["fixed"],
     strategyExecWindows:{base:{long:[20],short:[8],last:[2]},main:{long:["inherit"],short:[8],last:[2]},
       real:{long:["inherit"],short:[8],last:[2]},exec:{long:["inherit"],short:[20],last:[2]}},
@@ -26,10 +27,10 @@ test("recovery profiles retain signed Last-N branches across saved settings and 
   const runtime=new TerminalRuntime("bingx-x02",store)
   let restored:TerminalRuntime|undefined
   try {
-    runtime.saveFlatSettings({[profile.setting]:true})
+    runtime.saveFlatSettings({...fixed,[profile.setting]:true})
     const settings=runtime.engine.settings
     const geometries=generateEngineCatalog(settings).filter(config=>config.execProfile===profile.id)
-    assert.deepEqual(geometries.map(config=>[config.type,config.position_cost_step,config.tpStep,config.slRatio]),[["Trend_Efficiency",10,8,.8]])
+    assert.deepEqual(geometries.map(config=>[config.type,config.position_cost_step,config.tpStep,config.stoploss]),[["Trend_Efficiency",10,8,.008]])
     const plan=new ParentBranches(settings.catalog,true)
     const roots=plan.variants(geometries[0],undefined,"base")
     assert.equal(roots.length,8)
@@ -62,10 +63,10 @@ test("new and old Exec connections enable validated profiles and save independen
   const fresh=new TerminalRuntime("bingx-x02",store)
   const defaults=fresh.snapshot().settings
   for(const profile of EXEC_PROFILES)assert.equal(defaults[profile.setting],"true")
-  assert.equal(fresh.engine.snapshot({laneLimit:0}).catalogCount,261)
+  assert.equal(fresh.engine.snapshot({laneLimit:0}).catalogCount,1344)
   const sarGeometries=generateEngineCatalog(fresh.engine.settings).filter(config=>config.execProfile===sar.id)
-  assert.deepEqual(sarGeometries.map(config=>config.indicationSourceId),[...sar.catalogs[0].strategyIndicationSources])
-  assert.equal(new Set(sarGeometries.map(config=>config.id)).size,2)
+  assert.deepEqual(new Set(sarGeometries.map(config=>config.indicationSourceId)),new Set(sar.catalogs[0].strategyIndicationSources))
+  assert.equal(new Set(sarGeometries.map(config=>config.id)).size,2*27)
   assert.equal(fresh.control.running,false)
   fresh.shutdown()
   const before=new TradingEngine(configured)
@@ -78,11 +79,11 @@ test("new and old Exec connections enable validated profiles and save independen
   upgraded.shutdown()
   const reopened=new TerminalRuntime("bingx-x02",store)
   assert.equal(reopened.snapshot().settings.strategyTrendDcaEnabled,"false")
-  assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount+8)
+  assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount+7)
   reopened.saveFlatSettings({strategyTrendDcaEnabled:true,variantDcaEnabled:false})
   assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount)
   reopened.saveFlatSettings({variantDcaEnabled:true})
-  assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount+9)
+  assert.equal(reopened.engine.snapshot({laneLimit:0}).catalogCount,before.snapshot({laneLimit:0}).catalogCount+8)
   reopened.shutdown();store.close()
 })
 
@@ -90,7 +91,7 @@ test("default Trend + DCA reproduces the isolated profile across sides, fees and
   const actual=new TradingEngine({...configured,catalog:{...configured.catalog,strategyTrendDcaEnabled:true}})
   const db=new StateStore(":memory:")
   const isolated=new TerminalRuntime("bingx-x02",db)
-  isolated.saveFlatSettings(preset)
+  isolated.saveFlatSettings({...preset,...fixed})
   isolated.engine.updateSettings({symbols,symbolFees:configured.symbolFees})
   const expected:ClosedTrade[]=[], received:ClosedTrade[]=[]
   isolated.engine.observeStageCloses(trade=>expected.push(trade))

@@ -48,12 +48,12 @@ test('historical vectors preserve source ticks through rebases, higher frames, d
  const first=new TradingEngine(cfg);first.processCandles('SOL-USDT',bars.slice(0,317));const restarted=TradingEngine.fromSerialized(first.serializeState());restarted.processCandles('SOL-USDT',bars.slice(300));assert.deepEqual(strip(restarted),strip(whole))
 })
 
-test('every indication source, range, exit, ratio, period and supported timeframe remains represented without truncation',()=>{
+test('every indication source, range, exit, period and supported timeframe remains represented on eligible fixed stops',()=>{
  const ranges=['Micro','Low-Range','Minimal','Short','Normal','Long','Wide'],steps=[3,5,8,12,18,24,30]
  const exits=['fixed','trailing','trailing-only','trailing-fixed','trailing-only-fixed']
  for(const [i,range] of ranges.entries()){
   const selected=[...PORTED_CATALOG,...REVERSAL_SOURCES].map(s=>s.id)
-  const settings={...DEFAULTS,strategyEnabledRanges:[range],strategyTpSteps:[steps[i]],strategySlRatios:[.2,1,2.2],strategyExitModes:exits,strategyIndicationTypes:[...INDICATIONS],strategyIndicationSources:selected,strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1,5,15,30]}
+  const settings={...DEFAULTS,strategyShortStopPcts:steps[i]<=16?[.3]:[],strategyLongStopPcts:steps[i]>16?[.4]:[],strategyEnabledRanges:[range],strategyTpSteps:[steps[i]],strategyExitModes:exits,strategyIndicationTypes:[...INDICATIONS],strategyIndicationSources:selected,strategySignalPeriods:[10,14,20,40,60],strategySignalTimeframes:[1,5,15,30]}
   const configs=generateStrategyCatalog('bingx-x02',settings)
   assert.equal(configs.length,configurationCount(settings));assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)
   assert.ok(configs.every(c=>c.range===range&&c.takeprofit>0&&c.stoploss>0))
@@ -64,7 +64,7 @@ test('every indication source, range, exit, ratio, period and supported timefram
 })
 
 test('all imported sources have distinct identities across supported timeframes and match the Settings count',()=>{
- const values={...DEFAULTS,strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Tactic','Inverse'],strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),strategySignalTimeframes:[1,5,15,30]}
+ const values={...DEFAULTS,strategyShortStopPcts:[.3],strategyLongStopPcts:[],strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Tactic','Inverse'],strategyIndicationSources:PORTED_CATALOG.map(s=>s.id),strategySignalTimeframes:[1,5,15,30]}
  const configs=generateStrategyCatalog('bingx-x02',values)
  assert.equal(configs.length,2314*4+604*3)
  assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)

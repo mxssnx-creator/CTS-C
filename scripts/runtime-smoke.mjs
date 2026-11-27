@@ -24,7 +24,7 @@ try{
  assert.equal((await fetch(origin+'/api/terminal')).status,401)
  const cookie=await login()
  const snapshot=await fetch(origin+'/api/terminal',{headers:{Cookie:cookie}});assert.equal(snapshot.status,200)
- const state=await snapshot.json();assert.equal(state.readiness.x02Configured,false);assert.equal(state.equity,null);assert.equal(state.openPositions.length,0);assert.equal(state.engine.catalogCount,261)
+ const state=await snapshot.json();assert.equal(state.readiness.x02Configured,false);assert.equal(state.equity,null);assert.equal(state.openPositions.length,0);assert.equal(state.engine.catalogCount,1344)
  for(const key of ['strategyTrendDcaEnabled','strategySarDcaEnabled','strategyRsiContinuationDcaEnabled','strategyBreakoutContinuationDcaEnabled','strategyTrendRecoveryDcaEnabled','strategyBreakoutRecoveryDcaEnabled','strategySar04DcaEnabled'])assert.equal(state.settings[key],'true')
  assert.equal((await action(cookie,{action:'save-settings',settings:{mainEvalPosCount:7,volumeFactor:.01,symbolCount:100,stageWindowScope:'config',microStageWindowScope:'both',blockAutoEnabled:true,blockAutoLastN:12,blockAutoMinSamples:6,blockAutoMinPF:1.2}})).status,200)
  assert.equal((await action(cookie,{action:'save-settings',settings:{mainEvalPosCount:0}})).status,400)
@@ -37,7 +37,7 @@ try{
  if(process.env.CTS_TEST_NETWORK==='1'){
   const market=await fetch(origin+'/api/market-data?exchange=bingx&demo=true&symbol=BTC-USDT',{headers:{Cookie:cookie}});assert.equal(market.status,200);assert.ok((await market.json()).data.price>0)
   const candles=await fetch(origin+'/api/market-data/candles?exchange=bingx&demo=true&symbol=BTC-USDT&interval=5m',{headers:{Cookie:cookie}});assert.equal(candles.status,200);const bars=await candles.json();assert.ok(bars.data.length>=100);assert.equal(bars.source,'bingx:demo')
-  const replay=await fetch(origin+'/api/terminal/replay',{method:'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({symbol:'BTC-USDT',interval:'5m',exchange:'bingx',demo:true})});assert.equal(replay.status,200);const study=await replay.json();assert.equal(study.executionEligible,false);assert.equal(study.configurations,252);assert.ok(study.trainingCandles>0&&study.holdoutCandles>0)
+  const replay=await fetch(origin+'/api/terminal/replay',{method:'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({symbol:'BTC-USDT',interval:'5m',exchange:'bingx',demo:true})});assert.equal(replay.status,200);const study=await replay.json();assert.equal(study.executionEligible,false);assert.equal(study.configurations,1140);assert.ok(study.trainingCandles>0&&study.holdoutCandles>0)
   console.log(JSON.stringify({marketApiPassed:true,source:bars.source,actualCandles:bars.data.length,replayConfigurations:study.configurations,ordersSubmitted:0}))
  }
  await stop();await start()

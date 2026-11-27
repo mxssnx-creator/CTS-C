@@ -11,12 +11,12 @@ import {observedExit} from '../core/exits'
 import {StateStore} from '../core/store'
 import type {LaneState} from '../core/types'
 
-test('Micro/Low-Range Cartesian identity covers every step, tenth ratio, exit and timeframe',()=>{
+test('Micro/Low-Range Cartesian identity covers every eligible absolute stop, exit and timeframe',()=>{
   const settings={...DEFAULTS,strategyEnabledRanges:['Micro','Low-Range'],strategyTpSteps:[2,3,4,5],strategySlRatios:Array.from({length:15},(_,i)=>(i+2)/10),strategyExitModes:['fixed','trailing','trailing-only'],strategyIndicationTypes:['MA_Cross'],strategySignalTimeframes:[1/6,1]}
   const configs=generateStrategyCatalog('bingx-x02',settings)
-  assert.equal(configs.length,720);assert.equal(new Set(configs.map(c=>c.id)).size,720)
+  assert.equal(configs.length,(4+6+9+11)*2*3*2);assert.equal(new Set(configs.map(c=>c.id)).size,configs.length)
   assert.equal(configurationCount(settings),configs.length)
-  for(const c of configs){assert.ok(Math.abs(c.roundTripCostPct!-.11)<1e-12);assert.ok(Math.abs(c.stoploss-Math.max(.001,c.takeprofit*c.slRatio!))<1e-12);assert.ok(Math.abs(c.trailDistancePct!-Math.max(.05,c.stoploss*50))<1e-12)}
+  for(const c of configs){assert.ok(Math.abs(c.roundTripCostPct!-.11)<1e-12);assert.ok(Math.abs(c.stoploss-Math.max(.001,c.takeprofit*c.slRatio!))<1e-12);assert.ok(c.stoploss <= 2.5*c.takeprofit+1e-12); if(c.trailing)assert.ok(Math.abs(c.trailDistancePct!-Math.max(.05,c.stoploss*50))<1e-12)}
 })
 test('maker/taker costs charge two execution legs and fee-relative slippage exactly once',()=>{
   assert.ok(Math.abs(resolveTradingCostPct()-.11)<1e-12)

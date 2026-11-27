@@ -28,7 +28,7 @@ test("native RSI, SAR, Trend and Breakout signals produce qualified Exec entries
   const runtime=new TerminalRuntime("bingx-x02",store)
   let resumed:TerminalRuntime|undefined
   try {
-    runtime.saveFlatSettings({...profile,strategyIndicationTypes:["Tactic","Trend","Break_Continuation"],strategyIndicationSources:oscillators})
+    runtime.saveFlatSettings({...profile,strategyShortStopPcts:[1.2],strategyLongStopPcts:[],strategyIndicationTypes:["Tactic","Trend","Break_Continuation"],strategyIndicationSources:oscillators})
     runtime.engine.updateSettings({symbols:[symbol]})
     const bars=observedTape(), warmup=bars.slice(0,-500), holdout=bars.slice(-500)
     const batch = new TradingEngine(runtime.engine.settings)

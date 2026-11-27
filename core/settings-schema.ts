@@ -7,7 +7,7 @@ import {SIGNALS_CATALOG,DEFAULT_SIGNALS_SOURCES} from '../shared/cts-indications
 import { strategyProcessing, validateProcessingByRange } from "./strategy-processing"
 import { INDICATIONS as ALL_INDICATIONS, CORE_INDICATIONS, CORE_SIGNAL_PERIODS, indicationPeriods } from "./indications"
 import { DEFAULT_EXIT_MODES, EXIT_MODES, type EngineSettings, type ExitMode, type StrategyRange } from "./types"
-import { EXPANDED_CATALOG_MAX, STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS, SELECTABLE_STOP_DISTANCE_PCTS, SELECTABLE_TRAIL_DISTANCE_PCTS, protectionVariants } from "./protection-grid"
+import { EXPANDED_CATALOG_MAX, STOP_BANDS, priceProtection, STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS, SELECTABLE_STOP_DISTANCE_PCTS, SELECTABLE_TRAIL_DISTANCE_PCTS, protectionVariants } from "./protection-grid"
 import { LAST_N_STAGES, DEFAULT_EXEC_MIN_PF, DEFAULT_SIGNAL_MIN_PF, DEFAULT_EXEC_WINDOWS, checkExecWindows, checkLastNGrid, lastNVariantCount, type LastNGrid } from "./last-n-grid"
 import { DEFAULT_LOW_RANGE_SOURCES, LOW_RANGE_IDS, LOW_RANGE_STEPS, LOW_RANGE_TIMEFRAMES } from "../shared/cts-indications/low-range-catalog.ts"
 import { DEFAULT_STEP_AUTO } from "./step-evidence"
@@ -18,8 +18,8 @@ import { MAX_WARMUP_CANDLES } from "./history"
 import { EXEC_PROFILES } from "./exec-profile"
 
 export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"]
-export const RANGE_BOUNDS = [5, 8, 12, 18, 24, 30]
-export const STEPS = Array.from({ length: 29 }, (_, index) => index + 2)
+export const RANGE_BOUNDS = [5, 8, 12, 18, 24, 50]
+export const STEPS = Array.from({ length: 50 }, (_, index) => index + 1)
 export const RATIOS = Array.from({ length: 21 }, (_, index) => Number(((index + 2) * 0.1).toFixed(1)))
 export const BALANCED_STEPS = [3, 5, 8, 12, 18, 24, 30]
 export const BALANCED_RATIOS = [0.6, 1, 1.4]
@@ -38,6 +38,7 @@ export const DEFAULTS: Record<string, unknown> = {
   axisPrevious: 8, axisLast: 3, axisOutcome: "any",axisReferenceStage:'same-stage',
   blockBehavior: "pyramid", blockSize: 3, blockPauseRounds: 1, blockMaxMultiplier: 3,
   ...AUTO_PF_DEFAULTS, microTradeStream: false,
+  maxStopLossRatio: 2.5, strategyShortStopPcts: STOP_BANDS.short.stops, strategyLongStopPcts: STOP_BANDS.long.stops,
   strategyPriceDistancesEnabled: false, strategyStopDistancePcts: STOP_DISTANCE_PCTS, strategyTrailDistancePcts: TRAIL_DISTANCE_PCTS,
   blockSteps: 3, blockMode: "shared", dcaSteps: 2, dcaDistancePct: 1, dcaMultiplier: 2,
   blockAutoEnabled: DEFAULT_STEP_AUTO.enabled, blockAutoLastN: DEFAULT_STEP_AUTO.lastN,
@@ -124,6 +125,7 @@ export const EXECUTION_FIELDS = [
 ]
 const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
+  strategyShortStopPcts: STOP_BANDS.short.stops, strategyLongStopPcts: STOP_BANDS.long.stops,
   strategyStopDistancePcts: SELECTABLE_STOP_DISTANCE_PCTS, strategyTrailDistancePcts: SELECTABLE_TRAIL_DISTANCE_PCTS,
   strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
   strategyIndicationSources:[...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...REVERSAL_SOURCES].map(s=>s.id),
@@ -142,7 +144,8 @@ export const FACTOR_FIELDS = [
   { key: "dcaVolumeRatio", label: "DCA budget ratio", min: 0.001, max: 100, step: 0.001 },
   { key: "relateVolumeRatio", label: "Relate budget ratio", min: 0.001, max: 100, step: 0.001 },
   { key: "strategyTpFactor", label: "TP distance factor", min: 0.05, max: 10, step: 0.05 },
-  { key: "strategySlFactor", label: "SL / TP ratio factor", min: 0.05, max: 10, step: 0.05 },
+  { key: "maxStopLossRatio", label: "Maximum SL / TP ratio", min: 0.01, max: 5, step: 0.01 },
+  { key: "strategySlFactor", label: "Historical ratio-grid SL factor", min: 0.05, max: 10, step: 0.05 },
   { key: "strategyTrailRatio", label: "Trail / SL distance ratio", min: 0.05, max: 10, step: 0.05 },
   { key: "holdTimeFactor", label: "Maximum hold factor", min: 0.05, max: 10, step: 0.05 },
 ]
@@ -153,16 +156,14 @@ export function configurationCount(values: Record<string, unknown>) {
   const ranges = values.strategyEnabledRanges as string[]
   const types=values.strategyIndicationTypes as string[]
   // A draft selection can be empty while the operator is editing. The saved settings schema rejects it.
-  const price = { enabled: values.strategyPriceDistancesEnabled === true,
-    stops: (values.strategyStopDistancePcts ?? STOP_DISTANCE_PCTS) as number[],
-    trails: (values.strategyTrailDistancePcts ?? TRAIL_DISTANCE_PCTS) as number[] }
-  const variantCounts = new Map(ranges.map(range => [range, protectionVariants(range as StrategyRange,
-    (values.strategyExitModes as ExitMode[]).filter(mode => mode === "fixed" || strategyProcessing(values, { range: range as StrategyRange }).trailing),
-    values.strategySlRatios as number[], price, Number(values.microMinSlDistancePct ?? .1), Number(values.microMinTrailDistancePct ?? .05)).length]))
+  const price = priceProtection(values)
   let cells=0,lowRangeCells=0
   for(const step of values.strategyTpSteps as number[])for(const range of [RANGES[RANGE_BOUNDS.findIndex(bound=>step<=bound)],...(step<=8?["Low-Range"]:[])]){
     if(!ranges.includes(range))continue
-    const count = variantCounts.get(range) ?? 0
+    const count = protectionVariants(range as StrategyRange,
+      (values.strategyExitModes as ExitMode[]).filter(mode => mode === "fixed" || strategyProcessing(values, { range: range as StrategyRange }).trailing),
+      values.strategySlRatios as number[], price, Number(values.microMinSlDistancePct ?? .1),
+      Number(values.microMinTrailDistancePct ?? .05), step / 10 * Number(values.strategyTpFactor ?? 1)).length
     cells += count
     if (range === "Low-Range" && LOW_RANGE_STEPS.some(candidate => candidate === step)) lowRangeCells += count
   }
@@ -220,7 +221,8 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     } else if (key === "strategyProcessingByRange") {
       output[key] = validateProcessingByRange(value)
     } else if (arrayOptions) {
-      if (!Array.isArray(value) || !value.length || value.some(item => !arrayOptions.includes(item)) || new Set(value).size !== value.length) throw new Error(`Choose valid, unique values for ${key}.`)
+      const optionalBand = key === "strategyShortStopPcts" || key === "strategyLongStopPcts"
+      if (!Array.isArray(value) || (!optionalBand && !value.length) || value.some(item => !arrayOptions.includes(item)) || new Set(value).size !== value.length) throw new Error(`Choose valid, unique values for ${key}.`)
       output[key] = [...value]
     } else if (enumOptions) {
       if (typeof value !== "string" || !enumOptions.includes(value)) throw new Error(`Choose a valid value for ${key}.`)
@@ -248,7 +250,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if (exec && ["baseProfitFactor","mainProfitFactor","realProfitFactor"].some(key => Number(output[key]) < 1.01)) {
       throw new Error("Base, Main and Real minimum PF must be at least 1.01 in Exec progression.")
     }
-    if ((output.strategyPriceDistancesEnabled || LAST_N_STAGES.some(stage => windows[stage]?.length)) && (output.stageGateMode === "parent-branches" ? count / lastNVariantCount(windows) : count) > EXPANDED_CATALOG_MAX) {
+    if ((output.strategyShortStopPcts || output.strategyLongStopPcts || output.strategyPriceDistancesEnabled || LAST_N_STAGES.some(stage => windows[stage]?.length)) && (output.stageGateMode === "parent-branches" ? count / lastNVariantCount(windows) : count) > EXPANDED_CATALOG_MAX) {
       throw new Error(`Expanded catalog exceeds ${EXPANDED_CATALOG_MAX} configurations. Select fewer distances, sources, timeframes or windows.`)
     }
   }
