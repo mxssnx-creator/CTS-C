@@ -373,7 +373,8 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
           </section>
           {draft.relateEnabled === true && <section className="terminal-panel space-y-4 p-5">
             <h3 className="text-sm font-semibold">Relate allocation</h3>
-            <p className="terminal-muted text-xs">Each post-Base Set sizes from its own recent returns, consecutive wins and stop-to-target ratio.</p>
+            <p className="terminal-muted text-xs leading-relaxed">Loss series: after every losing order a relation (one Set's consecutive positions) raises its next order by the volume factor X until a win ends the series, for at most N rounds and never above the maximum multiplier. A series that loses all N rounds restarts at base volume. Raising happens only while the relation's own recent returns still qualify. Win run: the same ladder climbed by consecutive wins.</p>
+            {enumField("relateStepMode", "Step rule", [{ value: "loss", label: "Loss series: raise after each loss until a win, N rounds at most" }, { value: "wins", label: "Win run: raise after each consecutive win, N steps at most" }])}
             <div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("relate") && !field.key.startsWith("relateAuto")).map(numberField)}</div>
             <div className="space-y-4 border-t border-[var(--terminal-border)] pt-5">
               <label className="flex items-center justify-between gap-4">
@@ -381,7 +382,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
                 <input type="checkbox" className="h-4 w-4 accent-cyan-400" checked={draft.relateAutoEnabled === true} onChange={event => change("relateAutoEnabled", event.target.checked)} />
               </label>
               {draft.relateAutoEnabled === true && <>
-                <p className="terminal-muted text-xs leading-relaxed">Volume rises with every consecutive win in every qualifying relation and returns to base after a loss. A relation qualifies once it has the minimum returns, a PF above the larger of this minimum, the config floor and its Auto PF floor, and a positive mean that clears the confidence in standard errors. It applies to every relation, including stops larger than half the target, and the manual 60-return window and stop cap are not used.</p>
+                <p className="terminal-muted text-xs leading-relaxed">Volume follows the step rule above in every qualifying relation. A relation qualifies once it has the minimum returns, a PF above the larger of this minimum, the config floor and its Auto PF floor, and a positive mean that clears the confidence in standard errors. It applies to every relation, including stops larger than half the target, and the manual 60-return window and stop cap are not used.</p>
                 <div className="grid gap-4 sm:grid-cols-2">{COORDINATION_FIELDS.filter(field => field.key.startsWith("relateAuto")).map(numberField)}</div>
                 <label className="flex items-center justify-between gap-4">
                   <span className="text-xs font-medium">Extend a short tape with older returns of the ancestor Sets</span>

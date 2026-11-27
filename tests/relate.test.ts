@@ -9,7 +9,7 @@ const catalog = {
   strategyEnabledRanges: ["Short"], strategyTpSteps: [12], strategySlRatios: [.5, 1],
   strategyExitModes: ["fixed"], strategyIndicationTypes: ["Trend"],
 }
-const policy = { ...DEFAULT_RELATE, enabled: true, lastN: 60 }
+const policy = { ...DEFAULT_RELATE, enabled: true, lastN: 60, stepMode: "wins" as const }
 const symbol = "BTC-USDT"
 
 test("Relate sizes only qualified own returns within the configured stop and stack caps", () => {
@@ -74,7 +74,7 @@ test("Relate's Real allocation and exact Live mirror survive a checkpoint withou
   assert.equal(seen.get(1), 1)
 })
 test("Relate increases volume only when its own recent PF clears the disjoint Auto PF floor", () => {
-  const settings = {...DEFAULT_RELATE,enabled:true,lastN:60,minTrades:60}
+  const settings = {...DEFAULT_RELATE,enabled:true,lastN:60,minTrades:60,stepMode:"wins" as const}
   const config = {...generateStrategyCatalog("test",{strategyTpSteps:[3],strategySlRatios:[.5],strategyExitModes:["fixed"]})[0],
     autoPfPolicy:{fallback:1.1,minSamples:16,history:40,adjustment:.75,cap:2}}
   const recent = [...Array<number>(33).fill(1),...Array<number>(27).fill(-1)]
@@ -85,13 +85,15 @@ test("Relate increases volume only when its own recent PF clears the disjoint Au
 })
 
 const auto = {...DEFAULT_RELATE_AUTO, enabled:true}
-const autoPolicy = {...DEFAULT_RELATE, enabled:true, maxMultiplier:4, auto}
+/** The short-fixture gate (8 returns, 1.64 standard errors), for tests of ladder mechanics rather than of the default gate. */
+const quick = {...auto, minSamples:8, confidence:1.64}
+const autoPolicy = {...DEFAULT_RELATE, enabled:true, maxMultiplier:4, steps:12, stepMode:"wins" as const, auto:quick}
 const [tightConfig, wideConfig] = generateStrategyCatalog("test", catalog)
 
 test("Relate Auto raises volume with every consecutive win once a few returns prove the relation", () => {
   assert.equal(relateAllocation([1,1,1,-.2,1,1,1,1], tightConfig, autoPolicy), 1 + 3 * DEFAULT_RELATE.ratio)
   assert.equal(relateAllocation([1,1,1,1,1,1,1,1], tightConfig, autoPolicy), 1 + 8 * DEFAULT_RELATE.ratio, "each further win adds another step")
-  assert.equal(relateAllocation([1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], tightConfig, autoPolicy), 1 + DEFAULT_RELATE.steps * DEFAULT_RELATE.ratio, "the winning-step count caps the run")
+  assert.equal(relateAllocation([1,1,1,1,1,1,1,1,1,1,1,1,1,1,1], tightConfig, autoPolicy), 1 + autoPolicy.steps * DEFAULT_RELATE.ratio, "the winning-step count caps the run")
   assert.equal(relateAllocation(Array(30).fill(1), tightConfig, {...autoPolicy, maxMultiplier:2}), 2, "the maximum multiplier caps the volume")
   assert.equal(relateAllocation([-1,1,1,1,1,1,1,1], tightConfig, autoPolicy), 1, "a loss returns the relation to base volume")
 })
@@ -101,7 +103,7 @@ test("Relate Auto holds base volume without enough, weak, noisy or untrusted evi
   assert.equal(relateAllocation([.1,-.1,.1,-.1,.1,-.1,.1,-.1], tightConfig, autoPolicy), 1, "PF below the floor")
   const noisy = [3,-2,3,-2,3,-2,3,-1.5]
   assert.equal(relateAllocation(noisy, tightConfig, autoPolicy), 1, "a positive mean inside its own standard error")
-  assert.equal(relateAllocation(noisy, tightConfig, {...autoPolicy, auto:{...auto, confidence:0}}), 1 + DEFAULT_RELATE.ratio, "confidence 0 leaves only the PF floor")
+  assert.equal(relateAllocation(noisy, tightConfig, {...autoPolicy, auto:{...quick, confidence:0}}), 1 + DEFAULT_RELATE.ratio, "confidence 0 leaves only the PF floor")
   assert.equal(relateAllocation([1,NaN,1,1,1,1,1,1], tightConfig, autoPolicy), 1, "unknown returns never raise volume")
   assert.equal(relateAllocation(Array(30).fill(1), wideConfig, {...autoPolicy, auto:undefined}), 1, "manual sizing keeps the stop-to-target cap")
   assert.equal(relateAllocation(Array(30).fill(1), wideConfig, {...autoPolicy, maxMultiplier:2}), 2, "Auto sizes every relation, including stops the manual cap can never admit")
@@ -113,10 +115,10 @@ test("Relate Auto extends a short own tape only with older ancestor returns and 
   const inherited = [1,1,1,1,-.5,1,1]
   assert.equal(relateAllocation([1,1,1], tightConfig, autoPolicy), 1, "three own returns are too few")
   assert.equal(relateAllocation([1,1,1], tightConfig, autoPolicy, 3, inherited), 1 + 7 * DEFAULT_RELATE.ratio)
-  assert.equal(relateAllocation([1,1,1], tightConfig, {...autoPolicy, auto:{...auto, inherit:false}}, 3, inherited), 1, "inheritance can be switched off")
+  assert.equal(relateAllocation([1,1,1], tightConfig, {...autoPolicy, auto:{...quick, inherit:false}}, 3, inherited), 1, "inheritance can be switched off")
   const config = {...tightConfig, autoPfPolicy:{fallback:1.1,minSamples:16,history:40,adjustment:.75,cap:2}}
   const recent = [1.3,-1,1.3,-1,1.3,-1], older = Array.from({length:20}, (_, i) => i % 2 ? .5 : -1)
-  const six = {...autoPolicy, auto:{...auto, lastN:6, minSamples:6, confidence:0}}
+  const six = {...autoPolicy, auto:{...quick, lastN:6, minSamples:6, confidence:0}}
   assert.equal(relateAllocation(recent, config, six, 6), 1 + DEFAULT_RELATE.ratio, "the fallback floor 1.1 admits PF 1.3")
   assert.equal(relateAllocation(recent, config, six, 6, older), 1, "weak older history lifts the floor to 1.55")
 })
@@ -146,7 +148,7 @@ test("Relate Auto sizes the real entry from eight returns and the Live mirror ma
       axis: {...defaults.coordinations.axis, enabled:false},
       block: {...defaults.coordinations.block, enabled:false},
       dca: {...defaults.coordinations.dca, enabled:false},
-      relate: {...DEFAULT_RELATE, enabled:true, auto},
+      relate: {...DEFAULT_RELATE, enabled:true, stepMode:"wins", auto:quick},
     },
   })
   engine.processCandles(symbol, bars.slice(0,250))
@@ -204,9 +206,9 @@ test("with a real edge Relate Auto compounds volume across relations while entri
     engine.processCandles(symbol, bars, {eventLimit:0})
     return rows
   }
-  const manual = run({...DEFAULT_RELATE, enabled:true, lastN:60, minTrades:60})
-  const fast = run({...DEFAULT_RELATE, enabled:true, auto})
-  const wide = run({...DEFAULT_RELATE, enabled:true, ratio:.4, maxMultiplier:4, auto})
+  const manual = run({...DEFAULT_RELATE, enabled:true, steps:12, stepMode:"wins", lastN:60, minTrades:60})
+  const fast = run({...DEFAULT_RELATE, enabled:true, steps:12, stepMode:"wins", auto:quick})
+  const wide = run({...DEFAULT_RELATE, enabled:true, steps:12, stepMode:"wins", ratio:.4, maxMultiplier:4, auto:quick})
   const normal = fast["normal/tight"], relation = fast["relate/tight"]
   assert.ok(normal.n >= 60, "the trend produces enough winners to size up")
   assert.equal(relation.n, normal.n, "Relate trades the same entries as Normal")
@@ -278,4 +280,177 @@ test("inherited Relate evidence is the ancestor's older stream: never overlappin
     assert.ok(call.values, "the values are exactly the ancestor's returns, newest first")
   }
   assert.equal(original({parentProof: undefined, admittedAt: 1}, 5, 10), undefined, "a Base-stage Set has nothing to inherit")
+})
+
+const lossPolicy = {...DEFAULT_RELATE, enabled:true, stepMode:"loss" as const, steps:4, ratio:.4, maxMultiplier:4, auto}
+
+test("a Relate loss series raises each next order by X until a win, N rounds at most, then restarts at base", () => {
+  assert.equal(DEFAULT_RELATE.stepMode, "loss")
+  const strong = Array(30).fill(1)
+  const after = (losses: number, mode = lossPolicy) => relateAllocation([...Array(losses).fill(-.05), ...strong], tightConfig, mode)
+  assert.equal(after(0), 1, "no loss, no increase")
+  assert.ok(Math.abs(after(1) - 1.4) < 1e-12)
+  assert.ok(Math.abs(after(2) - 1.8) < 1e-12)
+  assert.ok(Math.abs(after(3) - 2.2) < 1e-12)
+  assert.ok(Math.abs(after(4) - 2.6) < 1e-12, "the Nth round is the last increase")
+  assert.equal(after(5), 1, "N rounds without a win end the series, which restarts at base")
+  assert.ok(Math.abs(after(6) - 1.4) < 1e-12, "and a new series begins")
+  assert.equal(after(4, {...lossPolicy, steps:15, maxMultiplier:2}), 2, "the maximum multiplier still caps the order")
+  assert.equal(relateAllocation([1, -.05, -.05, ...strong], tightConfig, lossPolicy), 1, "a win returns the next order to base")
+  // The same ladder climbed on wins, for checkpoints and settings that predate the loss rule.
+  assert.ok(Math.abs(relateAllocation([1,1,-.05, ...strong], tightConfig, {...lossPolicy, stepMode:"wins"}) - 1.8) < 1e-12)
+  assert.ok(Math.abs(relateAllocation([1,1,-.05, ...strong], tightConfig, {...lossPolicy, stepMode:undefined}) - 1.8) < 1e-12, "no step mode keeps the older win ladder")
+})
+
+test("Relate never raises volume on a relation whose own evidence fails, however many losses it has", () => {
+  const failing = [-1,-1,-1,.5,.5,.5,.5,.5,.5,.5]
+  assert.equal(relateAllocation(failing, tightConfig, lossPolicy), 1, "PF below the floor")
+  assert.equal(relateAllocation([-1,-1,-1,-1,-1,-1,-1,-1], tightConfig, lossPolicy), 1, "all losses")
+  assert.equal(relateAllocation([-.05,-.05,1,1,1,1,1], tightConfig, lossPolicy), 1, "too few returns for Auto")
+  assert.equal(relateAllocation([-.05,-.05,...Array(30).fill(1)], tightConfig, {...lossPolicy, enabled:false}), 1)
+  assert.equal(relateAllocation([-.05,-.05,...Array(58).fill(.2)], tightConfig, {...DEFAULT_RELATE, enabled:true, stepMode:"loss", lastN:60, ratio:.2}), 1.4, "the manual 60-return gate uses the same ladder")
+  assert.equal(relateAllocation([-.05,-.05,...Array(57).fill(.2)], tightConfig, {...DEFAULT_RELATE, enabled:true, stepMode:"loss", lastN:60}), 1)
+})
+
+test("Relate's step mode is validated and survives a settings round trip", () => {
+  const defaults = validateEngineSettings()
+  assert.equal(defaults.coordinations.relate!.stepMode, "loss")
+  assert.throws(() => validateEngineSettings({coordinations:{...defaults.coordinations, relate:{...DEFAULT_RELATE, stepMode:"every" as never}}}), /step mode/)
+})
+
+test("on a real edge every losing order raises the next one exactly by X within a series of N rounds, and a win ends the series", () => {
+  let seed = 3
+  const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296
+  let price = 100
+  const bars = Array.from({length:3000}, (_, i): Candle => {
+    price *= 1 + .0002 + .0018 * (random() - .5) * 2
+    return { timestamp:1_790_000_000_000 + i * 60_000, open:price, high:price, low:price, close:price, volume:1 }
+  })
+  for (const inherit of [false, true]) {
+    const relate = {...DEFAULT_RELATE, enabled:true, stepMode:"loss" as const, steps:4, ratio:.4, maxMultiplier:2, auto:{...quick, inherit}}
+    const defaults = validateEngineSettings()
+    const engine = new TradingEngine({
+      symbols: [symbol], stageGateMode: "processed-sets", catalog,
+      stageLastN:{ base:1, main:1, real:1 }, stageMinPF:{ base:0, main:0, real:0 },
+      coordinations: { ...defaults.coordinations, axis:{...defaults.coordinations.axis, enabled:false}, block:{...defaults.coordinations.block, enabled:false}, dca:{...defaults.coordinations.dca, enabled:false}, relate },
+    })
+    const lanes = new Map<string, { notional: number; ret: number }[]>()
+    engine.observeStageCloses(trade => {
+      if (trade.stage !== "real" || trade.coordination !== "relate") return
+      let rows = lanes.get(trade.laneId)
+      if (!rows) lanes.set(trade.laneId, rows = [])
+      rows.push({ notional: trade.notional, ret: trade.netReturnPct })
+    })
+    engine.processCandles(symbol, bars, {eventLimit:0})
+    let raised = 0, afterLoss = 0
+    for (const rows of lanes.values()) {
+      const base = Math.min(...rows.map(row => row.notional))
+      let losses = 0
+      for (let i = 0; i < rows.length; i++) {
+        const ratio = rows[i].notional / base
+        if (i > 0 && ratio > 1 + 1e-9) {
+          raised++
+          assert.ok(losses >= 1, "volume only rises after a loss")
+          assert.ok(Math.abs(ratio - Math.min(2, 1 + (losses % 5) * .4)) < 1e-9, `the ${losses}-loss round is X per loss within a series of at most N rounds, under the maximum`)
+          afterLoss++
+        } else if (i > 0 && rows[i - 1].ret > 0) assert.equal(ratio, 1, "a win returns the next order to base")
+        losses = rows[i].ret < 0 ? losses + 1 : 0
+      }
+    }
+    assert.ok(raised >= 5 && raised === afterLoss, `Relate raised ${raised} orders (inherit ${inherit})`)
+  }
+})
+
+test("Relate sizes the real entry from a short tape ending in losses and the Live mirror matches it", () => {
+  const bars = Array.from({length:480}, (_, i): Candle => {
+    const close = 100 + 8 * Math.sin(i / 5) + Math.sin(i / 11)
+    return { timestamp:1_790_000_000_000 + i * 60_000, open:close, high:close, low:close, close, volume:1 }
+  })
+  const defaults = validateEngineSettings()
+  const engine = new TradingEngine({
+    symbols: [symbol], stageGateMode: "processed-sets", catalog,
+    stageLastN:{ base:1, main:1, real:1 }, stageMinPF:{ base:0, main:0, real:0 },
+    coordinations: { ...defaults.coordinations, axis:{...defaults.coordinations.axis, enabled:false}, block:{...defaults.coordinations.block, enabled:false}, dca:{...defaults.coordinations.dca, enabled:false}, relate:{...DEFAULT_RELATE, enabled:true, stepMode:"loss", auto:{...auto, inherit:false}} },
+  })
+  engine.processCandles(symbol, bars.slice(0,250))
+  const state = engine.exportState()
+  // Seed only idle relations: a position still open would close after the seed and change the tape before the next entry.
+  const relationLanes = Object.values(state.lanes).filter(lane => lane.coordination === "relate" && lane.stage === "real" && !lane.open)
+  assert.ok(relationLanes.length >= 2)
+  const seeded = new Set<string>()
+  for (const lane of relationLanes) {
+    lane.samples = [-.05, -.05, ...Array.from({length:10}, () => 1)]
+    lane.sampleTimes = lane.samples.map((_, i) => bars[249 - i].timestamp)
+    seeded.add(`${lane.configId}|${lane.direction}`)
+  }
+  const resumed = TradingEngine.fromSerialized(JSON.stringify(state))
+  const first = new Map<string, number>()
+  for (const bar of bars.slice(250)) {
+    resumed.processCandles(symbol, [bar], {allowExecution: true})
+    for (const lane of Object.values(resumed.exportState().lanes)) {
+      const key = `${lane.configId}|${lane.direction}`
+      if (lane.coordination !== "relate" || lane.stage !== "live" || lane.open?.openedAt !== bar.timestamp || !seeded.has(key) || first.has(key)) continue
+      const position = lane.open
+      const intent = resumed.pendingIntents().find(item => item.positionId === position.id && item.kind === "entry")
+      assert.equal(intent?.entryAllocationRatio, position.notional / position.sizing!.baseBudget)
+      first.set(key, intent!.entryAllocationRatio!)
+    }
+    if (first.size >= 2) break
+  }
+  assert.ok(first.size >= 2, "at least two seeded relations entered")
+  for (const ratio of first.values()) assert.ok(Math.abs(ratio - 1.4) < 1e-9, `two losses raise the first entry by 2 x 0.2, got ${ratio}`)
+})
+
+test("re-pricing a neutral Relate run offline with relateAllocation equals the engine run with the same policy", () => {
+  let seed = 3
+  const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296
+  let price = 100
+  const bars = Array.from({length:3000}, (_, i): Candle => {
+    price *= 1 + .0002 + .0018 * (random() - .5) * 2
+    return { timestamp:1_790_000_000_000 + i * 60_000, open:price, high:price, low:price, close:price, volume:1 }
+  })
+  const policyUnderTest = {...DEFAULT_RELATE, enabled:true, stepMode:"loss" as const, steps:4, ratio:.4, maxMultiplier:2.6, auto:quick}
+  const run = (relate: typeof policyUnderTest) => {
+    const defaults = validateEngineSettings()
+    const engine = new TradingEngine({
+      symbols: [symbol], stageGateMode: "exec-branches",
+      catalog: {...catalog, strategyExecWindows:{
+        base:{long:[10], short:[4], last:[1]}, main:{long:["none"], short:[4], last:[1]},
+        real:{long:["none"], short:[4], last:[1]}, exec:{long:["none"], short:[4], last:[1]},
+      }},
+      coordinations: { ...defaults.coordinations, axis:{...defaults.coordinations.axis, enabled:false}, block:{...defaults.coordinations.block, enabled:false}, dca:{...defaults.coordinations.dca, enabled:false}, relate },
+    })
+    const inherited = new Map<string, number[]>()
+    const original = (engine as any).relateInherited.bind(engine) as (lane: any, before: number, limit: number) => number[] | undefined
+    ;(engine as any).relateInherited = (lane: any, before: number, limit: number) => {
+      const out = original(lane, before, limit)
+      if (out?.length) inherited.set(`${lane.id}@${before}`, out.slice())
+      return out
+    }
+    const lanes = new Map<string, { returns: number[]; pnl: number[]; opened: number[] }>()
+    engine.observeStageCloses(trade => {
+      if (trade.coordination !== "relate" || !["main", "real", "exec"].includes(trade.stage)) return
+      let lane = lanes.get(trade.laneId)
+      if (!lane) lanes.set(trade.laneId, lane = { returns: [], pnl: [], opened: [] })
+      lane.returns.push(trade.netReturnPct); lane.pnl.push(trade.netPnl); lane.opened.push(trade.openedAt)
+    })
+    engine.processCandles(symbol, bars, {eventLimit:0})
+    return { lanes, inherited, state: (engine as any).state.lanes as Record<string, any> }
+  }
+  const real = run(policyUnderTest)
+  const neutral = run({...policyUnderTest, maxMultiplier:1})
+  let engineNet = 0, offlineNet = 0, baseNet = 0, raised = 0
+  for (const lane of real.lanes.values()) for (const pnl of lane.pnl) engineNet += pnl
+  for (const [id, lane] of neutral.lanes) {
+    const config = neutral.state[id].config, own: number[] = []
+    for (let i = 0; i < lane.returns.length; i++) {
+      const multiplier = relateAllocation(own, config, policyUnderTest, own.length, neutral.inherited.get(`${id}@${lane.opened[i]}`))
+      offlineNet += lane.pnl[i] * multiplier; baseNet += lane.pnl[i]
+      if (multiplier > 1 + 1e-9) raised++
+      own.unshift(lane.returns[i]); if (own.length > 71) own.length = 71
+    }
+  }
+  assert.ok(raised >= 5, `the policy raises ${raised} orders`)
+  assert.ok(Math.abs(offlineNet - baseNet) > 1e-9, "sizing changes the cash result")
+  assert.ok(Math.abs(engineNet - offlineNet) < 1e-9 * Math.max(1, Math.abs(engineNet)), `engine ${engineNet} vs offline ${offlineNet}`)
 })

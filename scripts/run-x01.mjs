@@ -8,6 +8,7 @@ import { STARTUP_REQUEST_TIMEOUT, createRequester, waitForReady, saveInitialSett
 
 const CONNECTION = 'bingx-x01'
 const flag = (name, fallback) => { const i = process.argv.indexOf(name); return i < 0 ? fallback : Number(process.argv[i + 1]) }
+const word = name => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1] }
 function writeObservation(directory, status) {
   const target = join(directory, 'x01-runtime-observation.json'), temporary = `${target}.${process.pid}.tmp`
   try { writeFileSync(temporary, JSON.stringify(status, null, 2), { mode: 0o600, flag: 'wx' }); renameSync(temporary, target) }
@@ -23,6 +24,15 @@ export async function runX01() {
   if (!Number.isInteger(symbolCount) || symbolCount < 1 || symbolCount > 500) throw new Error('--symbols must be 1..500')
   if (!Number.isInteger(historyCandles) || historyCandles < 100 || historyCandles > 4320) throw new Error('--history-candles must be 100..4320')
   if (!(maxOrderNotional > 0 && maxOrderNotional <= 10)) throw new Error('--max-order-notional must be above 0 and at most 10 USDT')
+  // Relate stays off unless asked: --relate loss|wins [--relate-steps N] [--relate-ratio X] [--relate-max-multiplier M]. The server validates the values.
+  const relateMode = word('--relate')
+  if (relateMode !== undefined && relateMode !== 'loss' && relateMode !== 'wins') throw new Error('--relate must be loss or wins')
+  const relate = relateMode === undefined ? {} : {
+    relateEnabled: true, relateAutoEnabled: true, relateStepMode: relateMode,
+    ...(process.argv.includes('--relate-steps') && { relateSteps: flag('--relate-steps') }),
+    ...(process.argv.includes('--relate-ratio') && { relateRatio: flag('--relate-ratio') }),
+    ...(process.argv.includes('--relate-max-multiplier') && { relateMaxMultiplier: flag('--relate-max-multiplier') }),
+  }
   const dataDir = resolve(process.env.CTS_DATA_DIR || '.data')
   mkdirSync(dataDir, { recursive: true, mode: 0o700 }); chmodSync(dataDir, 0o700)
   const port = Number(process.env.PORT || '3001')
@@ -47,7 +57,7 @@ export async function runX01() {
     await authenticate({ timeoutMs: STARTUP_REQUEST_TIMEOUT })
     if (!canContinue()) return
     // Minimum volume factor and a small per-order cap; every other saved setting is kept.
-    await saveInitialSettings(request, { symbolCount, historyCandles, volumeFactor: .01, maxOrderNotional }, { sleep, canContinue })
+    await saveInitialSettings(request, { symbolCount, historyCandles, volumeFactor: .01, maxOrderNotional, ...relate }, { sleep, canContinue })
     if (!canContinue()) return
     await request('/api/terminal', { action: 'start-x01' }, { timeoutMs: STARTUP_REQUEST_TIMEOUT })
     await observeRuntime({ request, isRunning: () => childIsRunning(child), isStopping: () => stopping, sleep, warn: m => console.error(m), publish: s => {

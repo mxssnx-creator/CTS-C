@@ -62,7 +62,7 @@ export interface RelateSettings {
   steps: number
   /** X: volume added per step, as a fraction of the base allocation. */
   ratio: number
-  /** "loss": every consecutive loss of the relation raises the next order by X, up to N steps; a win returns it to base. "wins": the same ladder climbed by consecutive wins. Absent means "wins" (checkpoints from before this setting). */
+  /** "loss": every losing order raises the next one by X until a win, at most N rounds; a series that loses all N rounds restarts at base. "wins": the same ladder climbed by consecutive wins. Absent means "wins" (checkpoints from before this setting). */
   stepMode?: RelateStepMode
   lastN: number
   minTrades: number

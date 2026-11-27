@@ -44,6 +44,7 @@ export const DEFAULTS: Record<string, unknown> = {
   dcaAutoEnabled: DEFAULT_STEP_AUTO.enabled, dcaAutoLastN: DEFAULT_STEP_AUTO.lastN,
   dcaAutoMinSamples: DEFAULT_STEP_AUTO.minSamples, dcaAutoMinPF: DEFAULT_STEP_AUTO.minPF,
   relateEnabled: DEFAULT_RELATE.enabled, relateSteps: DEFAULT_RELATE.steps, relateRatio: DEFAULT_RELATE.ratio,
+  relateStepMode: DEFAULT_RELATE.stepMode,
   relateLastN: DEFAULT_RELATE.lastN, relateMinTrades: DEFAULT_RELATE.minTrades, relateMinPF: DEFAULT_RELATE.minPF,
   relateMaxMultiplier: DEFAULT_RELATE.maxMultiplier, relateMaxSlRatio: DEFAULT_RELATE.maxSlRatio,
   relateAutoEnabled: DEFAULT_RELATE_AUTO.enabled, relateAutoLastN: DEFAULT_RELATE_AUTO.lastN, relateAutoMinSamples: DEFAULT_RELATE_AUTO.minSamples,
@@ -98,8 +99,8 @@ export const COORDINATION_FIELDS = [
   { key: "dcaAutoLastN", label: "DCA Auto recent observations", min: 3, max: 100, step: 1 },
   { key: "dcaAutoMinSamples", label: "DCA Auto minimum observations", min: 3, max: 100, step: 1 },
   { key: "dcaAutoMinPF", label: "DCA Auto minimum add PF", min: 1.01, max: 10, step: .01 },
-  { key: "relateSteps", label: "Relate winning steps", min: 2, max: 15, step: 1 },
-  { key: "relateRatio", label: "Relate increase per step", min: .2, max: 6, step: .2 },
+  { key: "relateSteps", label: "Relate steps N (most increases)", min: 2, max: 15, step: 1 },
+  { key: "relateRatio", label: "Relate volume factor X per step", min: .2, max: 6, step: .2 },
   { key: "relateLastN", label: "Relate recent samples", min: 60, max: 250, step: 1 },
   { key: "relateMinTrades", label: "Relate minimum samples", min: 60, max: 250, step: 1 },
   { key: "relateMinPF", label: "Relate minimum PF", min: 1.01, max: 100, step: .01 },
@@ -111,7 +112,7 @@ export const COORDINATION_FIELDS = [
   { key: "relateAutoConfidence", label: "Relate Auto confidence (standard errors)", min: 0, max: 3, step: .1 },
 ]
 const WINDOW_SCOPES = ["context", "config", "both"] as const
-const ENUM_FIELDS: Record<string, readonly string[]> = { autoPfMode:["set-history","tp-distance"],blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches','exec-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
+const ENUM_FIELDS: Record<string, readonly string[]> = { autoPfMode:["set-history","tp-distance"],relateStepMode:["loss","wins"],blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches','exec-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
@@ -301,7 +302,7 @@ export function flatEngineSettings(s:EngineSettings,control:{symbolCount:number;
     blockAutoEnabled:blockAuto.enabled,blockAutoLastN:blockAuto.lastN,blockAutoMinSamples:blockAuto.minSamples,blockAutoMinPF:blockAuto.minPF,
     blockSteps:s.coordinations.block.steps,blockMode:s.coordinations.block.mode,dcaSteps:s.coordinations.dca.steps,dcaDistancePct:s.coordinations.dca.distancePct,dcaMultiplier:s.coordinations.dca.multiplier,
     dcaAutoEnabled:dcaAuto.enabled,dcaAutoLastN:dcaAuto.lastN,dcaAutoMinSamples:dcaAuto.minSamples,dcaAutoMinPF:dcaAuto.minPF,
-    relateEnabled:relate.enabled,relateSteps:relate.steps,relateRatio:relate.ratio,relateLastN:relate.lastN,relateMinTrades:relate.minTrades,
+    relateEnabled:relate.enabled,relateSteps:relate.steps,relateRatio:relate.ratio,relateStepMode:relate.stepMode??"wins",relateLastN:relate.lastN,relateMinTrades:relate.minTrades,
     relateMinPF:relate.minPF,relateMaxMultiplier:relate.maxMultiplier,relateMaxSlRatio:relate.maxSlRatio,
     relateAutoEnabled:relateAuto.enabled,relateAutoLastN:relateAuto.lastN,relateAutoMinSamples:relateAuto.minSamples,
     relateAutoMinPF:relateAuto.minPF,relateAutoConfidence:relateAuto.confidence,relateAutoInherit:relateAuto.inherit}

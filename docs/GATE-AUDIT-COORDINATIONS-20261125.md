@@ -30,9 +30,21 @@ windows in **both polarities at every stage**:
 | Own-sample independence (lanes) | 417,368 | 0 |
 
 The window grid reaches all four Short/Last polarity combinations at every stage: Base 5,422 to 9,940 lanes per
-combination, Main 94,367, Real 9,963, Exec 12. Exec windows were few in this scenario and no position was accepted
-at Exec, so Exec and Live proof numbers are covered by structure only here. Re-run with a narrow catalog around the
-configurations that were accepted at Exec (Inverse on Micro and Low-Range) to extend the numeric check:
+combination, Main 94,367, Real 9,963, Exec 12. No position was accepted at Exec in this scenario, so a second run
+covers Exec and Live with a narrow catalog around the configurations that were accepted at Exec in the 80-symbol run
+(Inverse on Micro and Low-Range, CHZ-USDT, same Short/Last polarities, DCA on):
+
+| | Checked | Failed |
+| --- | ---: | ---: |
+| Stage closes with proof structure | 183,920 | 0 |
+| Base / Main / Real / Exec lane windows | 752 / 6,016 / 16,064 / 41,344 | 0 |
+| Base proofs recomputed | 79,296 | 0 |
+| Main proofs recomputed | 58,272 | 0 |
+| Real proofs recomputed | 30,528 | 0 |
+| **Exec proofs recomputed** | **5,152** | 0 |
+| Own-sample independence (lanes) | 63,424 | 0 |
+
+All four polarity combinations are present at Exec (10,336 lanes each).
 
 ```sh
 node --import tsx scripts/audit-stage-gates.ts /path/to/tapes audit.json scenario.json 20 [exec|all]

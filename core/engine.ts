@@ -152,6 +152,7 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   finite(relate.maxMultiplier, "Relate maximum multiplier", 1, 8)
   finite(relate.maxSlRatio, "Relate maximum SL-to-TP ratio", .01, .5)
   if (relate.enabled && relate.lastN > settings.maxSamples) throw new Error("Relate window exceeds retained samples")
+  if (relate.stepMode !== undefined && relate.stepMode !== "loss" && relate.stepMode !== "wins") throw new Error("Invalid Relate step mode")
   if (relate.auto !== undefined) relate.auto = validateRelateAuto(relate.auto)
   if (relate.auto?.enabled && relate.auto.lastN > settings.maxSamples) throw new Error("Relate Auto window exceeds retained samples")
   for (const enabled of [axis.enabled, block.enabled, dca.enabled, relate.enabled]) if (typeof enabled !== "boolean") throw new Error("Coordination enabled must be boolean")

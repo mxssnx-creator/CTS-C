@@ -3,15 +3,17 @@ import { autoPfEvidence, autoPfMinimum } from "./auto-pf"
 import type { RelateAutoSettings, RelateSettings, StrategyConfig } from "./types"
 
 export const DEFAULT_RELATE: RelateSettings = {
-  enabled: false, steps: 12, ratio: .2, lastN: 250, minTrades: 60,
+  enabled: false, steps: 5, ratio: .2, stepMode: "loss", lastN: 250, minTrades: 60,
   minPF: 1.1, maxMultiplier: 2, maxSlRatio: .5,
 }
 /**
- * Judge the newest 30 returns once 8 exist, and only with a positive mean 1.64 standard errors above zero (95%, one-sided).
- * On 108 held-out symbol-days this cut activations on noise about fivefold against 6 returns and 1.0, with no slower
- * activation when a real edge exists.
+ * Judge the newest 30 returns once 12 exist, and only with a positive mean 2.33 standard errors above zero (99%,
+ * one-sided). Relate adds exposure, so a false activation costs real money. On 188 held-out symbol-days (12 symbols
+ * over 9 days and 80 other symbols), where the Sets themselves lost, a loss series of N = 4 and X = 0.4 cost, against
+ * no Relate on the 48 validation days: 0.25 with this gate (0.3% of orders raised), 1.8 with 8 returns and 1.64 standard
+ * errors (2.7%), 12.6 with 6 returns and 1.0 (12.9%) and 16.5 with no gate (32.2%), on a base loss of 119.
  */
-export const DEFAULT_RELATE_AUTO: RelateAutoSettings = { enabled: false, lastN: 30, minSamples: 8, minPF: 1.1, confidence: 1.64, inherit: true }
+export const DEFAULT_RELATE_AUTO: RelateAutoSettings = { enabled: false, lastN: 30, minSamples: 12, minPF: 1.1, confidence: 2.33, inherit: true }
 
 export function validateRelateAuto(policy: RelateAutoSettings): RelateAutoSettings {
   const base = validateStepAuto(policy, "Relate")
@@ -31,8 +33,13 @@ function eligible(config: StrategyConfig, policy: RelateSettings): boolean {
 }
 
 /**
- * Winning-run sizing: volume rises by `ratio` for every consecutive win (capped), for every relation that qualifies.
- * Returns are net per-position percentages, newest first. A loss resets the run, so exposure only grows on proof.
+ * Ladder sizing for one specific relation (a Set's consecutive positions). With `stepMode` "loss" every losing order
+ * raises the next order of that relation by `ratio` (X) of the base allocation until a win ends the series, for at
+ * most `steps` (N) rounds, never above `maxMultiplier`; a series that loses all N rounds ends and restarts at base.
+ * "wins" climbs the same ladder on consecutive wins instead, and a policy without `stepMode` keeps that older behavior.
+ *
+ * Volume is only raised while the relation's own evidence qualifies, so a relation that has stopped working is never
+ * averaged into. Returns are net per-position percentages, newest first.
  *
  * Manual mode judges the Set's own 60+ returns. Auto mode needs only a handful: the newest `lastN` returns (own,
  * then older non-overlapping returns of the same trade stream in ancestor Sets) must have PF above the larger of
@@ -47,8 +54,22 @@ export function relateAllocation(samples: readonly number[], config: StrategyCon
     enabled: true, lastN: policy.lastN, minSamples: policy.minTrades, minPF: Math.max(policy.minPF, config.autoPfFloor ?? 0, autoPf),
   })
   if (verdict.state !== "qualified") return 1
+  return ladder(samples, samples.length, policy)
+}
+
+/**
+ * "loss": a series. Every losing order raises the next one by X until a win ends the series; after N losing rounds
+ * without a win the series is over and the next order restarts at base, so the exposure of one series is bounded.
+ * "wins": consecutive winning orders climb the same ladder, at most N steps.
+ */
+function ladder(tape: readonly number[], limit: number, policy: RelateSettings): number {
+  if (policy.stepMode === "loss") {
+    let losses = 0
+    while (losses < limit && tape[losses] < 0) losses++
+    return Math.min(policy.maxMultiplier, 1 + (losses % (policy.steps + 1)) * policy.ratio)
+  }
   let wins = 0
-  while (wins < policy.steps && samples[wins] > 0) wins++
+  while (wins < policy.steps && wins < limit && tape[wins] > 0) wins++
   return Math.min(policy.maxMultiplier, 1 + wins * policy.ratio)
 }
 
@@ -75,7 +96,5 @@ function autoAllocation(own: readonly number[], inherited: readonly number[] | u
     const standardError = Math.sqrt(squares / (window - 1) / window)
     if (standardError > 0 && mean / standardError < auto.confidence) return 1
   }
-  let wins = 0
-  while (wins < policy.steps && wins < window && tape[wins] > 0) wins++
-  return Math.min(policy.maxMultiplier, 1 + wins * policy.ratio)
+  return ladder(tape, window, policy)
 }

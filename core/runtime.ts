@@ -463,6 +463,12 @@ export class TerminalRuntime {
         else policy[field] = Number(value)
         continue
       }
+      if (key === "relateStepMode") {
+        if (value !== "loss" && value !== "wins") throw new Error("Relate step mode must be loss or wins")
+        const policy = next.coordinations.relate ??= { ...DEFAULT_RELATE }
+        policy.stepMode = value
+        continue
+      }
       if (key.startsWith("relateAuto")) {
         const policy = next.coordinations.relate ??= { ...DEFAULT_RELATE }
         const auto = policy.auto ??= { ...DEFAULT_RELATE_AUTO }
