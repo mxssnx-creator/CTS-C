@@ -53,18 +53,31 @@ test("Exec policies use separate chronological blocks and reject an incomplete o
 
 test("positive and negative outcomes make independent paths and preserve the full-window PF", () => {
   const outcomes = ["positive","negative"] as const
+  const late = {long:["inherit"],short:[30],last:[1],shortOutcomes:outcomes,lastOutcomes:outcomes}
   const windows = checkExecWindows({base:{long:[10],short:[4,16],last:[1],shortOutcomes:outcomes,lastOutcomes:outcomes},
-    main:{long:["none","inherit"],short:[4],last:[1],shortOutcomes:outcomes,lastOutcomes:outcomes}})
+    main:{long:["none","inherit"],short:[4],last:[1],shortOutcomes:outcomes,lastOutcomes:outcomes},real:late,exec:late})
   const plan = new ParentBranches({strategyExecWindows:windows},true)
   const config = generateStrategyCatalog("test",settings.catalog)[0]
   const base = plan.variants(config,undefined,"base")
-  assert.equal(base.length,6)
-  assert.equal(new Set(base.map(lane=>lane.id)).size,6)
-  assert.equal(base.filter(lane=>lane.branch?.windows?.base?.shortPolarity==="negative").length,2)
+  assert.equal(base.length,8)
+  assert.equal(new Set(base.map(lane=>lane.id)).size,8)
+  assert.equal(base.filter(lane=>lane.branch?.windows?.base?.shortPolarity==="negative").length,4)
   const parent = base.find(lane=>lane.branch?.windows?.base?.minimalPolarity==="negative")!
   const next = plan.variants(parent,"normal","main")
   assert.equal(next.length,8)
   for (const child of next) assert.equal(plan.restore(child,config,()=>true),child)
+  const real = plan.variants(next[0],"normal","real")
+  assert.equal(real.length,4)
+  const exec = real.flatMap(lane=>["normal","axis"].flatMap(coordination=>plan.variants(lane,coordination as "normal"|"axis","exec")))
+  assert.equal(exec.length,32)
+  assert.equal(new Set(exec.map(lane=>lane.id)).size,32)
+  for (const lane of exec) {
+    assert.equal(plan.restore(lane,config,()=>true),lane)
+    assert.equal(lane.branch!.windows!.exec!.short,30)
+  }
+  const losses = blockPrefix([...Array<number>(31).fill(-.01),...Array<number>(10).fill(.05)])
+  assert.equal(evaluateBlocks(losses,execBlockPolicy(10,30,1,"negative","negative"),1.1).state,"qualified")
+  assert.equal(evaluateBlocks(losses,execBlockPolicy(0,30,1,"negative","negative"),1.1).state,"failed")
   const negative = execBlockPolicy(0,4,1,"positive","negative")
   assert.equal(evaluateBlocks(blockPrefix([-.2,.2,.2,.2,.2]),negative,1.1).state,"qualified")
   assert.equal(evaluateBlocks(blockPrefix([-1,.2,.2,.2,.2]),negative,1.1).state,"failed")
@@ -138,16 +151,18 @@ test("fresh parent entries fund independent child Sets and Exec mirrors without 
   } finally { db.close() }
 })
 
-test("only Exec can select Short up to 30 and each width uses its own complete window", () => {
+test("Real and Exec can select Short up to 30 and each width uses its own complete window", () => {
   const initial = checkExecWindows(settings.catalog!.strategyExecWindows)
   const exec = {...initial.exec,short:[30,20,28,24]}
   const windows = checkExecWindows({...initial,exec})
   assert.deepEqual(windows.exec.short,[20,24,28,30])
-  assert.throws(()=>checkExecWindows({real:{short:[30]}}),/distinct Exec window choices/)
+  assert.deepEqual(checkExecWindows({real:{short:[30]}}).real.short,[30])
+  assert.throws(()=>checkExecWindows({main:{short:[30]}}),/distinct Exec window choices/)
   assert.throws(()=>checkExecWindows({...initial,exec:{...exec,short:[31]}}),/distinct Exec window choices/)
   assert.throws(()=>checkExecWindows({...initial,exec},50),/exceed retained/)
   const minimal = {long:["none"],short:[4,30],last:[1],shortOutcomes:["negative"]}
-  assert.doesNotThrow(()=>checkExecWindows({...initial,exec:minimal},25))
+  assert.throws(()=>checkExecWindows({...initial,exec:minimal},25),/Exec exec windows exceed retained samples/)
+  assert.doesNotThrow(()=>checkExecWindows({...initial,exec:minimal},31))
   const engine = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows}})
   const traded:ClosedTrade[]=[]
   engine.observeStageCloses(trade=>{if(trade.executed) traded.push(trade)})
