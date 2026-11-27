@@ -1,0 +1,395 @@
+{
+  "kind": "cts-c-observed-stage-simulation",
+  "generatedAt": "2026-11-27T13:40:24.638Z",
+  "settings": {
+    "sourceHash": "f43e650a24501fe7dfe3810e537fedc2ff89b9f9c577a2c0a870b2c84579ca28",
+    "warmup": 4320,
+    "hours": 120,
+    "bucketMinutes": 240,
+    "fees": {
+      "makerFeePct": 0.02,
+      "takerFeePct": 0.05,
+      "slippagePctOfFees": 10
+    },
+    "catalog": {
+      "strategyEnabledRanges": [
+        "Micro",
+        "Minimal",
+        "Short",
+        "Normal",
+        "Long",
+        "Wide",
+        "Low-Range"
+      ],
+      "strategyTpSteps": [
+        2,
+        3,
+        5,
+        8,
+        12,
+        18,
+        24,
+        30
+      ],
+      "strategySlRatios": [
+        0.6,
+        1,
+        1.4
+      ],
+      "microTrailRatio": 0.5,
+      "autoPfEnabled": true,
+      "autoPfRatio": 0.2,
+      "autoPfMax": 2,
+      "strategyExitModes": [
+        "fixed",
+        "trailing",
+        "trailing-only"
+      ],
+      "strategySignalPeriods": [
+        20
+      ],
+      "strategySignalTimeframes": [
+        1
+      ],
+      "slippagePctOfFees": 10,
+      "strategyIndicationSources": [
+        "tactic-dca-bounce-8-percent-0.5-1-0.25",
+        "tactic-dca-trend-20-atr-1-2-0.5",
+        "tactic-dca-vwap-40-atr-1-3-0.5",
+        "tactic-dca-sweep-20-percent-0.5-2-0.25",
+        "inverse-known-ema-9-21",
+        "inverse-turn-ema-9-21",
+        "inverse-zscore-20",
+        "inverse-impulse-20",
+        "inverse-failed-break-20",
+        "inverse-rsi2-turn-20",
+        "trend-reversal-reclaim-6",
+        "trend-reversal-reclaim-10",
+        "trend-reversal-reclaim-16",
+        "trend-reversal-structure-6",
+        "trend-reversal-structure-10",
+        "trend-reversal-structure-16",
+        "trend-reversal-impulse-6",
+        "trend-reversal-impulse-10",
+        "trend-reversal-impulse-16",
+        "trend-reversal-pullback-6",
+        "trend-reversal-pullback-10",
+        "trend-reversal-pullback-16",
+        "trend-reversal-rsi-6",
+        "trend-reversal-rsi-10",
+        "trend-reversal-rsi-16",
+        "trend-reversal-psar-6",
+        "trend-reversal-psar-10",
+        "trend-reversal-psar-16",
+        "trend-reversal-confluence-6",
+        "trend-reversal-confluence-10",
+        "trend-reversal-confluence-16"
+      ]
+    }
+  },
+  "profiles": [
+    {
+      "name": "processed-pyramid-20-8-8",
+      "gate": "processed-sets",
+      "blockBehavior": "pyramid",
+      "execWindows": false
+    },
+    {
+      "name": "processed-rounds-20-8-8",
+      "gate": "processed-sets",
+      "blockBehavior": "rounds",
+      "execWindows": false
+    },
+    {
+      "name": "exec-branches-pyramid-20-8-8",
+      "gate": "exec-branches",
+      "blockBehavior": "pyramid",
+      "execWindows": true
+    },
+    {
+      "name": "prehistory-selected-processed-pyramid-20-8-8",
+      "gate": "processed-sets",
+      "blockBehavior": "pyramid",
+      "execWindows": false,
+      "frozenPrehistory": true
+    },
+    {
+      "name": "prehistory-selected-processed-rounds-20-8-8",
+      "gate": "processed-sets",
+      "blockBehavior": "rounds",
+      "execWindows": false,
+      "frozenPrehistory": true
+    },
+    {
+      "name": "prehistory-selected-exec-branches-pyramid-20-8-8",
+      "gate": "exec-branches",
+      "blockBehavior": "pyramid",
+      "execWindows": true,
+      "frozenPrehistory": true
+    }
+  ],
+  "types": [
+    "MA_Cross",
+    "RSI_Band",
+    "MACD_Signal",
+    "Bollinger_Bounce",
+    "MA_Inverse",
+    "Trend_Pullback",
+    "RSI_Momentum",
+    "Bollinger_Breakout",
+    "Trend",
+    "Trend_ADX",
+    "Trend_Efficiency",
+    "Trend_Fade",
+    "Break",
+    "Break_ATR",
+    "Break_Volume",
+    "Break_Retest",
+    "Break_Reversal",
+    "Break_Continuation",
+    "Tactic",
+    "Inverse",
+    "Signals",
+    "Low-Range",
+    "Trend-Reversal"
+  ],
+  "manifest": {
+    "cutoff": 1795785900000,
+    "start": 1795094700000,
+    "symbols": [
+      "BTC-USDT",
+      "ETH-USDT",
+      "SOL-USDT",
+      "XRP-USDT",
+      "BCH-USDT",
+      "DOGE-USDT",
+      "LINK-USDT",
+      "ADA-USDT",
+      "LTC-USDT",
+      "XTZ-USDT",
+      "DOT-USDT",
+      "AVAX-USDT",
+      "THETA-USDT",
+      "ALGO-USDT",
+      "AXS-USDT",
+      "DYDX-USDT",
+      "CELR-USDT",
+      "SAND-USDT",
+      "KSM-USDT",
+      "VET-USDT",
+      "SUSHI-USDT",
+      "NEAR-USDT",
+      "ATOM-USDT",
+      "BSV-USDT",
+      "UNI-USDT",
+      "FIL-USDT",
+      "AAVE-USDT",
+      "ENJ-USDT",
+      "MANA-USDT",
+      "CHZ-USDT"
+    ],
+    "datasets": [
+      {
+        "symbol": "BTC-USDT",
+        "file": "BTC-USDT.json",
+        "sha256": "578ffa257751e6cda7c8cf7b713e631781edd45724568402701a870269065f04",
+        "bars": 11520
+      },
+      {
+        "symbol": "ETH-USDT",
+        "file": "ETH-USDT.json",
+        "sha256": "f9feb7ed29b38d900d1cf667205b6586af0a20b97809f14086740d57e0e051ea",
+        "bars": 11520
+      },
+      {
+        "symbol": "SOL-USDT",
+        "file": "SOL-USDT.json",
+        "sha256": "80d115fa1347fe22c44f28388bba3a197452a2bcc9fb6286881b6a9379ae5d09",
+        "bars": 11520
+      },
+      {
+        "symbol": "XRP-USDT",
+        "file": "XRP-USDT.json",
+        "sha256": "cca99761ffaa140bc698ebec9c3bcf996d8f93673489329d9e6fdb6f6599f41a",
+        "bars": 11520
+      },
+      {
+        "symbol": "BCH-USDT",
+        "file": "BCH-USDT.json",
+        "sha256": "fe48f236e8ac006186c07494aa0660705bca2c43d4e2a220a812ebc005d45d6a",
+        "bars": 11520
+      },
+      {
+        "symbol": "DOGE-USDT",
+        "file": "DOGE-USDT.json",
+        "sha256": "69478f18aa511a53c78f55547e76b7a54425e1b0ebfc72d4df3bed26615489cd",
+        "bars": 11520
+      },
+      {
+        "symbol": "LINK-USDT",
+        "file": "LINK-USDT.json",
+        "sha256": "a42abe4123cf199e53f3dd1952a4f494faac70737f6e91e3ea8148ea2a9cc66d",
+        "bars": 11520
+      },
+      {
+        "symbol": "ADA-USDT",
+        "file": "ADA-USDT.json",
+        "sha256": "56ced9dbdeb127e819174d31fcb1034f6a9a44f8029401f3f6e985d0c3563287",
+        "bars": 11520
+      },
+      {
+        "symbol": "LTC-USDT",
+        "file": "LTC-USDT.json",
+        "sha256": "dc34d4e371da572d0bde66173937c779ed95d1aeff624d4db79a44fe354d2c33",
+        "bars": 11520
+      },
+      {
+        "symbol": "XTZ-USDT",
+        "file": "XTZ-USDT.json",
+        "sha256": "29d7ac706eda9f743b4c9fe1b6fc63e26cfb8571075e55e4336721a61b90b52a",
+        "bars": 11520
+      },
+      {
+        "symbol": "DOT-USDT",
+        "file": "DOT-USDT.json",
+        "sha256": "07df53666f978136af838de927b4d6fc5b09fb827b1319d7b8b4110531cc261f",
+        "bars": 11520
+      },
+      {
+        "symbol": "AVAX-USDT",
+        "file": "AVAX-USDT.json",
+        "sha256": "2e7d539f6a218c890dbb39e0bd9ea2546dbb50c40711ca4b0b469b839aa10784",
+        "bars": 11520
+      },
+      {
+        "symbol": "THETA-USDT",
+        "file": "THETA-USDT.json",
+        "sha256": "a08ef145f82e5f9bd4b8ba48b1bc7ba22cd85e39ef7b42ddedf890d357300787",
+        "bars": 11520
+      },
+      {
+        "symbol": "ALGO-USDT",
+        "file": "ALGO-USDT.json",
+        "sha256": "871d3c48be27d7dee14b7901a6553e9815e6a3427dded398ae22ff42d5b04e89",
+        "bars": 11520
+      },
+      {
+        "symbol": "AXS-USDT",
+        "file": "AXS-USDT.json",
+        "sha256": "4067362593c1ac48dfffc3864e41cf157fd2d3d86f41780ff422fa67ac054589",
+        "bars": 11520
+      },
+      {
+        "symbol": "DYDX-USDT",
+        "file": "DYDX-USDT.json",
+        "sha256": "a20de0fa9ad41ad7a4f6717dea24ad2a2c4b34c27ab0f4b2c791bdddad680db8",
+        "bars": 11520
+      },
+      {
+        "symbol": "CELR-USDT",
+        "file": "CELR-USDT.json",
+        "sha256": "1944acd4f6fb2e96da7b40121996626633817232bfccf3398a26c51947acd5de",
+        "bars": 11520
+      },
+      {
+        "symbol": "SAND-USDT",
+        "file": "SAND-USDT.json",
+        "sha256": "07b0628a6234eb2d196d2d43015f2bed1de141a9177f9402476302a60d244a56",
+        "bars": 11520
+      },
+      {
+        "symbol": "KSM-USDT",
+        "file": "KSM-USDT.json",
+        "sha256": "15a9894d1d7c34b80e726e97dfdfafd92d07eb73fab200349492608cfdc1c98d",
+        "bars": 11520
+      },
+      {
+        "symbol": "VET-USDT",
+        "file": "VET-USDT.json",
+        "sha256": "0b66ffdd960e1a08a3dd77f72e62499313b8e568b64188a2d647f8d00ecdbc9e",
+        "bars": 11520
+      },
+      {
+        "symbol": "SUSHI-USDT",
+        "file": "SUSHI-USDT.json",
+        "sha256": "904ab2493b322ae57cbf0428b06db73cce8e4ff1ab43274a8215044c6d4e9576",
+        "bars": 11520
+      },
+      {
+        "symbol": "NEAR-USDT",
+        "file": "NEAR-USDT.json",
+        "sha256": "db958bcf468a166da19f30e29b3f0c9807e74be0e4628b932b73fe7835add15d",
+        "bars": 11520
+      },
+      {
+        "symbol": "ATOM-USDT",
+        "file": "ATOM-USDT.json",
+        "sha256": "3990b4997887b0fff7ca56070fc8f95b49678547df23857ec535c2ffcc4cb2b8",
+        "bars": 11520
+      },
+      {
+        "symbol": "BSV-USDT",
+        "file": "BSV-USDT.json",
+        "sha256": "76f5c5a93f99441d8e4de3a7f2896676290d62881f0169bf4a4d19a75ce90e7a",
+        "bars": 11520
+      },
+      {
+        "symbol": "UNI-USDT",
+        "file": "UNI-USDT.json",
+        "sha256": "08c5544ea0c9c4e9794c1bf5f98ca0b2abbeee9ac1580d29530602a099898d10",
+        "bars": 11520
+      },
+      {
+        "symbol": "FIL-USDT",
+        "file": "FIL-USDT.json",
+        "sha256": "0fddfc0808f6d8bb3c3c8eb8b4e50374946c1a453ab24a810bb4df0d18f6d9c1",
+        "bars": 11520
+      },
+      {
+        "symbol": "AAVE-USDT",
+        "file": "AAVE-USDT.json",
+        "sha256": "9d3d599344cc055d4e5bee576b07050087cf31133af2ce53653ba35e8e5f376a",
+        "bars": 11520
+      },
+      {
+        "symbol": "ENJ-USDT",
+        "file": "ENJ-USDT.json",
+        "sha256": "c424b4977464d89a5d266befea4790f298b7950a28060a29b0fb144e4556cf04",
+        "bars": 11520
+      },
+      {
+        "symbol": "MANA-USDT",
+        "file": "MANA-USDT.json",
+        "sha256": "728e95e0683eda0d5b7a379e8812c4b14d96121d6b5e933acc2fd3a67f258aa9",
+        "bars": 11520
+      },
+      {
+        "symbol": "CHZ-USDT",
+        "file": "CHZ-USDT.json",
+        "sha256": "1ce8ba08270e9ff00643b0f02d89ff3ec029ec65ed362fbce2a816c9abd243fb",
+        "bars": 11520
+      }
+    ],
+    "excluded": []
+  },
+  "feeEvidence": {
+    "connection": "bingx-x02",
+    "ordersSubmitted": 0,
+    "verified": false,
+    "feeSource": "documented-defaults-unverified",
+    "fees": {
+      "makerFeePct": 0.02,
+      "takerFeePct": 0.05,
+      "slippagePctOfFees": 10
+    }
+  },
+  "workerLimits": {
+    "concurrency": 4,
+    "heapMiB": 1536,
+    "nice": 10,
+    "maxEventBatchCandles": 5
+  },
+  "ordersSubmitted": 0,
+  "actualExchangeExecutionPF": null,
+  "automaticPromotion": false
+}
