@@ -179,7 +179,8 @@ function laneKey(connectionId: string, symbol: string, config: StrategyConfig, d
 }
 type WindowResult={pfSampleCount?:number;blockPolicyKey?:string;drawdownPct?:number;maxDrawdownPct?:number;count:number;required:number;minPF:number;profit:number|null;loss:number|null;enoughSamples:boolean;profitFactor:number|null;pfState:import('./types').ProfitFactorState;qualified:boolean;autoPf?:GateProof["autoPf"]}
 type StageWindowResult=WindowResult&Pick<GateProof,"windowScope"|"configWindow">&{windowKey?:string}
-type SnapshotOptions={laneLimit?:number;laneStage?:Stage;positionLimit?:number;positionStage?:Stage;includeCoordinationStats?:boolean}
+/** sharedReadOnly skips the defensive copy for a caller that only reads the view and never mutates it. */
+type SnapshotOptions={laneLimit?:number;laneStage?:Stage;positionLimit?:number;positionStage?:Stage;includeCoordinationStats?:boolean;sharedReadOnly?:boolean}
 type StageSnapshot=Pick<EngineSnapshot,"stages"|"lanes">&{openLanes:LaneState[];coordinationStats?:ReturnType<TradingEngine["coordinationStats"]>}
 const forwardTotals = () => ({open:0,closed:0,profit:0,loss:0,netPnl:0,cashClosed:0,cashProfit:0,cashLoss:0})
 function addForward(totals: ReturnType<typeof forwardTotals>, open: boolean, settled: LaneState["postStage"]) {
@@ -1447,7 +1448,7 @@ export class TradingEngine {
     // from current state even when the underlying stage books did not change.
     const key=options.includeCoordinationStats&&laneLimit<=500&&positionLimit<=1000
       ? JSON.stringify([laneLimit,positionLimit,options.laneStage,options.positionStage]) : undefined
-    if(key!==undefined&&this.stageSnapshot?.key===key)return this.snapshotView(this.stageSnapshot)
+    if(key!==undefined&&this.stageSnapshot?.key===key)return this.snapshotView(this.stageSnapshot,options.sharedReadOnly===true)
     const s = this.state.settings
     const lanes: EngineSnapshot["lanes"] = [], openLanes:LaneState[]=[]
     const coordinationReport=options.includeCoordinationStats?this.coordinationReport():undefined
@@ -1555,15 +1556,16 @@ export class TradingEngine {
     })
     const report={stages,lanes,openLanes,...(coordinationReport&&{coordinationStats:coordinationReport.result()})}
     if(key!==undefined)this.stageSnapshot={key,...report}
-    return this.snapshotView(report)
+    return this.snapshotView(report,options.sharedReadOnly===true)
   }
-  private snapshotView({stages,lanes,openLanes,coordinationStats}:StageSnapshot):EngineSnapshot&Pick<StageSnapshot,"coordinationStats">{
+  private snapshotView({stages,lanes,openLanes,coordinationStats}:StageSnapshot,shared=false):EngineSnapshot&Pick<StageSnapshot,"coordinationStats">{
     const s=this.state.settings
     const positions=openLanes.map(lane=>({...lane.open!,laneId:lane.id,symbol:lane.symbol,configId:lane.configId,stage:lane.stage,coordination:lane.coordination}))
-    return structuredClone({ settings: s, catalogCount: this.configs.length * (this.branches && !this.branches.exec ? lastNVariantCount(checkLastNGrid(s.catalog.strategyLastNGrid)) : 1), symbolCount: s.symbols.length, processedCandles: this.state.processedCandles, updatedAt: this.state.updatedAt,
+    const view={ settings: s, catalogCount: this.configs.length * (this.branches && !this.branches.exec ? lastNVariantCount(checkLastNGrid(s.catalog.strategyLastNGrid)) : 1), symbolCount: s.symbols.length, processedCandles: this.state.processedCandles, updatedAt: this.state.updatedAt,
       equity: this.state.equity, peakEquity: this.state.peakEquity, maxDrawdownPct: this.state.maxDrawdownPct, stages,
       positions, trades: this.recentTradeRows(),liveTrades:this.state.recentLiveTrades!, intents: this.state.intents, equityHistory: this.state.equityHistory, lanes,
-      ...(coordinationStats&&{coordinationStats}) })
+      ...(coordinationStats&&{coordinationStats}) }
+    return shared?view:structuredClone(view)
   }
 }
 // Deterministic client IDs survive restart and retries; credentials are never inputs.

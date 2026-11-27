@@ -27,8 +27,8 @@ type Totals=ReturnType<typeof empty>
 const totalKeys=Object.keys(empty()) as (keyof Totals)[]
 const add=(a:Totals,b:Totals)=>{for(const k of totalKeys)a[k]+=b[k]}
 const getTotals=(m:Map<string,Totals>,key:string)=>{let row=m.get(key);if(!row){row=empty();m.set(key,row)}return row}
-const closeKeys=['closes','wins','profit','loss','netPnl','cost','notional'] as const
-function applyEvent(t:Totals,d:Totals,kind:string){if(kind==='opened')t.entries++;else if(kind==='added')t.additions++;else for(const k of closeKeys)t[k]+=d[k]}
+// Same additions in the same order as the closeKeys loop, written out because this runs for every bucket target on every close.
+function applyEvent(t:Totals,d:Totals,kind:string){if(kind==='opened')t.entries++;else if(kind==='added')t.additions++;else{t.closes+=d.closes;t.wins+=d.wins;t.profit+=d.profit;t.loss+=d.loss;t.netPnl+=d.netPnl;t.cost+=d.cost;t.notional+=d.notional}}
 const measured=(a:Totals)=>({...a,...describeProfitFactor(a.profit,a.loss,a.closes),modeledOrderActions:a.entries+a.additions+a.closes})
 const coverageEmpty=()=>({sets:0,enough:0,qualified:0,admissionReady:0,validatedSamples:0,validatedSets:0,validatedProfit:0,validatedLoss:0,ownQualifiedSets:0,ownQualifiedSamples:0,ownQualifiedProfit:0,ownQualifiedLoss:0,unfinished:0})
 type Coverage=ReturnType<typeof coverageEmpty>
@@ -85,6 +85,7 @@ async function prepare(root:string,count:number,warmup:number,hours:number):Prom
  await atomic(join(root,'manifest.json'),result);return result
 }
 
+const scratchDelta=empty()
 async function runJob(job:Job){
  const started=performance.now(),usage=process.resourceUsage(),raw=await readFile(join(job.root,job.dataset.file),'utf8');if(hash(raw)!==job.dataset.sha256)throw Error('Observed dataset digest mismatch')
  const bars=JSON.parse(raw) as Candle[];validateObservedCandles(bars)
@@ -118,17 +119,17 @@ async function runJob(job:Job){
      }
      if(binding.bucket!==bucket){binding.bucket=bucket;binding.bucketTargets=binding.participants.flatMap(i=>[bucketRows[i].stages[binding!.stage],...binding!.bucketKeys.map(key=>getTotals(bucketRows[i].groups,key))])}
 
-     const delta=empty()
-     if(event.type==='opened')delta.entries++
-     if(event.type==='added')delta.additions++
+     // Only closes carry a delta; opened and added events are counted by kind. The scratch delta is fully rewritten on every event.
+     const delta=scratchDelta
      if(event.trade){const t=event.trade;if(t.stage!=='base'&&(!t.admission?.length||t.admission.some(p=>!p.qualified)))throw Error('Unproven post-Base trade entered the forward ledger');delta.closes=1;delta.wins=Number(t.netReturnPct>0);delta.profit=Math.max(0,t.netReturnPct);delta.loss=Math.max(0,-t.netReturnPct);delta.netPnl=t.netPnl;delta.cost=t.cost;delta.notional=t.notional;lines+=JSON.stringify(t)+'\n'}
+     else{delta.closes=0;delta.wins=0;delta.profit=0;delta.loss=0;delta.netPnl=0;delta.cost=0;delta.notional=0}
      for(const target of binding.targets)applyEvent(target,delta,event.type)
      for(const target of binding.bucketTargets)applyEvent(target,delta,event.type)
     }
     if(lines&&!stream.write(lines))await once(stream,'drain');lines=''
    }
    // Coverage is sampled once per reporting bucket, which bounds the cost of full lane snapshots.
-   const snap=engine.snapshot({laneLimit:Infinity,positionLimit:0})
+   const snap=engine.snapshot({laneLimit:Infinity,positionLimit:0,sharedReadOnly:true})
    for(const [index,a]of accumulators.entries()){
     const coverage=Object.fromEntries(STAGES.map(s=>[s,coverageEmpty()])) as Record<Stage,Coverage>
     for(const lane of snap.lanes){
