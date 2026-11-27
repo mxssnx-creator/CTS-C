@@ -8,6 +8,7 @@ import { TerminalRuntime } from "../core/runtime"
 import { StateStore } from "../core/store"
 import type { Candle, ClosedTrade } from "../core/types"
 import preset from "../research-data/exec-dca-trend-preset.json"
+import reference from "../research-data/exec-trend-sar-reference.json"
 
 const symbols = ["UP-USDT","DOWN-USDT"]
 const [trend,sar] = EXEC_PROFILES
@@ -19,6 +20,35 @@ const configured = { ...DEFAULT_ENGINE_SETTINGS, symbols, stageGateMode:"exec-br
     strategyStageCoordinations:{main:["block"],real:["block"],exec:["block"]}},
   symbolFees:{"DOWN-USDT":{makerFeePct:.02,takerFeePct:.06}},
 }
+
+test("the narrow Trend and SAR reference saves and reloads the historical geometry and routing",()=>{
+  const store = new StateStore(":memory:")
+  const runtime = new TerminalRuntime("bingx-x02",store)
+  try {
+    runtime.saveFlatSettings(reference)
+    const settings = runtime.engine.settings
+    const geometries = generateEngineCatalog(settings)
+    assert.deepEqual(geometries.map(config=>[
+      config.execProfile??config.type,config.range,config.tpStep,config.slRatio,config.position_cost_step,config.indicationSourceId,
+    ]),[
+      ["Trend","Minimal",6,1,20,undefined],
+      [trend.id,"Short",12,1.2,10,undefined],
+      [sar.id,"Short",12,1.2,20,"parabolic-sar-0.01-0.15"],
+      [sar.id,"Short",12,1.2,20,"sar-fast"],
+    ])
+    const plan = new ParentBranches(settings.catalog,true)
+    assert.deepEqual(plan.baseChoices(geometries[0]),["normal","dca"])
+    assert.deepEqual(plan.choices("exec","dca",geometries[0]),["normal"])
+    assert.deepEqual(plan.choices("exec","normal",geometries[1]),["dca"])
+    assert.equal(runtime.control.historyCandles,14_400)
+    assert.equal(runtime.engine.settings.catalog.strategyExecSingleEntry,true)
+    runtime.saveFlatSettings({strategyExecSingleEntry:false})
+    assert.equal(TradingEngine.fromSerialized(runtime.engine.serializeState()).settings.catalog.strategyExecSingleEntry,false)
+  } finally {
+    runtime.shutdown()
+    store.close()
+  }
+})
 
 test("recovery profiles retain signed Last-N branches across saved settings and use their own geometry",()=>{
   const profile = EXEC_PROFILES.find(profile=>profile.id==="trend-recovery-dca-v1")!

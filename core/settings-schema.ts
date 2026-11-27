@@ -29,6 +29,7 @@ export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
   stageGateMode: "exec-branches",
+  strategyExecSingleEntry: false,
   ...Object.fromEntries(EXEC_PROFILES.map(profile=>[profile.setting,profile.enabledByDefault])),
   stageWindowScope: "context", microStageWindowScope: "inherit",
   stageBlocks: {}, strategyLastNGrid: {}, strategyExecWindows: DEFAULT_EXEC_WINDOWS, strategyStageCoordinations: {},
@@ -195,7 +196,7 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
     if (!Object.prototype.hasOwnProperty.call(values, key)) {
       if (partial) continue
       if (key === "strategyStageCoordinations") { output[key] = {}; continue }
-      if (key === "strategyExecWindows" || key === "execMinPF" || key === "strategyCoreSignalPeriods" || EXEC_PROFILES.some(profile=>profile.setting===key)) { output[key] = structuredClone(DEFAULTS[key]); continue }
+      if (key === "strategyExecWindows" || key === "execMinPF" || key === "strategyExecSingleEntry" || key === "strategyCoreSignalPeriods" || EXEC_PROFILES.some(profile=>profile.setting===key)) { output[key] = structuredClone(DEFAULTS[key]); continue }
       if (Object.hasOwn(AUTO_PF_DEFAULTS,key)) {
         output[key] = key === "autoPfMode" && values.autoPfEnabled === true ? "tp-distance" : DEFAULTS[key]
         continue

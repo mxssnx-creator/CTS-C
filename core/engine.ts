@@ -114,6 +114,8 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   finite(settings.initialEquity, "initialEquity", .01, 1e12); finite(settings.baseNotional, "baseNotional", .000001, 1e9)
   finite(settings.volumeFactor, "volumeFactor", .000001, 100); finite(settings.maxSamples, "maxSamples", 1, 1000, true)
   checkStageCoordinations(settings.catalog.strategyStageCoordinations)
+  if (settings.catalog.strategyExecSingleEntry !== undefined && typeof settings.catalog.strategyExecSingleEntry !== "boolean")
+    throw new Error("Exec single entry must be enabled or disabled")
   for (const profile of EXEC_PROFILES) {
     const enabled = settings.catalog[profile.setting]
     if (enabled !== undefined && typeof enabled !== "boolean") throw new Error(`${profile.label} profile must be enabled or disabled`)
@@ -1050,6 +1052,8 @@ export class TradingEngine {
     coordinations: readonly Coordination[], allowExecution: boolean, emit: (event: EngineEvent) => void): void {
     const plan = this.branches!, s = this.state.settings
     const enabled = geometry.execProfile ? PROFILE_BASE_COORDINATIONS : coordinations
+    const singleEntry = plan.exec && s.catalog.strategyExecSingleEntry === true
+    let selected: Map<Coordination,{config:StrategyConfig;position:PaperPosition;proof:GateProof[];samples:number}> | undefined
     const visit = (config: StrategyConfig, coordination: Coordination, stage: Stage, parent?: PaperPosition, entryProof?: GateProof[], baseGate?:WindowResult) => {
       let lane = this.cachedLane(symbol,config.id,direction,coordination,stage)
       if (lane?.open || lane && (lane.lastTimestamp >= candle.timestamp || !this.validLineage(lane))) return
@@ -1084,9 +1088,18 @@ export class TradingEngine {
       const exact = baseGate ?? this.stageWindow(lane,stage,candle.timestamp,true)
       const qualified = exact.qualified &&
         (scope === "context" || this.stageWindow(lane,stage,candle.timestamp).qualified)
+      const final = stage === this.finalGate
+      if (final) {
+        if (!qualified || (plan.exec && !this.processingAllows(lane))) return
+        const incumbent = selected?.get(coordination)
+        if (incumbent && (exact.count < incumbent.samples ||
+            (exact.count === incumbent.samples && config.id >= incumbent.config.id))) return
+      }
       const nextProof = plan.exec && qualified ? [...(entryProof ?? []),this.immutableProof(this.gateProof(lane,stage,candle.timestamp,exact))] : undefined
-      if (stage === this.finalGate) {
-        if (qualified && (!plan.exec || this.processingAllows(lane))) visit(config,coordination,"live",position,nextProof)
+      if (final) {
+        // The Exec books keep every position. Only the funded sibling is mirrored.
+        if (singleEntry) (selected ??= new Map()).set(coordination,{config,position,proof:nextProof!,samples:exact.count})
+        else visit(config,coordination,"live",position,nextProof)
         return
       }
       const next = stage === "base" ? "main" : stage === "main" ? "real" : "exec"
@@ -1184,6 +1197,8 @@ export class TradingEngine {
         visit(config,coordination,"base",undefined,undefined,gate)
       }
     }
+    if (selected) for (const [coordination,{config,position,proof}] of selected)
+      visit(config,coordination,"live",position,proof)
   }
 
   processCandles(symbolInput: string, candles: Candle[], options: CandleProcessing = {}): EngineEvent[] {
