@@ -429,6 +429,7 @@ export class TerminalRuntime {
       if(key==='stageBlocks'){next.stageBlocks=structuredClone(value) as EngineSettings['stageBlocks'];continue}
       if(key==='stageGateMode'){next.stageGateMode=value as EngineSettings['stageGateMode'];continue}
       if(key==='execMinPF'){next.execMinPF=Number(value);continue}
+      if(key==='signalMinPF'){next.signalMinPF=Number(value);continue}
       if(key==='stageWindowScope'){next.stageWindowScope=value as EngineSettings['stageWindowScope'];continue}
       if(key==='microStageWindowScope'){next.microStageWindowScope=value as EngineSettings['microStageWindowScope'];continue}
       if(key==='liveEntryMode'){next.liveEntryMode=value as EngineSettings['liveEntryMode'];continue}

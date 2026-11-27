@@ -37,6 +37,7 @@ export interface EngineSettings {
   liveEntryMode?:'independent'|'real-mirror'
   stageGateMode?:'continuous-ancestors'|'processed-sets'|'parent-branches'|'exec-branches'
   execMinPF?:number
+  signalMinPF?:number
   stageWindowScope?: StageWindowScope
   microStageWindowScope?: StageWindowScope | "inherit"
   connectionId: string; symbols: string[]; initialEquity: number; baseNotional: number; volumeFactor: number

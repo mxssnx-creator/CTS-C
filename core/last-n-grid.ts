@@ -16,6 +16,7 @@ export const EXEC_LONG_MODES = ["none", "inherit"] as const
 export const EXEC_OUTCOMES = ["positive", "negative"] as const
 export const POSITIVE_EXEC_OUTCOME = ["positive"] as const
 export const DEFAULT_EXEC_MIN_PF = 1.1
+export const DEFAULT_SIGNAL_MIN_PF = 1.5
 type ShortLast = { short: readonly number[]; last: readonly number[]; shortOutcomes?: readonly Polarity[]; lastOutcomes?: readonly Polarity[] }
 export type ExecWindows = { base: ShortLast & { long: readonly number[] } } &
   Record<Exclude<EvaluationStage, "base">, ShortLast & { long: readonly typeof EXEC_LONG_MODES[number][] }>

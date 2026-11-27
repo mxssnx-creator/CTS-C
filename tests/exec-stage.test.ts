@@ -28,7 +28,7 @@ const settings: Partial<EngineSettings> = {
     strategyExecWindows: {
       base: { long: [10,20], short: [4], last: [1] },
       main: { long: ["none","inherit"], short: [4], last: [1] },
-      real: { long: ["none"], short: [4], last: [1] },
+      real: { long: ["none","inherit"], short: [4], last: [1] },
       exec: { long: ["none","inherit"], short: [4], last: [1] },
     },
   },
@@ -99,7 +99,7 @@ test("fresh parent entries fund independent child Sets and Exec mirrors without 
     assert.deepEqual(restarted.snapshot(),checkpoint)
     const book = engine.exportState().lanes
     const lanes = Object.values(book), exec = lanes.filter(lane=>lane.stage==="exec")
-    assert.equal(exec.length, 8, "each Real Set has an Exec child with and without the originating Base Long")
+    assert.equal(exec.length, 16, "all eight continuation paths exist for each independent Base Long")
     const byStage = checkpoint.stages.find(row=>row.stage==="exec")!
     assert.ok(byStage.executed!.closed>0)
     assert.ok(byStage.closed>byStage.executed!.closed,"Exec warming closes are excluded from Executed PF")
@@ -117,6 +117,7 @@ test("fresh parent entries fund independent child Sets and Exec mirrors without 
       const parent = book[lane.parentProof!.at(-1)!.laneId]
       const windows = lane.config.branch!.windows!
       assert.equal(lane.config.branch!.geometryId,parent.config.branch!.geometryId)
+      assert.equal(windows.base!.long,parent.config.branch!.windows!.base!.long)
       if (lane.stage === "live") {
         assert.equal(parent.stage,"exec")
         assert.equal(lane.samples.length,0)
