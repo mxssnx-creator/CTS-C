@@ -33,7 +33,7 @@ test('genuine ten-second Tactic candles share calculation history without touchi
 })
 
 test('historical vectors preserve source ticks through rebases, higher frames, duplicate overlap and future extensions',()=>{
- const ids=['inverse-known-ema-9-21','tactic-dca-bounce-8-percent-0.5-1-0.25','rsi-reclaim-5-25','rsi-mom-5-35-follow','parabolic-sar-0.01-0.15','sar-fast-follow']
+ const ids=['inverse-known-ema-9-21','tactic-dca-bounce-8-percent-0.5-1-0.25','rsi-reclaim-5-25','rsi-mom-5-35-follow','parabolic-sar-0.01-0.15','sar-fast-follow','range-compression-breakout-6-18','range-compression-rejection-10-30']
  for(const minutes of [1,5,15]){
   const input=waveBars(minutes===1?PORTED_HISTORY_LIMIT+12:720).map(b=>({...b,timestamp:b.timestamp+60000})),ticks=newSignalState(),expected=input.map(bar=>advancePortedSources(ticks,bar,minutes,ids,{symbol:'SOL-USDT'})),batch=newSignalState(),actual=historicalPortedSignals(batch,input,minutes,ids,'SOL-USDT')
   for(const [i,bar] of input.entries())for(const id of ids)assert.equal(actual.get(bar.timestamp)?.get(id),expected[i].get(id),id+'/'+minutes+'/'+i)

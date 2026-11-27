@@ -10,7 +10,7 @@ import { formatProfitFactor, type ProfitFactorState } from "./profit-factor"
 import {CONNECTIONS,connectionInfo,type ConnectionId} from "@/core/connections"
 import type {CoordinationRow} from "./strategy-lab"
 import type { ExecutionSnapshot } from "./execution-ledger"
-import { ProgressionDetails, PaperEquity, STAGE_NAMES, type StageTelemetry } from "./progression-panel"
+import { ProgressionDetails, PaperEquity, STAGE_NAMES, formatForwardCashPF, type StageTelemetry } from "./progression-panel"
 const ExecutionLedger = dynamic(() => import("./execution-ledger").then(module => module.ExecutionLedger))
 const MarketTerminal = dynamic(() => import("./market-terminal").then(module => module.MarketTerminal), { loading: () => <div className="terminal-empty">Loading candle chart…</div> })
 const StrategyLab = dynamic(() => import("./strategy-lab").then(module => module.StrategyLab), { loading: () => <div className="terminal-empty">Loading strategy controls…</div> })
@@ -196,7 +196,7 @@ export function TradingTerminal() {
                 <h3>{stage}</h3><strong>{snapshot ? count(data.sets) : "—"}<small>Sets</small></strong>
                 <p>{data.directMirror ? `${count(data.eligible)} active mirrors` : `${count(data.eligible)} qualified`}</p>
                 <div className="terminal-stage-foot">
-                  {data.executed ? <>Executed PF {formatProfitFactor(data.executed.profitFactor,data.executed.pfState)}<br/>{data.executed.closed.toLocaleString()} closed</>
+                  {data.executed ? <>Executed PF {formatProfitFactor(data.executed.profitFactor,data.executed.pfState)}<br/>Cash PF {formatForwardCashPF(data.executed)}<br/>{data.executed.closed.toLocaleString()} closed</>
                     : data.directMirror ? <>Paper PF {formatProfitFactor(data.pf,data.pfState)}</>
                     : <>Validated PF {formatProfitFactor(data.validatedWindow?.profitFactor,data.validatedWindow?.pfState)}<br/>Post-stage PF {formatProfitFactor(data.postStage?.profitFactor,data.postStage?.pfState)}</>}
                 </div>

@@ -8,6 +8,7 @@ import { blockPrefix, evaluateBlocks } from "../shared/cts-lastn/blocks"
 import { BRANCH_COORDINATIONS, ParentBranches } from "../core/stage-branches"
 import { generateStrategyCatalog } from "../core/catalog"
 import { runExecProgressionReplay } from "../core/terminal-replay"
+import { describeProfitFactor } from "../core/metrics"
 
 const symbol = "BTC-USDT"
 const makeBar = (index: number): Candle => {
@@ -83,6 +84,157 @@ test("positive and negative outcomes make independent paths and preserve the ful
   assert.equal(evaluateBlocks(blockPrefix([-1,.2,.2,.2,.2]),negative,1.1).state,"failed")
 })
 
+test("Base materializes geometry only when that window qualifies", () => {
+  const initial=checkExecWindows(settings.catalog!.strategyExecWindows)
+  const windows=checkExecWindows({...initial,base:{...initial.base,long:[10,50],shortOutcomes:["positive","negative"]}})
+  const engine=new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows}})
+  const plan=(engine as unknown as {branches:ParentBranches}).branches
+  engine.processCandles(symbol,bars.slice(0,45),{eventLimit:0})
+  const observation=Object.values(engine.exportState().lanes).find(lane=>lane.baseObservation&&lane.direction==="long")!
+  const templates=plan.baseWindows(observation.config)
+  assert.ok(plan.baseConfig(observation.config,templates[0]))
+  assert.equal(plan.baseConfig(observation.config,templates[1]),undefined,"the negative Short did not qualify")
+  assert.equal(plan.baseConfig(observation.config,templates[2]),undefined,"the long window needs more closes")
+  engine.processCandles(symbol,bars.slice(45),{eventLimit:0})
+  assert.ok(plan.baseConfig(observation.config,templates[2]),"the longer Set is created once its own gate passes")
+})
+
+test("a restored Base Set progresses while its observation is still rebuilding history", () => {
+  const engine = new TradingEngine(settings)
+  const index = 130
+  engine.processCandles(symbol,bars.slice(0,index),{eventLimit:0})
+  const state = engine.exportState()
+  const base = Object.values(state.lanes).find(lane=>lane.stage==="base"&&!lane.baseObservation&&lane.direction==="long")!
+  assert.ok(base.samples.length>=15)
+  for (const lane of Object.values(state.lanes)) if (lane.baseObservation) delete state.lanes[lane.id]
+  const restored = TradingEngine.fromOwnedCheckpoint(state)
+  const admitted = []
+  for (const bar of bars.slice(index,index+6)) {
+    admitted.push(...restored.processCandles(symbol,[bar]).filter(event=>event.type==="opened"))
+  }
+  assert.ok(admitted.some(event=>event.laneId===base.id))
+  assert.ok(admitted.some(event=>event.stage==="live"))
+  const probe = Object.values(restored.exportState().lanes).find(lane=>lane.baseObservation&&lane.direction==="long")!
+  assert.ok(probe.samples.length<15)
+})
+
+test("additional signals reuse an unchanged Base observation", (t) => {
+  const engine = new TradingEngine(settings)
+  const rising = Array.from({length:20},(_,i)=>{
+    const close = 100*1.00001**i
+    return {...makeBar(i),open:close,high:close,low:close,close}
+  })
+  engine.processCandles(symbol,rising.slice(0,12))
+  const before = Object.values(engine.exportState().lanes).find(lane=>lane.baseObservation)!
+  assert.ok(before.open)
+  const cache = t.mock.method(engine as unknown as {cacheLane:()=>void},"cacheLane")
+  engine.processCandles(symbol,rising.slice(12))
+  const after = engine.exportState().lanes[before.id]
+  assert.equal(after.open!.id,before.open.id)
+  assert.equal(cache.mock.callCount(),0,"no identity or registration work for the open probe")
+})
+
+test("post-stage cash PF uses funded settled P&L and preserves legacy coverage", () => {
+  const other = "ETH-USDT"
+  const engine = new TradingEngine({...settings,symbols:[symbol,other],catalog:{
+    ...settings.catalog,relationalVolumeRatios:{symbols:{[other]:4}},
+  }})
+  const trades:ClosedTrade[] = []
+  engine.observeStageCloses(trade=>trades.push(trade))
+  let index = 110
+  for (const asset of [symbol,other]) engine.processCandles(asset,bars.slice(0,index),{eventLimit:0})
+  let open = engine.snapshot({positionStage:"exec"}).positions.filter(position=>position.executed)
+  while (!open.length && index<bars.length) {
+    for (const asset of [symbol,other]) engine.processCandles(asset,[bars[index]],{eventLimit:0})
+    index++
+    open = engine.snapshot({positionStage:"exec"}).positions.filter(position=>position.executed)
+  }
+  const legacy = engine.exportState()
+  for (const lane of Object.values(legacy.lanes)) for (const cohort of [lane.executed,lane.postStage]) {
+    if (!cohort) continue
+    delete cohort.cashClosed
+    delete cohort.cashProfit
+    delete cohort.cashLoss
+  }
+  const restored = TradingEngine.fromOwnedCheckpoint(legacy)
+  const exec = (candidate:TradingEngine) => candidate.snapshot({laneLimit:0,positionLimit:0}).stages.find(row=>row.stage==="exec")!.executed!
+  assert.ok(exec(restored).closed>0)
+  assert.deepEqual(exec(restored).cashPF,{samples:0,profitFactor:null,pfState:"unknown"})
+  const newCloses:ClosedTrade[] = []
+  restored.observeStageCloses(trade=>newCloses.push(trade))
+  for (const [asset,move] of [[symbol,1.012],[other,.988]] as const) {
+    const position = open.find(row=>row.symbol===asset)!
+    const tick = position.entryPrice*move, time = bars[index-1].timestamp+1_000
+    for (const candidate of [engine,restored]) candidate.processTick(asset,tick,time)
+  }
+  const cash = (rows:ClosedTrade[]) => {
+    const accepted = rows.filter(trade=>trade.executed)
+    const gains = accepted.reduce((total,trade)=>total+Math.max(0,trade.netPnl),0)
+    const losses = accepted.reduce((total,trade)=>total+Math.max(0,-trade.netPnl),0)
+    assert.ok(gains>0&&losses>0)
+    return {samples:accepted.length,...describeProfitFactor(gains,losses,accepted.length)}
+  }
+  const total = exec(engine)
+  assert.equal(total.cashPF!.samples,total.closed)
+  assert.ok(Math.abs(total.cashPF!.profitFactor!-cash(trades).profitFactor)<1e-10)
+  assert.notEqual(total.profitFactor,total.cashPF!.profitFactor)
+  const mixed = exec(restored)
+  assert.equal(mixed.cashPF!.samples,cash(newCloses).samples)
+  assert.ok(Math.abs(mixed.cashPF!.profitFactor!-cash(newCloses).profitFactor)<1e-10)
+  assert.equal(mixed.closed,total.closed)
+  assert.deepEqual(exec(TradingEngine.fromSerialized(restored.serializeState())),mixed)
+})
+
+test("dashboard reuses stage totals for marks and refreshes them on settlement and settings changes", (t) => {
+  const engine=new TradingEngine(settings)
+  let end=130
+  engine.processCandles(symbol,bars.slice(0,end),{eventLimit:0,allowExecution:true})
+  while(!engine.snapshot().positions.some(position=>position.stage==="live")&&end<bars.length){
+    engine.processCandles(symbol,[bars[end++]],{eventLimit:0,allowExecution:true})
+  }
+  const display={laneLimit:100,positionLimit:100,positionStage:"live" as const}
+  const mock=t.mock.method(engine as unknown as {stageWindow:()=>unknown},"stageWindow")
+  const read=()=>engine.snapshot({...display,includeCoordinationStats:true})
+  const first=read()
+  const calls=mock.mock.callCount()
+  assert.ok(calls>0)
+  const live=first.positions[0]
+  assert.ok(live)
+  engine.processTick(symbol,live.entryPrice*1.00001,bars[end-1].timestamp+1000)
+  const marked=read()
+  assert.equal(mock.mock.callCount(),calls,"price-only marks do not rescan stage books")
+  assert.deepEqual(marked.stages,first.stages)
+  assert.ok(marked.positions.find(position=>position.id===live.id)!.peak>live.peak)
+  marked.stages[0].closed=-1
+  assert.deepEqual(read().stages,first.stages,"returned reports cannot mutate the cache")
+
+  engine.processTick(symbol,live.entryPrice*1.1,bars[end-1].timestamp+2000)
+  const settled=read()
+  assert.ok(mock.mock.callCount()>calls)
+  assert.ok(settled.stages.find(stage=>stage.stage==="live")!.closed>first.stages.find(stage=>stage.stage==="live")!.closed)
+  const {coordinationStats,...standard}=settled
+  assert.deepEqual(standard,engine.snapshot(display))
+  assert.deepEqual(coordinationStats,engine.coordinationStats())
+  engine.updateSettings({stageMinPF:{base:1.5,main:1.5,real:1.5}})
+  const {coordinationStats:reported,...updated}=read()
+  assert.deepEqual(updated,engine.snapshot(display))
+  assert.deepEqual(reported,engine.coordinationStats())
+})
+
+test("bounded recent closes keep exact newest-first order through a rollover and restart",()=>{
+  const engine=new TradingEngine(settings)
+  const reference:string[]=[]
+  engine.observeStageCloses(trade=>reference.push(trade.id))
+  engine.processCandles(symbol,Array.from({length:360},(_,i)=>makeBar(i)),{eventLimit:0})
+  assert.ok(reference.length>1000)
+  assert.deepEqual(engine.snapshot({laneLimit:0}).trades.map(trade=>trade.id),reference.slice(-1000).reverse())
+
+  const restored=TradingEngine.fromSerialized(engine.serializeState())
+  restored.observeStageCloses(trade=>reference.push(trade.id))
+  restored.processCandles(symbol,Array.from({length:12},(_,i)=>makeBar(360+i)),{eventLimit:0})
+  assert.deepEqual(restored.snapshot({laneLimit:0}).trades.map(trade=>trade.id),reference.slice(-1000).reverse())
+})
+
 test("fresh parent entries fund independent child Sets and Exec mirrors without a Live window", () => {
   const engine = new TradingEngine(settings)
   engine.processCandles(symbol,bars.slice(0,39))
@@ -154,7 +306,8 @@ test("fresh parent entries fund independent child Sets and Exec mirrors without 
 test("Real and Exec can select Short up to 30 and each width uses its own complete window", () => {
   const initial = checkExecWindows(settings.catalog!.strategyExecWindows)
   const exec = {...initial.exec,short:[30,20,28,24]}
-  const windows = checkExecWindows({...initial,exec})
+  const windows = checkExecWindows({...initial,real:{...initial.real,short:[30]},exec})
+  assert.deepEqual(windows.real.short,[30])
   assert.deepEqual(windows.exec.short,[20,24,28,30])
   assert.deepEqual(checkExecWindows({real:{short:[30]}}).real.short,[30])
   assert.throws(()=>checkExecWindows({main:{short:[30]}}),/distinct Exec window choices/)
@@ -171,6 +324,72 @@ test("Real and Exec can select Short up to 30 and each width uses its own comple
   assert.ok(closings.includes(31),"30 Short closes plus one Last close are needed for the no-Long variant")
   assert.ok(closings.includes(41),"the inherited Base Long contributes ten more disjoint closes")
   assert.ok(traded.every(trade=>trade.executionProof!.count===trade.executionProof!.required))
+  assert.ok(traded.every(trade=>trade.admission?.some(proof=>proof.stage==="real"&&proof.required===31&&proof.count===31)))
+})
+
+test("wide signed Real and Exec Sets keep their own parent, inherited Long and exact window", () => {
+  const signed = {long:["none","inherit"],short:[30],last:[1],shortOutcomes:["positive","negative"],lastOutcomes:["positive","negative"]}
+  const windows = checkExecWindows({base:{long:[10],short:[4],last:[1]},main:{long:["none"],short:[4],last:[1]},real:signed,exec:signed})
+  const catalog = {strategyExecWindows:windows}
+  const plan = new ParentBranches(catalog,true)
+  const geometry = generateStrategyCatalog("test",settings.catalog)[0]
+  const [base] = plan.variants(geometry,undefined,"base")
+  const [main] = plan.variants(base,"normal","main")
+  const real = plan.variants(main,"normal","real")
+  const exec = real.flatMap(parent=>plan.variants(parent,"normal","exec"))
+  assert.equal(real.length,8)
+  assert.equal(new Set(exec.map(config=>config.id)).size,64)
+  assert.equal(exec.length,execPathCount(windows))
+  const restoredPlan=new ParentBranches(catalog,true)
+  assert.deepEqual(exec.map(config=>restoredPlan.restore(config,geometry,()=>true)),exec)
+
+  const returns = [-.05,...Array<number>(30).fill(-.02),...Array<number>(10).fill(.2)]
+  for(const stage of ["real","exec"] as const){
+    const configs=stage==="real"?real:plan.variants(real[0],"normal","exec")
+    const qualified=configs.filter(config=>evaluateBlocks(blockPrefix(returns),config.branch!.windows![stage]!,1.1).state==="qualified")
+    assert.equal(qualified.length,1)
+    const policy=qualified[0].branch!.windows![stage]!
+    assert.deepEqual(policy,execBlockPolicy(10,30,1,"negative","negative"))
+    assert.equal(evaluateBlocks(blockPrefix(returns.slice(0,-1)),policy,1.1).state,"insufficient")
+    assert.equal(evaluateBlocks(blockPrefix(returns),policy,4).state,"failed")
+  }
+})
+
+test("both negative outcomes reach Exec through owned positions and complete gates at every stage", () => {
+  const outcomes = ["positive","negative"]
+  const next = {long:["inherit"],short:[4],last:[1],shortOutcomes:outcomes,lastOutcomes:outcomes}
+  const windows = checkExecWindows({base:{...next,long:[10]},main:next,real:next,exec:next})
+  const engine = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows}})
+  const support = new Map<string,Set<string>>()
+  engine.observeStageCloses(trade=>{
+    if (!trade.executed) return
+    const gates = [...trade.admission!,trade.executionProof!]
+    assert.deepEqual(gates.map(gate=>gate.stage),["base","main","real","exec"])
+    assert.equal(new Set(gates.map(gate=>gate.laneId)).size,4)
+    for (const gate of gates) {
+      const [,long,short,last,shortOutcome,lastOutcome] = JSON.parse(gate.blockPolicyKey!)
+      assert.deepEqual([long,short,last,gate.required,gate.count],[10,4,1,15,15])
+      assert.equal(gate.checkedAt,trade.openedAt)
+      assert.ok(gate.qualified&&gate.profitFactor!>=gate.minPF)
+      const pairs = support.get(gate.stage) ?? new Set<string>()
+      pairs.add(`${shortOutcome}/${lastOutcome}`)
+      support.set(gate.stage,pairs)
+    }
+  })
+  let seed = 113
+  for (let i=0; i<1_800; i++) {
+    seed = (Math.imul(seed,1_664_525)+1_013_904_223)>>>0
+    const close = 100*1.003**i, timestamp = 1_790_000_040_000+i*60_000
+    engine.processCandles(symbol,[{timestamp,open:close,high:close,low:close,close,volume:100}],{eventLimit:0})
+    engine.processTick(symbol,close*(seed/2**32<.35?.996:1.01),timestamp+1_000)
+  }
+  for (const stage of ["base","main","real","exec"]) {
+    assert.ok([...support.get(stage)!].some(pair=>pair.startsWith("negative/")),stage)
+    assert.ok([...support.get(stage)!].some(pair=>pair.endsWith("/negative")),stage)
+  }
+  assert.ok(support.get("exec")!.has("negative/negative"))
+  const {stages} = engine.snapshot({laneLimit:0,positionLimit:0})
+  assert.equal(stages.find(stage=>stage.stage==="exec")!.executed!.closed,stages.find(stage=>stage.stage==="live")!.closed)
 })
 
 test("terminal holdout reports only the settled positions that fed a child", async () => {

@@ -29,6 +29,15 @@ test("close priority between positions preserves FIFO within each position and b
   const plan = planExecutionIntents([intent("b-entry", "entry", "position-b"), intent("a-close", "close", "position-a", now), intent("a-entry", "entry", "position-a", now - 2000), intent("a-add", "add", "position-a", now - 1000)], { ...context, limit: 3 })
   assert.deepEqual(plan.ready.map(item => item.id), ["a-entry", "a-add", "a-close"])
 })
+test("a deferred lot keeps its own closing order in sequence while another lot closes", () => {
+  const add=intent("a-add","add"),close=intent("a-close","close","position-a",now)
+  const other=intent("b-close","close","position-b",now)
+  const retryAt=new Map([[add.id,now+1000]])
+  const delayed=planExecutionIntents([add,close,other],{...context,retryAt,limit:2})
+  assert.deepEqual(delayed.ready.map(row=>row.id),[other.id])
+  const resumed=planExecutionIntents([add,close,other],{...context,now:now+1000,retryAt,limit:2})
+  assert.deepEqual(resumed.ready.map(row=>row.id),[add.id,close.id])
+})
 test("duplicate and previously settled engine intents are not requeued", () => {
   const row = intent("entry", "entry")
   const plan = planExecutionIntents([row, row, { ...intent("settled", "entry"), status: "acknowledged" }], context)

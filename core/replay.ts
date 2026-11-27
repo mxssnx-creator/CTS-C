@@ -1,4 +1,4 @@
-import { portedStates, StreamMath } from "../shared/cts-indications/index.ts"
+import { portedStates, sourceEntryAt, StreamMath } from "../shared/cts-indications/index.ts"
 import type { Candle, PseudoPosition, SignalState } from "./types"
 import { EXIT_MODES, type ExitMode } from "./types"
 import { calculatePriceMovePct, POSITION_COST_PCT_DEFAULT } from "./metrics"
@@ -6,7 +6,6 @@ import { observedExit } from "./exits"
 import { INDICATIONS,TECHNICAL_INDICATIONS } from "./indications"
 import {technicalSignal} from './technical-signals'
 import { SIGNAL_TIMEFRAMES } from "../shared/cts-indications/research-sources"
-import { oscillatorContinuationBase } from "../shared/cts-indications/oscillator-sources"
 
 const sourceStreams=new WeakMap<SignalState,{first:number;stream:StreamMath}>()
 export const PORTED_HISTORY_LIMIT=4320
@@ -126,10 +125,8 @@ function configuredClosedBar(state:SignalState,bar:Candle,minutes:number):Candle
 }
 
 function portedEntry(id:string,series:Int8Array,index:number):Direction|undefined {
-  if (index < 1) return
-  const direction=series[index]
-  if (direction===0 || (direction===series[index-1] && !oscillatorContinuationBase(id))) return
-  return direction>0 ? "long" : "short"
+  const direction=sourceEntryAt(id,series,index)
+  if(direction!==0)return direction>0?"long":"short"
 }
 
 /** One bounded OHLCV buffer and one shared math cache per symbol/timeframe, independent output per source. */
@@ -153,15 +150,41 @@ export function advancePortedSources(state:SignalState,bar:Candle,minutes:number
   }
   return result
 }
-/** Causal historical vectors, segmented at exactly the same bounded-history rebase boundaries as ticks.
- * Reference-dependent sources keep the observation-by-observation path. */
-export function historicalPortedSignals(state:SignalState,bars:readonly Candle[],minutes:number,ids:readonly string[],symbol:string):Map<number,Map<string,Direction|undefined>>{
-  if(ids.some(id=>/pair-|market-/.test(id)))throw new Error('Reference-dependent sources require observed-prefix evaluation')
+/** The decision engine consumes these native closed references on their own clocks. */
+export function marketReferenceBars(state:SignalState|undefined,bars:readonly Candle[],minutes:number):Candle[]{
+  const frame=newSignalState()
+  if(state?.frame)frame.frame=structuredClone(state.frame)
+  const rows=state?.portedBars?.slice()??[]
+  for(const bar of bars){
+    const closed=configuredClosedBar(frame,bar,minutes)
+    if(!closed)continue
+    const timestamp=closed.timestamp-minutes*60000
+    if(!rows.length||timestamp>rows.at(-1)!.timestamp)rows.push({...closed,timestamp})
+  }
+  return rows
+}
+
+/** Causal historical vectors, segmented at the bounded-history rebase boundaries used by ticks. */
+export function historicalPortedSignals(state:SignalState,bars:readonly Candle[],minutes:number,ids:readonly string[],symbol:string,peers?:SourceContext["peers"]):Map<number,Map<string,Direction|undefined>>{
+  const relative=ids.filter(id=>/pair-|market-/.test(id)), independent=ids.filter(id=>!/pair-|market-/.test(id))
+  if(relative.length&&peers===undefined)throw new Error('Reference-dependent sources require observed-prefix evaluation')
   const result=new Map<number,Map<string,Direction|undefined>>(),rows=state.portedBars??=[],pending:{timestamp:number;index:number}[]=[]
   const flush=()=>{
     if(!pending.length)return
-    const output=portedStates(symbol,minutes,rows,ids)
-    for(const p of pending){const values=new Map<string,Direction|undefined>();for(const id of ids)values.set(id,portedEntry(id,output.states[id],p.index));result.set(p.timestamp,values)}
+    const groups=[]
+    if(independent.length)groups.push(portedStates(symbol,minutes,rows,independent).states)
+    const references=relative.length?peers!.filter(peer=>peer.symbol!==symbol).map(peer=>{
+      const first=rows[0].timestamp-minutes*60_000, through=rows.at(-1)!.timestamp
+      return {symbol:peer.symbol,bars:peer.bars.filter(bar=>bar.timestamp>=first&&bar.timestamp<=through)}
+    }):[]
+    if(relative.length)groups.push(portedStates(symbol,minutes,rows,relative,references).states)
+    const states=Object.assign({},...groups) as Record<string,Int8Array>
+    const firstReference=Math.min(...references.filter(peer=>peer.bars.length).map(peer=>peer.bars[0].timestamp))
+    for(const p of pending){
+      const values=new Map<string,Direction|undefined>()
+      for(const id of ids)values.set(id,id.includes('market-')&&rows[p.index].timestamp<firstReference?undefined:portedEntry(id,states[id],p.index))
+      result.set(p.timestamp,values)
+    }
     pending.length=0
   }
   for(const bar of bars){

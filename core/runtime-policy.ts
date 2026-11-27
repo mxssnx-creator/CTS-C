@@ -4,6 +4,7 @@ export interface IntentPolicyContext {
   activePositionIds: ReadonlySet<string>
   /** Engine intent IDs found by exact lookup in the durable venue journal. */
   submittedIntentIds: ReadonlySet<string>
+  retryAt?: ReadonlyMap<string, number>
   now: number
   maxEntryAgeMs?: number
   maxAddAgeMs?: number
@@ -46,5 +47,13 @@ export function planExecutionIntents(intents: readonly ExecutionIntent[], contex
     urgent: items.some((intent) => intent.kind === "close"),
     items: items.sort((a, b) => a.timestamp - b.timestamp || kindOrder[a.kind] - kindOrder[b.kind] || a.id.localeCompare(b.id)),
   })).sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.items[0].timestamp - b.items[0].timestamp || a.key.localeCompare(b.key))
-  return { ready: ordered.flatMap((group) => group.items).slice(0, limit), rejected }
+  const ready: ExecutionIntent[] = []
+  for (const {items} of ordered) {
+    if ((context.retryAt?.get(items[0].id) ?? 0) > context.now) continue
+    for (const intent of items) {
+      ready.push(intent)
+      if (ready.length === limit) return { ready, rejected }
+    }
+  }
+  return { ready, rejected }
 }

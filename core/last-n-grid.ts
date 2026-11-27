@@ -10,7 +10,7 @@ export type ConfigLastN = Partial<Record<LegacyEvaluationStage, number>>
 
 export const EXEC_LONG_COUNTS = [10, 20, 30, 40, 50] as const
 const DEFAULT_SHORT_COUNTS = [4, 8, 12, 16] as const
-const EXEC_SHORT_COUNTS = [...DEFAULT_SHORT_COUNTS, 20, 24, 28, 30] as const
+const EXTENDED_SHORT_COUNTS = [...DEFAULT_SHORT_COUNTS, 20, 24, 28, 30] as const
 export const EXEC_LAST_COUNTS = [1, 2, 3, 4, 5] as const
 export const EXEC_LONG_MODES = ["none", "inherit"] as const
 export const EXEC_OUTCOMES = ["positive", "negative"] as const
@@ -24,7 +24,7 @@ const inherited = { ...shortLast, long: EXEC_LONG_MODES }
 export const DEFAULT_EXEC_WINDOWS: ExecWindows = { base: { ...shortLast, long: EXEC_LONG_COUNTS }, main: inherited, real: inherited, exec: inherited }
 
 export function stageShortCounts(stage: EvaluationStage): readonly number[] {
-  return stage === "real" || stage === "exec" ? EXEC_SHORT_COUNTS : DEFAULT_SHORT_COUNTS
+  return stage === "real" || stage === "exec" ? EXTENDED_SHORT_COUNTS : DEFAULT_SHORT_COUNTS
 }
 
 export function checkExecWindows(raw: unknown, maxSamples = Infinity): ExecWindows {

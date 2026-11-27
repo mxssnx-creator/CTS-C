@@ -5,7 +5,7 @@ import {TradingEngine} from '../core/engine'
 import type {Candle} from '../core/types'
 const bars:Candle[]=Array.from({length:500},(_,i)=>{const close=100+9*Math.sin(i/11);return {timestamp:1790000040000+i*60000,open:close,high:close,low:close,close,volume:1}})
 function engine(){return new TradingEngine({symbols:['BTC-USDT','ETH-USDT'],stageGateMode:'processed-sets',stageLastN:{base:1,main:1,real:1},stageMinPF:{base:0,main:0,real:0},catalog:{strategyTpSteps:[3,5],strategySlRatios:[1],strategyExitModes:['fixed','trailing','trailing-only'],strategyIndicationTypes:['Trend']},coordinations:{axis:{enabled:true,previous:1,last:1,outcome:'any'},block:{enabled:true,steps:2,ratio:.2,mode:'shared'},dca:{enabled:true,steps:2,distancePct:.1,multiplier:.2}}})}
-function save(store:StateStore,e:TradingEngine){const settings=e.settings,meta=e.checkpointMetadata();if(store.hasLaneCheckpoint())store.saveLaneCheckpoint(meta,e.checkpointLanes(),[],settings,()=>{});else store.migrateLaneCheckpoint(meta,e.checkpointLanes(true),[],settings,()=>{});e.checkpointSaved()}
+function save(store:StateStore,e:TradingEngine){const settings=e.settings,meta=e.checkpointPayload();if(store.hasLaneCheckpoint())store.saveLaneCheckpoint(meta,e.checkpointLanes(),[],settings,()=>{});else store.migrateLaneCheckpoint(meta,e.checkpointLanes(true),[],settings,()=>{});e.checkpointSaved()}
 test('incremental checkpoints preserve exact full state through entries, adds, closes, ticks, settings and restart',()=>{
  const store=new StateStore(':memory:'),e=engine()
  try{

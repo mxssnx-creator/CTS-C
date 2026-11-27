@@ -1,4 +1,4 @@
-import {portedStates,entryOnsets,type PortedBar} from "./index.ts";
+import {portedStates,sourceEntryAt,type PortedBar} from "./index.ts";
 import { SIGNAL_TIMEFRAMES } from "./research-sources.ts";
 export interface SourceRequest{name:string;id:string;tf:number}
 export function aggregateClosedBars(rows:readonly PortedBar[],tf:number){
@@ -16,7 +16,7 @@ export function alignedSourceStates(symbol:string,rows:readonly PortedBar[],requ
  for(const tf of new Set(requests.map(r=>r.tf))){
   const own=aggregateClosedBars(rows,tf),selected=requests.filter(r=>r.tf===tf);
   const result=portedStates(symbol,tf,own.bars,selected.map(r=>r.id),peers.map(p=>({symbol:p.symbol,bars:aggregateClosedBars(p.bars,tf).bars})));
-  for(const request of selected){const out=Array<number>(rows.length).fill(0),source=entryOnsets(result.states[request.id]);for(let j=0;j<source.length;j++)out[own.at[j]]=source[j];states[request.name]=out;available[request.name]=result.available[request.id];}
+  for(const request of selected){const out=Array<number>(rows.length).fill(0),source=result.states[request.id];for(let j=0;j<source.length;j++)out[own.at[j]]=sourceEntryAt(request.id,source,j);states[request.name]=out;available[request.name]=result.available[request.id];}
  }
  return {states,available};
 }

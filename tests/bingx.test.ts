@@ -163,6 +163,25 @@ test("read pacing applies to concurrent public calls", async () => {
   assert.ok(starts[2] - starts[1] >= 210)
 })
 
+test("market pacing keeps a queued history request from blocking ticker and metadata reads", {timeout:1000}, async () => {
+  let time=1000
+  const starts:{path:string;time:number}[]=[]
+  const sleepers:(()=>void)[]=[]
+  const client=new BingxVstClient(null,{
+    now:()=>time,minRequestIntervalMs:45,pacePublicMarket:true,
+    sleep:ms=>new Promise<void>(resolve=>sleepers.push(()=>{time+=ms;resolve()})),
+    fetch:async input=>{starts.push({path:new URL(String(input)).pathname,time});return json([])},
+  })
+  await client.candles("BTC-USDT")
+  const waiting=client.candles("ETH-USDT")
+  await Promise.all([client.quotes(),client.contracts()])
+  assert.equal(sleepers.length,1)
+  assert.deepEqual(starts.map(({path,time})=>[path.split("/").at(-1),time]),[["klines",1000],["price",1000],["contracts",1000]])
+  sleepers[0]()
+  await waiting
+  assert.ok(starts.at(-1)!.time-starts[0].time>=1000)
+})
+
 test("exchange commission is read in decimal-rate units", async () => {
   const { client } = fixture(() => json({ commission: { makerCommissionRate: "0.0005", takerCommissionRate: "0.0008" } }))
   assert.deepEqual(await client.commission("BTC-USDT"), { maker: 0.0005, taker: 0.0008, source: "exchange" })

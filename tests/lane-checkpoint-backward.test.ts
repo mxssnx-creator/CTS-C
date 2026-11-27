@@ -38,6 +38,33 @@ test("v4 writer retains exact v2 and v3 checkpoint reads",()=>{
     const record=store.database.prepare("SELECT data FROM records WHERE key='engine'").get() as {data:string}
     assert.match(record.data,new RegExp(`^\\{"checkpointFormat":"lane-rows-v${version}"`))
     assert.deepEqual(store.loadEngineState(),expected)
+    store.saveLaneCheckpoint(engine.checkpointPayload(),[...engine.checkpointLanes(true)].slice(0,1),[],engine.settings,()=>{})
+    assert.deepEqual(store.loadEngineState(),expected,`v${version} rows can remain beside v5 rows during incremental upgrades`)
     store.close()
   }
+})
+
+test("v5 upgrades legacy text rows incrementally and verifies its configuration index",()=>{
+  const engine=new TradingEngine({symbols:[symbol],catalog:{strategyEnabledRanges:["Micro"],strategyIndicationTypes:["Trend"],
+    strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:["fixed"],strategySignalTimeframes:[1]}})
+  engine.processCandles(symbol,bars)
+  const rows=[...engine.checkpointLanes(true)]
+  assert.ok(rows.length>1)
+  const store=new StateStore(":memory:")
+  try{
+    store.migrateLaneCheckpoint(engine.checkpointMetadata(),rows,[],engine.settings,()=>{})
+    const expected=JSON.parse(engine.serializeState())
+    assert.deepEqual(store.loadEngineState(),expected)
+    store.saveLaneCheckpoint(engine.checkpointPayload(),rows.slice(0,1),[],engine.settings,()=>{})
+    const record=store.database.prepare("SELECT data FROM records WHERE key='engine'").get() as {data:string}
+    assert.equal(JSON.parse(record.data).checkpointFormat,'lane-rows-v5')
+    const binary=store.database.prepare("SELECT count(*) AS count FROM engine_lanes WHERE typeof(data)='blob'").get()
+    assert.equal(binary?.count,1)
+    assert.deepEqual(store.loadEngineState(),expected)
+    store.database.prepare("UPDATE records SET updated=0 WHERE key='engine-configs-v5'").run()
+    store.saveLaneCheckpoint(engine.checkpointPayload(),[],[],engine.settings,()=>{})
+    assert.equal(store.database.prepare("SELECT updated FROM records WHERE key='engine-configs-v5'").get()?.updated,0,"unchanged configurations are reused on commit")
+    store.database.prepare("UPDATE records SET data=? WHERE key='engine-configs-v5'").run(new Uint8Array([0]))
+    assert.throws(()=>store.loadEngineState(),/configuration index is missing or corrupt/)
+  }finally{store.close()}
 })

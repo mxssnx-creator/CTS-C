@@ -1,4 +1,4 @@
-name: Million active parent Set capacity
+name: Parent Set capacity and checkpoint verification
 
 on:
   pull_request:

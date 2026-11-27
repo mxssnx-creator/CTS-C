@@ -3,7 +3,7 @@ import {test} from 'node:test'
 import {gzipSync} from 'node:zlib'
 import {generateStrategyCatalog} from '../core/catalog'
 import {resolveTradingCostPct} from '../core/metrics'
-import {TradeBarBuilder,decodeTradeMessage,BingxTradeStream,TRADE_STREAM_URLS} from '../core/trade-stream'
+import {TradeBarBuilder,decodeTradeMessage,BingxTradeStream,TRADE_STREAM_URLS,type TradeBar} from '../core/trade-stream'
 import {TradingEngine} from '../core/engine'
 import {blockRoundBudget,consumeBlockPause,settleBlockRound} from '../core/block-rounds'
 import {DEFAULTS,configurationCount} from '../core/settings-schema'
@@ -47,6 +47,17 @@ test('10s and 1m clocks create independent signal evidence and survive restart',
   assert.equal(e.lastProcessedAt('BTC-USDT'),null);assert.equal(e.lastProcessedAt('BTC-USDT',10),bars.at(-1)!.timestamp)
   assert.ok(Object.values(e.exportState().lanes).every(l=>l.config.signalTimeframeMinutes===1/6))
   const restored=TradingEngine.fromSerialized(e.serializeState());assert.deepEqual(restored.processCandles('BTC-USDT',bars,{barSeconds:10}),[])
+})
+test('one bar batch deduplicates trades and retains each symbol against its own latest clock',()=>{
+  const store=new StateStore(':memory:')
+  const bar=(timestamp:number):TradeBar=>({timestamp,open:100,high:100,low:100,close:100,volume:1,trades:1,complete:true,source:'bingx-trades'})
+  const old=bar(10000),latest=bar(4*86_400_000+10000)
+  try{
+    store.saveTradeBars([{symbol:'BTC-USDT',bar:latest},{symbol:'BTC-USDT',bar:old},{symbol:'ETH-USDT',bar:old},{symbol:'BTC-USDT',bar:latest}])
+    store.saveTradeBar('BTC-USDT',old)
+    assert.deepEqual(store.tradeBars('BTC-USDT'),[latest])
+    assert.deepEqual(store.tradeBars('ETH-USDT'),[old])
+  }finally{store.close()}
 })
 test('auto PF uses cost-adjusted distance at each configuration without dropping stage floors',()=>{
   const c=generateStrategyCatalog('x',{strategyEnabledRanges:['Micro'],strategyTpSteps:[2,5],strategySlRatios:[1],strategyExitModes:['fixed'],strategyIndicationTypes:['Trend'],autoPfEnabled:true,autoPfRatio:1,autoPfMax:2})

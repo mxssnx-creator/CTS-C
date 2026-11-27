@@ -443,6 +443,44 @@ test("submitted instance-scoped entries retain reconciliation priority after the
   })
 })
 
+test("a deferred venue receipt leaves another lot ready even while new execution is paused",async(t)=>{
+  await isolated(async runtime=>{
+    const internal=runtime as any
+    let now=Date.now()
+    t.mock.method(Date,"now",()=>now)
+    const entry={...intent("entry"),timestamp:now-3000},close={...intent("close"),timestamp:now-2000}
+    const other={...close,id:"other-close",positionId:"position-b",timestamp:now-1000}
+    const wireId=internal.executor.clientOrderId(entry.connectionId,entry.id)
+    runtime.store.claimIntent(wireId,{intent:entry,order:{clientOrderId:wireId}})
+    const state=runtime.engine.exportState();state.intents=[entry,close,other]
+    runtime.engine=new TradingEngine(state.settings,state)
+    runtime.pause()
+
+    const dispatches:string[]=[]
+    let entryKnown=false
+    internal.executor={process:async([ready]:ExecutionIntent[],reconcile:boolean)=>{
+      dispatches.push(ready.id)
+      if(ready.id===entry.id){assert.equal(reconcile,true);return [{id:entry.id,status:entryKnown?"acknowledged":"unknown"}]}
+      return [{id:ready.id,status:"acknowledged"},...(reconcile?[{id:entry.id,status:"unknown"}]:[])]
+    }}
+    const pump=async(reconcile=false)=>{internal.pumpExecution(reconcile);await internal.executionTask}
+    const retryStarted=now
+    await pump()
+    now+=500
+    await pump(true)
+    await pump()
+    assert.deepEqual(dispatches,[entry.id,other.id])
+    assert.deepEqual(runtime.engine.pendingIntents().map(row=>row.id),[entry.id,close.id])
+
+    now=retryStarted+1000
+    entryKnown=true
+    await pump()
+    await pump()
+    assert.deepEqual(dispatches,[entry.id,other.id,entry.id,close.id])
+    assert.equal(runtime.engine.pendingIntents().length,0)
+  })
+})
+
 test("stream execution dispatches a close before the next main tick and coalesces in-flight work",async()=>{
   await isolated(async runtime=>{
     const internal=runtime as any, blocked=deferred<any[]>()
@@ -459,6 +497,67 @@ test("stream execution dispatches a close before the next main tick and coalesce
     blocked.resolve([{id:"intent-close",status:"acknowledged"}]);await task
     internal.consumeTrades();assert.equal(calls,1,"idle stream does not poll the venue at 10Hz")
     assert.equal(runtime.engine.pendingIntents().length,0)
+  })
+})
+
+test("trade slices yield with their unprocessed prices and discard only an invalidated generation",async(t)=>{
+  await isolated(async runtime=>{
+    const internal=runtime as any,symbol=runtime.engine.settings.symbols[0],now=Date.now()
+    let clock=0,drains=0
+    t.mock.method(performance,"now",()=>clock)
+    const ticks:number[]=[]
+    runtime.engine.processTick=(_symbol,price)=>{ticks.push(price);clock+=20;return []}
+    const status={generation:1}
+    const trade=(price:number,timestamp:number)=>({id:String(price),symbol,timestamp,price,quantity:1})
+    let observations=[trade(99,now-1000),trade(100,now-800),trade(101,now-600),trade(102,now-400)]
+    internal.tradeStream={status,drain:()=>{drains++;return observations.splice(0)},stop:()=>{}}
+    internal.marks.set(symbol,{price:110,timestamp:now})
+
+    internal.consumeTrades()
+    assert.deepEqual(ticks,[99])
+    assert.equal(internal.marks.get(symbol).price,110)
+    internal.consumeTrades()
+    internal.consumeTrades()
+    assert.deepEqual(ticks,[99,100,101])
+    assert.equal(drains,1)
+
+    status.generation++
+    observations=[trade(103,now+1)]
+    internal.consumeTrades()
+    assert.deepEqual(ticks,[99,100,101,103])
+    assert.equal(drains,2)
+    assert.deepEqual(internal.marks.get(symbol),{price:103,timestamp:now+1})
+  })
+})
+
+test("a failed market batch write delays trade processing until its bars are durable",async(t)=>{
+  await isolated(async runtime=>{
+    const internal=runtime as any,symbol=runtime.engine.settings.symbols[0]
+    const minute=Math.floor(Date.now()/10000)*10000
+    const input=[-20000,-10000,0].map((offset,index)=>({id:String(index),symbol,timestamp:minute+offset,price:100+index,quantity:1}))
+    internal.tradeStream={status:{generation:1},drain:()=>input.splice(0),stop:()=>{}}
+    t.mock.method(performance,"now",()=>0)
+    const persisted=runtime.store.saveTradeBars.bind(runtime.store)
+    let attempts=0
+    t.mock.method(runtime.store,"saveTradeBars",(bars:Parameters<typeof persisted>[0])=>{
+      if(attempts++===0)throw new Error("Temporary storage failure")
+      persisted(bars)
+    })
+    const ticks:number[]=[]
+    runtime.engine.processTick=(_symbol,price)=>{ticks.push(price);return []}
+    const applied:number[]=[]
+    runtime.engine.processCandles=(_symbol,bars)=>{
+      assert.equal(runtime.store.tradeBars(symbol).length,2)
+      applied.push(bars[0].timestamp)
+      return []
+    }
+    assert.throws(()=>internal.consumeTrades(),/Temporary storage failure/)
+    assert.deepEqual(ticks,[])
+    assert.deepEqual(applied,[])
+    internal.consumeTrades()
+    assert.equal(attempts,2)
+    assert.deepEqual(ticks,[100,101,102])
+    assert.deepEqual(applied,[minute])
   })
 })
 

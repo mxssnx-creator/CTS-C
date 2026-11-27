@@ -4,6 +4,7 @@ import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES } from "@/shared/cts-indications/research-sources"
+import { INVERSE_CONTINUATION_SOURCES } from "@/shared/cts-indications/inverse-sources"
 import { EXEC_PROFILES } from "@/core/exec-profile"
 import execDcaTrendPreset from "@/research-data/exec-dca-trend-preset.json"
 import { PARABOLIC_SAR_VARIANTS, RSI_VARIANTS, RSI_CONTINUATION_SOURCES, SAR_CONTINUATION_SOURCES, THIN_OSCILLATOR_SOURCE_IDS } from "@/shared/cts-indications/oscillator-sources"
@@ -31,7 +32,7 @@ const EXIT_LABELS: Record<ExitMode, string> = {
   "trailing-fixed": "Fixed-distance trailing",
   "trailing-only-fixed": "Fixed-distance trailing-only",
 }
-const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...REVERSAL_SOURCES]
+const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...INVERSE_CONTINUATION_SOURCES,...REVERSAL_SOURCES]
 const OSCILLATOR_FAMILIES = [["RSI configurations",[...RSI_VARIANTS,...RSI_CONTINUATION_SOURCES]],["Parabolic SAR configurations",[...PARABOLIC_SAR_VARIANTS,...SAR_CONTINUATION_SOURCES]]] as const
 const OSCILLATOR_IDS = new Set<string>(OSCILLATOR_FAMILIES.flatMap(([,sources])=>sources.map(source=>source.id)))
 
@@ -302,7 +303,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
                   <MultiChoice title={label+" Short"} description="Completed positions immediately before Last." values={[...stageShortCounts(stage)]} selected={[...windows.short]} onChange={value=>updateExecBlock(stage,"short",value)}/>
                   <MultiChoice title={label+" Last"} description="Most recent completed positions." values={[...EXEC_LAST_COUNTS]} selected={[...windows.last]} onChange={value=>updateExecBlock(stage,"last",value)}/>
                   <MultiChoice title={label+" Short outcomes"} description="Each size and outcome has its own Set. The full window must pass its PF gate." values={EXEC_OUTCOMES} selected={[...(windows.shortOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"shortOutcomes",value)}/>
-                  <MultiChoice title={label+" Last outcomes"} description="Each outcome is an independent Set. A negative Last must sit inside a profitable full window." values={EXEC_OUTCOMES} selected={[...(windows.lastOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"lastOutcomes",value)}/>
+                  <MultiChoice title={label+" Last outcomes"} description="Each outcome has its own Set. Short and Last can both be negative when Long supplies enough profit for the full window to pass." values={EXEC_OUTCOMES} selected={[...(windows.lastOutcomes??POSITIVE_EXEC_OUTCOME)]} onChange={value=>updateExecBlock(stage,"lastOutcomes",value)}/>
                 </section>
               }) : LAST_N_STAGES.map(stage => {
                 const grid = (draft.strategyLastNGrid ?? {}) as LastNGrid

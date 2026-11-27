@@ -9,6 +9,8 @@ import {SIGNALS_BY_ID} from './signals-catalog.ts';
 import { LOW_RANGE_IDS, LOW_RANGE_TIMEFRAMES } from "./low-range-catalog.ts";
 import { isResearchTacticSource, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "./research-sources.ts";
 import { oscillatorContinuationBase } from "./oscillator-sources.ts";
+import { inverseContinuationBase } from "./inverse-sources.ts";
+import { RANGE_COMPRESSION_BY_ID, rangeCompressionState } from "./range-compression.ts";
 
 export type PortedBar={timestamp:number;open:number;high:number;low:number;close:number;volume:number};
 export const PORTED_INDICATIONS=INDICATIONS.filter(s=>s.kind==="inverse"||s.kind==="tactic");
@@ -28,10 +30,16 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
  const b=portedBars(symbol,tfMin,rows),k=new SeriesCache(b);if(stream)k.enableStreaming(stream);
  const unique=new Set<string>([symbol]);
  const marketBars:Bars[]=[b];
- for(const peer of peers){if(unique.has(peer.symbol))throw new Error("Duplicate market reference symbol");unique.add(peer.symbol);marketBars.push(portedBars(peer.symbol,tfMin,peer.bars));}
+ for(const peer of peers){if(!peer.bars.length)continue;if(unique.has(peer.symbol))throw new Error("Duplicate market reference symbol");unique.add(peer.symbol);marketBars.push(portedBars(peer.symbol,tfMin,peer.bars));}
  k.setMarket(new MarketSource(marketBars));
  const states:Record<string,Int8Array>={},available:Record<string,boolean>={};
  for(const id of new Set(ids)){
+   const compression = RANGE_COMPRESSION_BY_ID.get(id);
+   if (compression) {
+     available[id] = supportsTacticTimeframe(id, tfMin);
+     states[id] = available[id] ? rangeCompressionState(compression, k) : new Int8Array(b.n);
+     continue;
+   }
    const reversal = REVERSAL_BY_ID.get(id.startsWith("sig-trend-reversal-") ? id.slice(4) : id);
    if (reversal) {
      available[id] = [1, 5, 15, 30].includes(tfMin);
@@ -43,14 +51,22 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
      continue;
    }
    const lowRange = lowRangeIds.has(id);
-   if(!PORTED_BY_ID.has(id)&&!SIGNALS_BY_ID.has(id)&&!lowRange&&!isResearchTacticSource(id))throw new Error(`Unknown indication source ${id}`);
+   const inverse = inverseContinuationBase(id);
+   if(!PORTED_BY_ID.has(id)&&!SIGNALS_BY_ID.has(id)&&!lowRange&&!isResearchTacticSource(id)&&!inverse)throw new Error(`Unknown indication source ${id}`);
    const pair=/^inverse-pair-(btc|eth)-/.exec(id);
    available[id]=lowRange ? LOW_RANGE_TIMEFRAMES.some(tf => tf === tfMin) : isResearchTacticSource(id)||PORTED_BY_ID.get(id)?.kind==="tactic" ? supportsTacticTimeframe(id,tfMin) : ![1,5,15].includes(tfMin)&&id.startsWith("inverse-")?false:pair?symbol!==pair[1].toUpperCase()+"-USDT"&&unique.has(pair[1].toUpperCase()+"-USDT")
      :id.includes("market-")?marketBars.length>1:true;
-   states[id]=available[id]?indicationState(oscillatorContinuationBase(id)??id,k)??new Int8Array(b.n):new Int8Array(b.n);
+   states[id]=available[id]?indicationState(inverse??oscillatorContinuationBase(id)??id,k)??new Int8Array(b.n):new Int8Array(b.n);
  }
  return {states,available};
 }
 
 /** Emit a direction once at its onset; inversion is already calculated in the source. */
 export function entryOnsets(states:Int8Array):Int8Array{const out=new Int8Array(states.length);for(let i=1;i<states.length;i++)if(states[i]!==0&&states[i]!==states[i-1])out[i]=states[i];return out;}
+
+export function sourceEntryAt(id:string,states:Int8Array,index:number):number {
+  const direction=states[index]??0
+  if(index<1||direction===0)return 0
+  if(direction!==states[index-1])return direction
+  return inverseContinuationBase(id)||oscillatorContinuationBase(id)?direction:0
+}

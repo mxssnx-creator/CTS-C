@@ -1,4 +1,4 @@
-import {BingxTradeStream,TradeBarBuilder} from './trade-stream'
+import {BingxTradeStream,TradeBarBuilder,type ObservedTrade,type TradeBar} from './trade-stream'
 import { randomUUID } from 'node:crypto'
 import { normalizeSymbol, TradingEngine, DEFAULT_ENGINE_SETTINGS, validateEngineSettings,validateObservedCandles } from './engine'
 import { connectionClient, connectionCredentials,type BingxClient,type ClientOptions } from './bingx'
@@ -17,10 +17,12 @@ import { EXEC_PROFILES, withDefaultExecProfile } from './exec-profile'
 interface Control { running: boolean; exchangeExecution: boolean; warmed: string[]; symbolCount: number; historyCandles:number; lastTick: number | null; lastError: string | null;feeReadFailures:string[];feeCheckedAt:number|null }
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
 interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null;readyAt?:number;batchSize?:number}
+interface TradeBatch {trades:{trade:ObservedTrade;bar?:TradeBar}[];bars:{symbol:string;bar:TradeBar}[];offset:number}
 const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:4320,lastTick:null,lastError:null,feeReadFailures:[],feeCheckedAt:null }
 const EXECUTION_INTERVAL_MS = 250
 const RECONCILIATION_INTERVAL_MS = 1000
-const MARKET_INTERVAL_MS = 45
+const MARKET_CLIENT_OPTIONS: ClientOptions = {minRequestIntervalMs:45,pacePublicMarket:true}
+const TRADE_SLICE_MS = 15
 const HISTORY_QUOTE_WAIT_MS = 2_000
 const HISTORY_REQUESTS = 16
 const HISTORY_QUEUE_LIMIT = 32
@@ -38,6 +40,7 @@ export class TerminalRuntime {
   private tradeStream?:BingxTradeStream
   private tradeBars=new TradeBarBuilder()
   private tradeGeneration=0
+  private tradeBatch?:TradeBatch
   private tradeTimer?:ReturnType<typeof setTimeout>
   private tradeSerialPending=false
   private tradeBarsRecorded=0
@@ -55,6 +58,7 @@ export class TerminalRuntime {
   private bufferedEvents:EngineEvent[]=[]
   private sequence: Promise<unknown> = Promise.resolve()
   private executionTask?:Promise<void>
+  private readonly executionRetryAt=new Map<string,number>()
   private quoteTask?:Promise<void>
   private quoteResult?:Awaited<ReturnType<BingxClient["quotes"]>>
   private quoteError:Error|null=null
@@ -71,7 +75,7 @@ export class TerminalRuntime {
   private executor:DemoExecutor
   constructor(readonly connectionId:ConnectionId='bingx-x02',readonly store:StateStore=getStore(connectionId),private readonly createClient:(id:ConnectionId,options?:ClientOptions)=>BingxClient=connectionClient) {
     connectionInfo(connectionId)
-    this.client=this.createClient(connectionId,{minRequestIntervalMs:MARKET_INTERVAL_MS})
+    this.client=this.createClient(connectionId,MARKET_CLIENT_OPTIONS)
     this.executor=new DemoExecutor(this.store,this.createClient(connectionId),{connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:intent=>this.validateLiveIntent(intent)})
     const restored = this.store.loadEngineState()
     this.hydratedCheckpointToken=this.store.loadedCheckpointToken()
@@ -135,26 +139,31 @@ export class TerminalRuntime {
     validateObservedCandles(candles)
     const latest=Math.floor(Date.now()/60000)*60000
     if(candles.some((bar,i)=>bar.timestamp>latest||bar.timestamp%60000!==0||(i>0&&bar.timestamp-candles[i-1].timestamp!==60000)))throw new Error('Warmup requires complete contiguous one-minute observations')
-    let batchSize=1
+    // This path is offline. Reuse each ported signal vector across a useful
+    // batch while still yielding and renewing ownership between chunks.
+    let batchSize=64
     for(let offset=0;offset<candles.length;){
       this.ensureLease()
       const chunk=candles.slice(offset,offset+batchSize), began=performance.now()
       this.engine.processCandles(symbol,chunk,{allowExecution:false,eventLimit:0})
-      batchSize=historyBatchSize(chunk.length,performance.now()-began)
+      const elapsed=Math.max(1,performance.now()-began)
+      batchSize=Math.max(1,Math.min(512,chunk.length*2,Math.floor(200*chunk.length/elapsed)))
       offset+=chunk.length
       await new Promise<void>(resolve=>setImmediate(resolve))
     }
     this.persist()
   }
-  shutdown(){this.tradeStream?.stop();clearTimeout(this.tradeTimer);clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);clearTimeout(this.executionTimer);this.leased=false;this.leaseLost=true;this.control.running=false}
+  shutdown(){this.stopTradeStream();clearInterval(this.heartbeat);if(this.leased&&!this.leaseLost&&this.store.ownsLease(this.owner)){this.persist();this.store.releaseLease(this.owner)}clearTimeout(this.timer);clearTimeout(this.executionTimer);this.leased=false;this.leaseLost=true;this.control.running=false}
   serial<T>(operation:()=>Promise<T>): Promise<T> { const next=this.sequence.catch(()=>{}).then(operation); this.sequence=next; return next }
   private persist(events: EngineEvent[] = [],force=true) {
     this.ensureLease();retainEvents(this.bufferedEvents,events)
-    const cold=this.control.warmed.length<this.engine.managedSymbols().length
-    const exposed=this.executor.lots?.().some(lot=>lot.quantity>1e-10)??false
-    const interval=cold&&!exposed?30000:5000
-    if(!force&&Date.now()-this.checkpointAt<interval&&this.engine.intentRevision===this.checkpointIntentRevision)return
-    const metadata=this.engine.checkpointMetadata(),settings=this.engine.settings
+    if(!force&&this.engine.intentRevision===this.checkpointIntentRevision){
+      const elapsed=Date.now()-this.checkpointAt
+      if(elapsed<5000)return
+      const cold=this.control.warmed.length<this.engine.managedSymbols().length
+      if(elapsed<30000&&cold&&!this.executor.lots?.().some(lot=>lot.quantity>1e-10))return
+    }
+    const metadata=this.engine.checkpointPayload(),settings=this.engine.settings
     if(this.store.hasLaneCheckpoint())this.store.saveLaneCheckpoint(metadata,this.engine.checkpointLanes(),this.bufferedEvents,settings,()=>this.ensureLease())
     else this.store.migrateLaneCheckpoint(metadata,this.engine.checkpointLanes(true),this.bufferedEvents,settings,()=>this.ensureLease())
     this.engine.checkpointSaved();this.store.set('control',this.control)
@@ -167,7 +176,7 @@ export class TerminalRuntime {
     if(!connectionCredentials(this.connectionId))throw new Error(`Dedicated ${connectionInfo(this.connectionId).name} credentials are unavailable on the server.`)
     this.quoteGeneration++;this.quoteResult=undefined;this.quoteError=null
     this.accountGeneration++;this.accountError=null;this.accountRetryAt=0
-    this.client = this.createClient(this.connectionId,{minRequestIntervalMs:MARKET_INTERVAL_MS})
+    this.client = this.createClient(this.connectionId,MARKET_CLIENT_OPTIONS)
     this.executor = new DemoExecutor(this.store,this.createClient(this.connectionId),{connectionId:this.connectionId,beforeSubmit:()=>this.ensureLease(),validateIntent:(intent)=>this.validateLiveIntent(intent)})
     const [balance,contracts,quotes] = await Promise.all([this.client.balance(),this.client.contracts(),this.client.quotes()])
     this.ensureLease()
@@ -196,45 +205,75 @@ export class TerminalRuntime {
     this.schedule()
   }
   pause() { this.ensureLease();this.control.exchangeExecution=false; this.persist() }
-  stop() { this.ensureLease();this.tradeStream?.stop();clearTimeout(this.tradeTimer);this.control.running=false;this.control.exchangeExecution=false;clearTimeout(this.timer);this.timer=undefined;clearTimeout(this.executionTimer);this.executionTimer=undefined;this.persist() }
+  stop() { this.ensureLease();this.stopTradeStream();this.control.running=false;this.control.exchangeExecution=false;clearTimeout(this.timer);this.timer=undefined;clearTimeout(this.executionTimer);this.executionTimer=undefined;this.persist() }
   resume() { if(this.control.running){try{this.ensureLease();if(connectionCredentials(this.connectionId)){this.startTradeStream();this.scheduleExecution();this.schedule();}else{this.control.running=false;this.control.lastError=`${connectionInfo(this.connectionId).name} credentials unavailable after restart`;this.persist()}}catch(error){this.control.running=false;this.control.lastError=error instanceof Error?error.message:'Runtime ownership unavailable'}} }
   private startTradeStream(){
-    this.tradeStream?.stop();clearTimeout(this.tradeTimer)
+    this.stopTradeStream()
     if(this.engine.settings.catalog.microTradeStream!==true)return
     this.tradeStream=new BingxTradeStream(this.connectionId)
     this.tradeStream.start(this.engine.managedSymbols())
     this.scheduleTrades()
   }
+  private stopTradeStream(){
+    this.tradeStream?.stop()
+    this.tradeStream=undefined
+    clearTimeout(this.tradeTimer)
+    this.tradeTimer=undefined
+    this.tradeBatch=undefined
+    this.tradeBars.reset()
+  }
   private scheduleTrades(){
-    if(!this.control.running||!this.tradeStream)return
+    if(this.tradeTimer||!this.control.running||!this.tradeStream)return
     this.tradeTimer=setTimeout(()=>{
+      this.tradeTimer=undefined
       if(!this.tradeSerialPending){
         this.tradeSerialPending=true
         void this.serial(async()=>this.consumeTrades()).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Trade processing failed'}).finally(()=>{this.tradeSerialPending=false;this.scheduleTrades()})
       }
-    },100)
+    },this.tradeBatch&&!this.tradeBatch.bars.length?0:100)
     this.tradeTimer.unref?.()
   }
   private consumeTrades(){
     if(!this.control.running||!this.tradeStream)return
     this.ensureLease()
-    if(this.tradeGeneration!==this.tradeStream.status.generation){this.tradeGeneration=this.tradeStream.status.generation;this.tradeBars.reset()}
-    const events:EngineEvent[]=[]
-    for(const trade of this.tradeStream.drain(1000)){
-      const observed=this.tradeBars.ingest(trade)
-      if(!observed.accepted)continue
-      if(observed.bar){
-        this.store.saveTradeBar(trade.symbol,observed.bar);this.tradeBarsRecorded++
-        if(observed.bar.complete){
-          // Each micro lane warms on its own observed bars and stage proofs;
-          // unrelated minute-history recovery must not block a qualified lane.
-          const fresh=Date.now()-trade.timestamp<=15000
-          retainEvents(events,this.engine.processCandles(trade.symbol,[observed.bar],{barSeconds:10,allowExecution:fresh&&this.control.exchangeExecution,eventLimit:fresh?5000:0}))
-        }
+    if(this.tradeGeneration!==this.tradeStream.status.generation){
+      this.tradeGeneration=this.tradeStream.status.generation
+      this.tradeBatch=undefined
+      this.tradeBars.reset()
+    }
+    const deadline=performance.now()+TRADE_SLICE_MS
+    let batch=this.tradeBatch
+    if(!batch){
+      batch={trades:[],bars:[],offset:0}
+      const latest=Date.now()+5000
+      for(const trade of this.tradeStream.drain(1000)){
+        if(trade.timestamp>latest)continue
+        const observed=this.tradeBars.ingest(trade)
+        if(!observed.accepted)continue
+        batch.trades.push({trade,bar:observed.bar})
+        if(observed.bar)batch.bars.push({symbol:trade.symbol,bar:observed.bar})
       }
-      this.marks.set(trade.symbol,{price:trade.price,timestamp:trade.timestamp})
+      this.tradeBatch=batch
+    }
+    // An I/O failure leaves the batch pending. Bar evidence is durable before
+    // any candle can open a risk intent, including on the retry.
+    if(batch.bars.length){
+      this.store.saveTradeBars(batch.bars)
+      this.tradeBarsRecorded+=batch.bars.length
+      batch.bars.length=0
+    }
+    const first=batch.offset,events:EngineEvent[]=[]
+    while(batch.offset<batch.trades.length&&(batch.offset===first||performance.now()<deadline)){
+      const {trade,bar}=batch.trades[batch.offset++]
+      if(bar?.complete){
+        // Each micro lane warms on its own observed bars and stage proofs.
+        const fresh=Date.now()-trade.timestamp<=15000
+        retainEvents(events,this.engine.processCandles(trade.symbol,[bar],{barSeconds:10,allowExecution:fresh&&this.control.exchangeExecution,eventLimit:fresh?5000:0}))
+      }
+      if((this.marks.get(trade.symbol)?.timestamp??0)<=trade.timestamp)this.marks.set(trade.symbol,{price:trade.price,timestamp:trade.timestamp})
       retainEvents(events,this.engine.processTick(trade.symbol,trade.price,trade.timestamp,true,this.control.warmed.includes(trade.symbol)?"all":"micro"))
     }
+    if(batch.offset===batch.trades.length)this.tradeBatch=undefined
     if(events.length)this.persist(events,false)
     this.pumpExecution()
   }
@@ -253,23 +292,41 @@ export class TerminalRuntime {
   private pumpExecution(reconcile=false){
     if(!this.control.running)return
     this.ensureLease()
-    if(!this.executionTask){
-        const events:EngineEvent[]=[]
-        const pending=this.engine.pendingIntents().filter(i=>this.control.exchangeExecution||i.kind==='close')
-        if(!reconcile&&!pending.length)return
-        const submittedIntentIds=new Set(pending.filter(i=>this.store.hasExecutionIntent(i.connectionId,i.id)).map(i=>i.id))
-        const plan=planExecutionIntents(pending,{activePositionIds:this.engine.activeLivePositionIds(),submittedIntentIds,now:Date.now(),limit:1})
-        for(const rejection of plan.rejected){this.engine.markExecution(rejection.id,{status:'rejected',error:rejection.error});const intent=pending.find(i=>i.id===rejection.id)!;events.push({type:'execution',laneId:intent.laneId,stage:'live',timestamp:Date.now(),status:'rejected',reason:rejection.error})}
-        if(plan.rejected.length)this.persist(events.splice(0))
-        const maintenance = reconcile || plan.ready.some(intent => submittedIntentIds.has(intent.id))
-        if (maintenance) this.reconciledAt = Date.now()
-        if (!maintenance && !plan.ready.length) return
-        this.executionTask=this.executor.process(plan.ready, maintenance).then(updates=>this.serial(async()=>{
-          const pendingById=new Map(this.engine.pendingIntents().map(i=>[i.id,i])),audit:EngineEvent[]=[]
-          for(const update of updates)if(update.status!=='unknown'&&pendingById.has(update.id)){this.engine.markExecution(update.id,{...update,status:update.status});audit.push({type:'execution',laneId:pendingById.get(update.id)!.laneId,stage:'live',timestamp:Date.now(),status:update.status,reason:update.error})}
-          if(audit.length)this.persist(audit)
-        })).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Executor unavailable'}).finally(()=>{this.executionTask=undefined})
+    if(this.executionTask)return
+    const intents=this.engine.pendingIntents()
+    if(!reconcile&&!intents.length)return
+    const submittedIntentIds=new Set(intents.filter(intent=>this.store.hasExecutionIntent(intent.connectionId,intent.id)).map(intent=>intent.id))
+    const pending=intents.filter(intent=>this.control.exchangeExecution||intent.kind==='close'||submittedIntentIds.has(intent.id))
+    const now=Date.now()
+    const plan=planExecutionIntents(pending,{activePositionIds:this.engine.activeLivePositionIds(),submittedIntentIds,retryAt:this.executionRetryAt,now,limit:1})
+    const events:EngineEvent[]=[]
+    for(const rejection of plan.rejected){
+      this.executionRetryAt.delete(rejection.id)
+      this.engine.markExecution(rejection.id,{status:'rejected',error:rejection.error})
+      const intent=pending.find(row=>row.id===rejection.id)!
+      events.push({type:'execution',laneId:intent.laneId,stage:'live',timestamp:now,status:'rejected',reason:rejection.error})
+    }
+    if(events.length)this.persist(events)
+    const next=plan.ready[0]
+    const maintenance=reconcile||Boolean(next&&submittedIntentIds.has(next.id))
+    if(!maintenance&&!next)return
+    if(maintenance)this.reconciledAt=now
+    this.executionTask=this.executor.process(plan.ready,maintenance).then(updates=>this.serial(async()=>{
+      const pendingById=new Map(this.engine.pendingIntents().map(intent=>[intent.id,intent])),audit:EngineEvent[]=[]
+      for(const update of updates){
+        const intent=pendingById.get(update.id)
+        if(!intent)continue
+        if(update.status==='unknown'){
+          // Periodic reconciliation must not postpone a waiting retry indefinitely.
+          if(update.id===next?.id)this.executionRetryAt.set(update.id,Date.now()+RECONCILIATION_INTERVAL_MS)
+          continue
+        }
+        this.executionRetryAt.delete(update.id)
+        this.engine.markExecution(update.id,{...update,status:update.status})
+        audit.push({type:'execution',laneId:intent.laneId,stage:'live',timestamp:Date.now(),status:update.status,reason:update.error})
       }
+      if(audit.length)this.persist(audit)
+    })).catch(error=>{this.control.lastError=error instanceof Error?error.message:'Executor unavailable'}).finally(()=>{this.executionTask=undefined})
   }
   private prefetchHistory() {
     if(!this.control.running)return
@@ -502,7 +559,7 @@ export class TerminalRuntime {
   }
   marketDataStatus(){return {...this.tradeStream?.status,barsRecorded:this.tradeBarsRecorded,duplicates:this.tradeBars.duplicates,lateTrades:this.tradeBars.late,gaps:this.tradeBars.gaps,barSeconds:10}}
   snapshot() {
-    const s=this.engine.snapshot({laneLimit:500,positionLimit:1000,positionStage:'live'}), account=this.store.get<{equity:number;updatedAt:number}>('account')
+    const s=this.engine.snapshot({laneLimit:500,positionLimit:1000,positionStage:'live',includeCoordinationStats:true}), account=this.store.get<{equity:number;updatedAt:number}>('account')
     const exec = s.settings.stageGateMode === "exec-branches"
     const stages=Object.fromEntries(s.stages.filter(stage=>stage.stage!=="exec"||exec||stage.lanes).map(stage=>{
       const mirror = exec && stage.stage === "live"
@@ -527,7 +584,7 @@ export class TerminalRuntime {
       events:this.store.events().map(e=>({timestamp:new Date(Number(e.timestamp)||Date.now()).toISOString(),level:e.status==='rejected'?'error':'info',phase:String(e.stage||'engine'),message:`${e.type}${e.status?' '+e.status:''}: ${e.reason||String(e.laneId||'').slice(0,240)}`,connectionId:this.connectionId})),
       readiness:{x02Configured:Boolean(connectionCredentials('bingx-x02')),configured:Boolean(connectionCredentials(this.connectionId)),environment:connectionInfo(this.connectionId).environment,status:this.control.lastError||this.accountError||(this.control.running?warmedCount>=s.symbolCount?`Monitoring ${s.symbolCount} symbols`:`Market warm-up ${warmedCount}/${s.symbolCount}`:connectionCredentials(this.connectionId)?`Configured; ready to verify ${connectionInfo(this.connectionId).environment}`:`Dedicated ${connectionInfo(this.connectionId).name} credentials required`),engineStatus:this.control.running?'running':'stopped',warmedSymbols:warmedCount,currentMinuteSymbols:observedCurrent,lastTick:this.control.lastTick},
       positionCount:live.open,positionDisplayLimit:1000,microMarketData:this.marketDataStatus(),metricScope:'Active sets use the current configuration and gates. Lifetime PF and Live-paper totals retain all recorded cohorts and losses. Recent Live-paper closes have a separate 1,000-row history. Legacy fees remain unavailable when the old checkpoint lacks complete totals. Exchange equity and owned fills are reported separately.',
-      coordinationStats:this.engine.coordinationStats(),
+      coordinationStats:s.coordinationStats,
       engine:{processedCandles:s.processedCandles,catalogCount:s.catalogCount,symbolCount:s.symbolCount,lanes:s.lanes.slice(0,500),maxDrawdownPct:s.maxDrawdownPct,equityHistory:s.equityHistory,symbolFees:s.settings.symbolFees??{},feeReadFailures:this.control.feeReadFailures,feeCheckedAt:this.control.feeCheckedAt,feeFallbackSymbols:s.settings.symbols.filter(symbol=>!s.settings.symbolFees?.[symbol])},
       execution:{lots:ownedLots,intents:this.store.intents(100),summary:{...this.executor.summary(ownedLots),dispatchIntervalMs:EXECUTION_INTERVAL_MS},comparison:this.executor.comparison(ownedLots)},lastReplay:this.store.get('lastReplay')}
   }

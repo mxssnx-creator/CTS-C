@@ -6,6 +6,13 @@ import { EXEC_PROFILES } from "@/core/exec-profile"
 export interface StageTelemetry {autoPf?:StageMetrics["autoPf"];validatedWindow?:StageMetrics["validatedWindow"];admittedForward?:StageMetrics["admittedForward"];postStage?:StageMetrics["postStage"];executed?:StageMetrics["executed"];execProfiles?:StageMetrics["execProfiles"];directMirror?:boolean;sampleSetCount?:number;sets:number;allSets?:number;retiredSets?:number;eligible:number;enoughSamples:number|null;samplesPercent:number|null;pf:number|null;pfState?:ProfitFactorState;windowPF?:number|null;windowPfState?:ProfitFactorState;open?:number;closed?:number;blockedByParent?:number;admissionReady?:number;required?:number }
 export const STAGE_NAMES = ["base","main","real","exec","live"] as const
 
+export function formatForwardCashPF(row: StageMetrics["postStage"]): string {
+  const cash = row?.cashPF
+  const value = formatProfitFactor(cash?.profitFactor,cash?.pfState)
+  return row && cash && cash.samples < row.closed
+    ? `${value} · ${cash.samples.toLocaleString()}/${row.closed.toLocaleString()} closes` : value
+}
+
 export function ProgressionDetails({stages}:{stages:Record<string,StageTelemetry>}){
   return <section className="terminal-panel">
     <header className="terminal-panel-heading"><h2>Stage diagnostics</h2></header>
@@ -21,16 +28,16 @@ export function ProgressionDetails({stages}:{stages:Record<string,StageTelemetry
           <td>{s.autoPf ? <>{s.autoPf.minThreshold.toFixed(2)}–{s.autoPf.maxThreshold.toFixed(2)}<small>{s.autoPf.historySets.toLocaleString()} history · {s.autoPf.fallbackSets.toLocaleString()} fallback</small></> : "—"}</td>
           <td>{formatProfitFactor(s.validatedWindow?.profitFactor,s.validatedWindow?.pfState)}{s.validatedWindow&&<small>{s.validatedWindow.sets.toLocaleString()} Sets · {s.validatedWindow.samples.toLocaleString()} samples</small>}</td>
           <td>{name==="base"?"—":formatProfitFactor(s.admittedForward?.profitFactor,s.admittedForward?.pfState)}{name!=="base"&&s.admittedForward&&<small>{s.admittedForward.closes.toLocaleString()} closes · {s.admittedForward.unprovenCloses.toLocaleString()} unproven</small>}</td>
-          <td>{formatProfitFactor(s.postStage?.profitFactor,s.postStage?.pfState)}{s.postStage&&<small>{s.postStage.closed.toLocaleString()} settled · {s.postStage.open.toLocaleString()} active</small>}</td>
-          <td>{formatProfitFactor(s.executed?.profitFactor,s.executed?.pfState)}{s.executed&&<small>{s.executed.open.toLocaleString()} active · {s.executed.closed.toLocaleString()} settled</small>}
-            {EXEC_PROFILES.map(profile=>{const row=s.execProfiles?.[profile.id];return row&&<small key={profile.id}>{profile.label} {formatProfitFactor(row.profitFactor,row.pfState)} · {row.closed.toLocaleString()} settled</small>})}</td>
+          <td>{formatProfitFactor(s.postStage?.profitFactor,s.postStage?.pfState)}{s.postStage&&<><small>Cash PF {formatForwardCashPF(s.postStage)}</small><small>{s.postStage.closed.toLocaleString()} settled · {s.postStage.open.toLocaleString()} active</small></>}</td>
+          <td>{formatProfitFactor(s.executed?.profitFactor,s.executed?.pfState)}{s.executed&&<><small>Cash PF {formatForwardCashPF(s.executed)}</small><small>{s.executed.open.toLocaleString()} active · {s.executed.closed.toLocaleString()} settled</small></>}
+            {EXEC_PROFILES.map(profile=>{const row=s.execProfiles?.[profile.id];return row&&<small key={profile.id}>{profile.label} {formatProfitFactor(row.profitFactor,row.pfState)} · Cash PF {formatForwardCashPF(row)} · {row.closed.toLocaleString()} settled</small>})}</td>
           <td>{formatProfitFactor(s.pf,s.pfState)}</td>
           <td>{s.directMirror?"—":(s.blockedByParent??0).toLocaleString()}</td>
           <td>{(s.open??0).toLocaleString()} / {(s.closed??0).toLocaleString()}</td>
         </tr>
       })}</tbody>
     </table></div>
-    <p className="terminal-ledger-note">Validated window PF uses qualified Sets. Admitted forward PF measures positions received from the preceding stage. Post-stage PF measures positions that opened a child at the next stage, once per position. Executed PF measures entries accepted at Exec after they settle.</p>
+    <p className="terminal-ledger-note">Validated window PF uses qualified Sets. Admitted forward PF measures positions received from the preceding stage. Post-stage PF counts settled positions that opened a child. Executed PF counts settled entries accepted at Exec. Cash PF uses realized paper P&amp;L after modeled costs.</p>
   </section>
 }
 
