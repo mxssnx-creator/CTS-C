@@ -101,7 +101,10 @@ try{
  assert.equal(await dynamicTrailing.getAttribute('aria-pressed'),'true')
  await fixedTrailing.click()
  await page.getByRole('checkbox',{name:'Relate',exact:true}).check()
- await page.getByLabel('Relate winning steps',{exact:true}).fill('10')
+ await page.getByLabel('Relate steps N (most increases)',{exact:true}).fill('10')
+ await page.getByLabel('Step rule',{exact:true}).selectOption('wins')
+ await page.getByRole('checkbox',{name:'Size from a few recent returns (Auto)',exact:true}).check()
+ await page.getByLabel('Relate Auto minimum returns',{exact:true}).fill('12')
  await page.getByRole('button',{name:'Save configuration',exact:true}).click()
  await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
  const lowRange=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
@@ -110,6 +113,7 @@ try{
  assert.deepEqual(JSON.parse(lowRange.strategyLowRangeSources),lowRangeSources)
  assert.ok(JSON.parse(lowRange.strategyExitModes).includes('trailing-fixed'))
  assert.deepEqual([lowRange.relateEnabled,lowRange.relateSteps],['true','10'])
+ assert.deepEqual([lowRange.relateStepMode,lowRange.relateAutoEnabled,lowRange.relateAutoMinSamples],['wins','true','12'])
 
  await page.getByLabel('Stage progression',{exact:true}).selectOption('exec-branches')
  const trendDca=page.getByRole('checkbox',{name:'Trend + DCA execution profile',exact:true})

@@ -109,7 +109,7 @@ export const COORDINATION_FIELDS = [
   { key: "relateAutoLastN", label: "Relate Auto recent returns", min: 3, max: 100, step: 1 },
   { key: "relateAutoMinSamples", label: "Relate Auto minimum returns", min: 3, max: 100, step: 1 },
   { key: "relateAutoMinPF", label: "Relate Auto minimum PF", min: 1.01, max: 10, step: .01 },
-  { key: "relateAutoConfidence", label: "Relate Auto confidence (standard errors)", min: 0, max: 3, step: .1 },
+  { key: "relateAutoConfidence", label: "Relate Auto confidence (standard errors)", min: 0, max: 3, step: .01 },
 ]
 const WINDOW_SCOPES = ["context", "config", "both"] as const
 const ENUM_FIELDS: Record<string, readonly string[]> = { autoPfMode:["set-history","tp-distance"],relateStepMode:["loss","wins"],blockBehavior:["pyramid","rounds"],liveEntryMode:['independent','real-mirror'],stageGateMode:['continuous-ancestors','processed-sets','parent-branches','exec-branches'],stageWindowScope:WINDOW_SCOPES,microStageWindowScope:["inherit",...WINDOW_SCOPES],axisReferenceStage:['base','same-stage'],axisOutcome: ["any", "positive", "negative"], blockMode: ["shared", "additive"] }
