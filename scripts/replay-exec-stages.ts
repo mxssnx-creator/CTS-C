@@ -261,6 +261,8 @@ async function main() {
   const postSigns:Record<string,Cohort> = {}, executedSigns:Record<string,Cohort> = {}
   const shortCoverage:Record<string,{sets:number;ready:number}> = {}
   const shortUnique:Record<string,{fit:number;holdout:number}> = {}
+  // Worker completion order must not change floating-point sums across repeated replays.
+  results.sort((a,b)=>a.symbol.localeCompare(b.symbol))
   for (const result of results) {
     merge(stages,result.stages); merge(variants,result.variants); merge(groups,result.groups)
     merge(postStages,result.postStages); merge(shortBooks,result.shortBooks); merge(shortAccepted,result.shortAccepted)
@@ -293,7 +295,7 @@ async function main() {
     signedWindows:{postStage:scoredCohorts(postSigns),executedByAncestor:scoredCohorts(executedSigns)},
     execShort:{coverage:shortCoverage,book:scoredCohorts(shortBooks),accepted:scoredCohorts(shortAccepted),unique:shortUnique},
     unique:Object.fromEntries(periods.map(period=>[period,distinctReturns[period].closed])),
-    distinctReturns,rank,results:results.sort((a,b)=>a.symbol.localeCompare(b.symbol)),
+    distinctReturns,rank,results,
   },null,2)+"\n")
 }
 
