@@ -74,7 +74,9 @@ try{
  await page.getByRole('button',{name:'Connections',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Verify & start x02'}).isEnabled(),false)
  await page.getByLabel('Trading connection',{exact:true}).selectOption('bingx-x01');await page.getByRole('heading',{name:'X01 execution control',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Verify & start x01 mainnet'}).isEnabled(),false)
  await page.getByRole('button',{name:'Strategy lab',exact:true}).click();await page.getByLabel('Exec → Live minimum PF',{exact:true}).fill('1.2');await page.getByRole('button',{name:'Save configuration',exact:true}).click();await page.getByText('Strategy configuration saved to x01.',{exact:true}).waitFor()
- assert.equal((await (await page.request.get(origin+'/api/terminal?connection=bingx-x01')).json()).settings.execMinPF,'1.2')
+ const x01=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x01')).json()).settings
+ assert.equal(x01.execMinPF,'1.2')
+ assert.equal(x01.strategyExecSingleEntry,'true')
  assert.equal((await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings.mainEvalPosCount,'7')
  await page.getByLabel('Trading connection',{exact:true}).selectOption('bingx-x02');await page.getByLabel('Main completed samples',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelector('input[type=number]')!==null)
 
@@ -116,6 +118,9 @@ try{
  assert.deepEqual([lowRange.relateStepMode,lowRange.relateAutoEnabled,lowRange.relateAutoMinSamples],['wins','true','12'])
 
  await page.getByLabel('Stage progression',{exact:true}).selectOption('exec-branches')
+ const singleExecEntry=page.getByLabel('One funded Exec sibling per signal',{exact:true})
+ assert.ok(await singleExecEntry.isChecked())
+ await singleExecEntry.uncheck()
  const trendDca=page.getByRole('checkbox',{name:'Trend + DCA execution profile',exact:true})
  assert.ok(await trendDca.isChecked())
  assert.ok(await page.getByRole('checkbox',{name:'Parabolic SAR + DCA execution profile',exact:true}).isChecked())
@@ -135,6 +140,7 @@ try{
  await page.getByRole('button',{name:'Save configuration',exact:true}).click()
  await page.getByText('Strategy configuration saved to x02.',{exact:true}).waitFor()
  const signals=(await (await page.request.get(origin+'/api/terminal?connection=bingx-x02')).json()).settings
+ assert.equal(signals.strategyExecSingleEntry,'false')
  assert.deepEqual(JSON.parse(signals.strategyIndicationTypes),['Signals'])
  assert.deepEqual(JSON.parse(signals.strategySignalsSources),['sig-ema-cross-s','sig-coord-v2-r80-n3-i3-bzikk5k'])
  assert.equal(signals.signalsMaxWindowDrawdownPct,'2.5');assert.equal(signals.stageGateMode,'exec-branches');assert.equal(signals.execMinPF,'1.15')

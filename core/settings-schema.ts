@@ -15,7 +15,7 @@ import { DEFAULT_RELATE, DEFAULT_RELATE_AUTO } from "./relate"
 import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
 import { DEFAULT_WARMUP_CANDLES, MIN_WARMUP_CANDLES, MAX_WARMUP_CANDLES } from "./history-policy.mjs"
-import { EXEC_PROFILES } from "./exec-profile"
+import { DEFAULT_EXEC_SINGLE_ENTRY, EXEC_PROFILES } from "./exec-profile"
 import { INVERSE_CONTINUATION_SOURCES } from "../shared/cts-indications/inverse-sources"
 
 export const RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "Wide", "Low-Range"]
@@ -29,7 +29,7 @@ export const INDICATIONS = [...ALL_INDICATIONS]
 export const DEFAULTS: Record<string, unknown> = {
   relationalVolumeRatios: structuredClone(DEFAULT_RELATIONAL_VOLUME), strategyNormalEnabled: true, strategyTrailingEnabled: true, strategyProcessingByRange: {},
   stageGateMode: "exec-branches",
-  strategyExecSingleEntry: false,
+  strategyExecSingleEntry: DEFAULT_EXEC_SINGLE_ENTRY,
   ...Object.fromEntries(EXEC_PROFILES.map(profile=>[profile.setting,profile.enabledByDefault])),
   stageWindowScope: "context", microStageWindowScope: "inherit",
   stageBlocks: {}, strategyLastNGrid: {}, strategyExecWindows: DEFAULT_EXEC_WINDOWS, strategyStageCoordinations: {},

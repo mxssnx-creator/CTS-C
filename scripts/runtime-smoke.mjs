@@ -25,6 +25,7 @@ try{
  const cookie=await login()
  const snapshot=await fetch(origin+'/api/terminal',{headers:{Cookie:cookie}});assert.equal(snapshot.status,200)
  const state=await snapshot.json();assert.equal(state.readiness.x02Configured,false);assert.equal(state.equity,null);assert.equal(state.openPositions.length,0);assert.equal(state.engine.catalogCount,261)
+ assert.equal(state.settings.strategyExecSingleEntry,'true')
  for(const key of ['strategyTrendDcaEnabled','strategySarDcaEnabled','strategyRsiContinuationDcaEnabled','strategyBreakoutContinuationDcaEnabled','strategyTrendRecoveryDcaEnabled','strategyBreakoutRecoveryDcaEnabled','strategySar04DcaEnabled'])assert.equal(state.settings[key],'true')
  assert.equal(state.settings.strategyInverseRecoveryDcaEnabled,'false')
  assert.equal(state.settings.strategyActivityMomentumDcaEnabled,'false')
