@@ -14,7 +14,7 @@ import { DEFAULT_STEP_AUTO } from "./step-evidence"
 import { DEFAULT_RELATE, DEFAULT_RELATE_AUTO } from "./relate"
 import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
-import { MAX_WARMUP_CANDLES } from "./history"
+import { DEFAULT_WARMUP_CANDLES, MIN_WARMUP_CANDLES, MAX_WARMUP_CANDLES } from "./history-policy.mjs"
 import { EXEC_PROFILES } from "./exec-profile"
 import { INVERSE_CONTINUATION_SOURCES } from "../shared/cts-indications/inverse-sources"
 
@@ -54,7 +54,7 @@ export const DEFAULTS: Record<string, unknown> = {
   normalVolumeRatio: 1, axisVolumeRatio: 1, blockVolumeFactor: 1, dcaVolumeRatio: 1, relateVolumeRatio: 1, maxOrderNotional: 0,
   microTrailRatio: .5, microMinSlDistancePct: .1, microMinTrailDistancePct: .05, strategyTpFactor: 1, strategySlFactor: 1, strategyTrailRatio: 1, holdTimeFactor: 1,
   blockVolumeRatio: 0.2, makerFeePct: 0.02, takerFeePct: 0.05, slippagePctOfFees: 10,
-  symbolCount: 100, historyCandles: 4320, volumeFactor: 0.01, baseNotional: 100,
+  symbolCount: 100, historyCandles: DEFAULT_WARMUP_CANDLES, volumeFactor: 0.01, baseNotional: 100,
   strategyEnabledRanges: RANGES.filter(r=>r!=="Low-Range"), strategyTpSteps: BALANCED_STEPS, strategySlRatios: BALANCED_RATIOS,
   strategyExitModes: [...DEFAULT_EXIT_MODES], strategyIndicationTypes: [...CORE_INDICATIONS],
   strategyIndicationSources:[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES],
@@ -118,7 +118,7 @@ const ENUM_FIELDS: Record<string, readonly string[]> = { autoPfMode:["set-histor
 export const EXECUTION_FIELDS = [
   { key: "maxOrderNotional", label: "Maximum order notional (0 = disabled)", min: 0, max: 1_000_000_000, step: 0.001 },
   { key: "symbolCount", label: "Symbols to scan", min: 1, max: 500, step: 1 },
-  { key: "historyCandles", label: "Warm-up candles per symbol", min: 100, max: MAX_WARMUP_CANDLES, step: 1 },
+  { key: "historyCandles", label: "Warm-up candles per symbol", min: MIN_WARMUP_CANDLES, max: MAX_WARMUP_CANDLES, step: 1 },
   { key: "baseNotional", label: "Base notional (USDT)", min: 0.000001, max: 1_000_000_000, step: 0.000001 },
   { key: "volumeFactor", label: "Volume factor", min: 0.000001, max: 100, step: 0.000001 },
 ]

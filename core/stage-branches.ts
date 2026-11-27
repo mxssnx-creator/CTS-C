@@ -4,7 +4,7 @@ import type { Coordination, StrategyConfig } from "./types"
 import { EXEC_PROFILES, PROFILE_BASE_COORDINATIONS, PROFILE_CHILD_COORDINATIONS } from "./exec-profile"
 
 type ChildStage = Exclude<EvaluationStage, "base">
-export type StageCoordinations = Partial<Record<ChildStage, readonly Coordination[]>>
+export type StageCoordinations = Partial<Record<EvaluationStage, readonly Coordination[]>>
 export const BRANCH_COORDINATIONS = ["normal", "axis", "block", "dca", "relate"] as const
 export function checkStageCoordinations(raw: unknown): StageCoordinations {
   if (raw === undefined) return {}
@@ -12,7 +12,7 @@ export function checkStageCoordinations(raw: unknown): StageCoordinations {
     throw new Error("Stage coordinations must be a stage map")
   }
   for (const [stage, choices] of Object.entries(raw)) {
-    if (!["main", "real", "exec"].includes(stage) || !Array.isArray(choices) || new Set(choices).size !== choices.length ||
+    if (!EXEC_EVALUATION_STAGES.some(point=>point===stage) || !Array.isArray(choices) || new Set(choices).size !== choices.length ||
         choices.some(c => !BRANCH_COORDINATIONS.includes(c))) throw new Error("Invalid stage coordinations")
   }
   return raw as StageCoordinations
@@ -139,6 +139,12 @@ export class ParentBranches {
     return this.exec ? BRANCH_COORDINATIONS : [previous]
   }
 
+  baseChoices(config: StrategyConfig): readonly Coordination[] {
+    if (config.execProfile) return PROFILE_BASE_COORDINATIONS
+    const selected = this.coordinations.base
+    return this.exec && selected?.length ? selected : BRANCH_COORDINATIONS
+  }
+
   get(id: string) { return this.configs.get(id) }
 
   /** Rebuild one saved path from current settings without enumerating its siblings. */
@@ -153,7 +159,7 @@ export class ParentBranches {
       const previous = branch.ancestors[index - 1], before = branch.ancestors[index - 2]
       if (previous && (previous.configId !== parent.id || !enabled(previous.coordination) ||
           (before ? !this.choices(this.evaluationStages[index - 1] as ChildStage,before.coordination,geometry).includes(previous.coordination)
-            : geometry.execProfile && !PROFILE_BASE_COORDINATIONS.includes(previous.coordination)))) return
+            : !this.baseChoices(geometry).includes(previous.coordination)))) return
       if (plan) {
         const policy = branch.windows?.[stage], windows = plan[stage]
         if (!policy || !windows.short.includes(policy.short) || !windows.last.includes(policy.minimal) ||

@@ -199,6 +199,12 @@ type ExactWindow = { minPF:number; autoFloor:number; auto?:AutoPfPolicy; timed:n
 const exactWindows = new WeakMap<BlockPolicy,WeakMap<number[],ExactWindow>>()
 const sharedBlockPrefixes = new WeakMap<number[], BlockPrefix>()
 const emptySamples = Object.freeze([]) as unknown as number[]
+function frozenRetained(values:number[],limit:number):number[] {
+  if (values.length<=limit && Object.isFrozen(values)) return values
+  const retained = values.slice(0,limit)
+  Object.freeze(retained)
+  return retained
+}
 const mirrorWindow: WindowResult = { count:0,required:0,minPF:0,profit:0,loss:0,enoughSamples:false,profitFactor:null,pfState:"empty",qualified:false }
 const axisCache=new WeakMap<WindowEvidence,{closed:number;samples:number[];length:number;head:number|undefined;previous:number;last:number;outcome:string;threshold:number;allowed:boolean}>()
 const sameProof = (one: GateProof, other: GateProof) => one === other || JSON.stringify(one) === JSON.stringify(other)
@@ -515,11 +521,13 @@ export class TradingEngine {
       if (!symbols.has(lane.symbol) || !this.coordinationEnabled(lane.coordination) ||
           (lane.config.execProfile && !PROFILE_BASE_COORDINATIONS.includes(lane.coordination))) continue
       if (lane.baseObservation) {
-        if (!this.branches?.exec || lane.stage !== "base" || !this.signalsBySymbol.get(lane.symbol)?.catalog.configIds.has(lane.configId)) continue
+        if (!this.branches?.exec || lane.stage !== "base" || !this.signalsBySymbol.get(lane.symbol)?.catalog.configIds.has(lane.configId) ||
+            (!this.branches.baseChoices(lane.config).includes(lane.coordination) && !this.baseAxisProbe(lane.config,lane.coordination))) continue
       } else if (this.branches) {
         const canonical = this.branches.restore(lane.config, this.geometry.get(lane.config.branch?.geometryId ?? ""), c => this.coordinationEnabled(c))
         if (!canonical || !this.signalsBySymbol.get(lane.symbol)?.catalog.configIds.has(canonical.branch!.geometryId)) continue
         const depth = canonical.branch!.ancestors.length
+        if (lane.stage === "base" && !this.branches.baseChoices(canonical).includes(lane.coordination)) continue
         if (lane.stage === "exec" && !this.branches.exec || depth !== Math.min(STAGE_INDEX[lane.stage], this.branches.evaluationStages.length - 1)) continue
         const previous = canonical.branch!.ancestors.at(-1)
         if (previous && !this.branches.choices(this.branches.evaluationStages[depth] as "main" | "real" | "exec", previous.coordination,canonical).includes(lane.coordination) && !this.axisReferenceOnly(canonical,lane.coordination,lane.stage)) continue
@@ -861,9 +869,9 @@ export class TradingEngine {
     return position
   }
   /**
-   * Older returns of the same trade stream held by ancestor Sets, newest first. A child opens at its parent's entry and
-   * shares its exits, so each ancestor only contributes closes that precede the descendant's first admission; nothing
-   * is counted twice and nothing from a sibling is borrowed.
+   * Older returns of the same trade stream held by ancestor Sets, newest first.
+   * Each ancestor contributes only closes before the descendant's first admission.
+   * A coordination that can alter the entry basis ends the comparable stream.
    */
   private relateInherited(lane: LaneState, before: number, limit: number): number[] | undefined {
     const chain = lane.parentProof
@@ -872,7 +880,7 @@ export class TradingEngine {
     let horizon = Math.min(before, lane.admittedAt ?? before)
     for (let i = chain.length - 1; i >= 0 && out.length < limit; i--) {
       const ancestor = this.state.lanes[chain[i].laneId]
-      if (!ancestor) continue
+      if (!ancestor || ancestor.coordination==="dca" || ancestor.coordination==="block") break
       const times = ancestor.sampleTimes
       if (times) for (let k = 0; k < times.length && out.length < limit; k++) if (times[k] < horizon) out.push(ancestor.samples[k])
       if (ancestor.admittedAt !== undefined) horizon = Math.min(horizon, ancestor.admittedAt)
@@ -1013,6 +1021,14 @@ export class TradingEngine {
     return axis.enabled && axis.reference !== "base" && choices.includes("axis") && !choices.includes("normal")
   }
 
+  /** An Axis route can use a Normal Base observation without funding a Normal Set. */
+  private baseAxisProbe(config: StrategyConfig, coordination: Coordination): boolean {
+    if (coordination !== "normal" || config.execProfile || !this.state.settings.coordinations.axis.enabled) return false
+    const plan = this.branches!
+    return plan.baseChoices(config).includes("axis") || (this.state.settings.coordinations.axis.reference === "base" &&
+      (["main","real","exec"] as const).some(stage=>plan.choices(stage,"normal",config).includes("axis")))
+  }
+
   private calculationOnly(config: StrategyConfig, coordination: Coordination, stage: Stage) {
     return this.axisReferenceOnly(config,coordination,stage) ||
       (coordination === "normal" && stage === "live" && !strategyProcessing(this.state.settings.catalog,config).normal)
@@ -1097,6 +1113,7 @@ export class TradingEngine {
     const baseSampleCounts = plan.baseSampleCounts(geometry)
     const windows = plan.baseWindows(geometry)
     const minPF = s.stageMinPF.base
+    const baseChoices = plan.baseChoices(geometry)
     const resumeBase = (coordination: Coordination, afterCount = 0) => {
       // A restored or busy probe cannot stall a Base Set with its own history.
       for (const base of plan.materializedBase(geometry)) {
@@ -1105,6 +1122,14 @@ export class TradingEngine {
       }
     }
     for (const coordination of enabled) {
+      if (!baseChoices.includes(coordination)) {
+        if (this.baseAxisProbe(geometry,coordination)) {
+          const probe = this.cachedLane(symbol,geometry.id,direction,coordination,"base") ??
+            this.lane(symbol,geometry,direction,coordination,"base",true)
+          if (!probe.open && probe.lastTimestamp < candle.timestamp) this.open(probe,candle)
+        }
+        continue
+      }
       if (coordination === "axis" && !this.axisAllows(symbol,geometry,direction,"base",candle.timestamp)) {
         resumeBase(coordination)
         continue
@@ -1127,9 +1152,7 @@ export class TradingEngine {
         resumeBase(coordination)
         continue
       }
-      // A Base observation can feed different window sizes at this exact clock.
-      // Auto PF's older history stays out of the much smaller gate prefix.
-      gatePrefix(evidence.samples,baseSampleCounts.at(-1)!)
+      let preparedPrefix = false
       for (const window of windows) {
         if (window.required > evidence.samples.length) {
           resumeBase(coordination,evidence.samples.length)
@@ -1140,13 +1163,18 @@ export class TradingEngine {
           visit(base,coordination,"base")
           continue
         }
+        // Only unmaterialized Base Sets need to read the probe's shared gate prefix.
+        if (!preparedPrefix) {
+          gatePrefix(evidence.samples,baseSampleCounts.at(-1)!)
+          preparedPrefix = true
+        }
         const gate = windowMetrics(evidence,window.required,minPF,window.policy)
         if (!gate.qualified) continue
         const config = base ?? plan.baseConfig(geometry,window,true)
         const candidate = this.lane(symbol,config,direction,coordination,"base")
         const retention = this.sampleRetention(candidate)
-        candidate.samples = Object.freeze(observation.samples.slice(0,retention)) as unknown as number[]
-        if (observation.sampleTimes) candidate.sampleTimes = Object.freeze(observation.sampleTimes.slice(0,retention)) as unknown as number[]
+        candidate.samples = frozenRetained(observation.samples,retention)
+        if (observation.sampleTimes) candidate.sampleTimes = frozenRetained(observation.sampleTimes,retention)
         if (observation.untimedSamplesThrough !== undefined) candidate.untimedSamplesThrough = observation.untimedSamplesThrough
         const { closedCount,wins,netPnl,grossProfit,grossLoss,costTotal,blockRound,dcaStepReturns,blockStepReturns } = observation
         Object.assign(candidate,{closedCount,wins,netPnl,grossProfit,grossLoss,costTotal,admissionCount:observation.admissionCount-1})
@@ -1423,7 +1451,8 @@ export class TradingEngine {
     for (const id in this.state.lanes) {
       const lane=this.state.lanes[id]
       if (lane.calculationOnly) {
-        if (lane.baseObservation && this.branches?.exec && this.currentLane(lane)) {
+        if (lane.baseObservation && this.branches?.exec && this.currentLane(lane) &&
+            this.branches.baseChoices(lane.config).includes(lane.coordination)) {
           const counts = this.branches.baseSampleCounts(lane.config)
           baseObserved += counts.length
           let count = 0

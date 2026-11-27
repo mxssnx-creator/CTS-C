@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, openSync, closeSync, chmodSync, writeFileSync, r
 import { loadEnvFile } from 'node:process'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { DEFAULT_WARMUP_CANDLES, MIN_WARMUP_CANDLES, MAX_WARMUP_CANDLES, validWarmupCount } from '../core/history-policy.mjs'
 import { STARTUP_REQUEST_TIMEOUT, createRequester, waitForReady, saveInitialSettings, childIsRunning, childCompletion, stopChild, assertPortAvailable, observeRuntime } from './run-x02.mjs'
 
 const CONNECTION = 'bingx-x01'
@@ -20,9 +21,9 @@ export async function runX01() {
   for (const file of ['.env.local', '.env']) if (existsSync(file)) loadEnvFile(file)
   if (!process.env.CTS_ADMIN_PASSWORD || process.env.CTS_ADMIN_PASSWORD.length < 12) throw new Error('CTS_ADMIN_PASSWORD of at least 12 characters is required')
   if (!(process.env.BINGX_X01_KEY && process.env.BINGX_X01_SECRET)) throw new Error('BINGX_X01_KEY and BINGX_X01_SECRET are required; x01 never reuses other credentials')
-  const symbolCount = flag('--symbols', 60), historyCandles = flag('--history-candles', 1440), maxOrderNotional = flag('--max-order-notional', 2)
+  const symbolCount = flag('--symbols', 60), historyCandles = flag('--history-candles', DEFAULT_WARMUP_CANDLES), maxOrderNotional = flag('--max-order-notional', 2)
   if (!Number.isInteger(symbolCount) || symbolCount < 1 || symbolCount > 500) throw new Error('--symbols must be 1..500')
-  if (!Number.isInteger(historyCandles) || historyCandles < 100 || historyCandles > 4320) throw new Error('--history-candles must be 100..4320')
+  if (!validWarmupCount(historyCandles)) throw new Error(`--history-candles must be ${MIN_WARMUP_CANDLES}..${MAX_WARMUP_CANDLES}`)
   if (!(maxOrderNotional > 0 && maxOrderNotional <= 10)) throw new Error('--max-order-notional must be above 0 and at most 10 USDT')
   // Relate stays off unless asked: --relate loss|wins [--relate-steps N] [--relate-ratio X] [--relate-max-multiplier M]. The server validates the values.
   const relateMode = word('--relate')

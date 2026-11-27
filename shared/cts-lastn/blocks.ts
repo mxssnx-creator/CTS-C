@@ -11,7 +11,14 @@ export function checkBlockPolicy(p:BlockPolicy):void {
     !['positive','negative'].includes(p.shortPolarity)||!['positive','negative'].includes(p.minimalPolarity))throw new Error('Invalid disjoint Last-N policy');
 }
 export const blockRequired=(p:BlockPolicy)=>p.long+p.short+p.minimal;
-export const blockPolicyKey=(p:BlockPolicy)=>JSON.stringify([p.lastRequiresPF?'disjoint-positions-v2':'disjoint-positions-v1',p.long,p.short,p.minimal,p.shortPolarity,p.minimalPolarity]);
+const blockKeys = new WeakMap<BlockPolicy,string>();
+export function blockPolicyKey(p:BlockPolicy):string {
+  const cached = blockKeys.get(p);
+  if (cached !== undefined) return cached;
+  const key = JSON.stringify([p.lastRequiresPF?'disjoint-positions-v2':'disjoint-positions-v1',p.long,p.short,p.minimal,p.shortPolarity,p.minimalPolarity]);
+  if (Object.isFrozen(p)) blockKeys.set(p,key);
+  return key;
+}
 /** No max(short/long) clipping: every requested combination has its own exact identity. */
 export function* blockPolicies():Generator<Readonly<BlockPolicy>> {
   for(const long of LONG_COUNTS)for(const short of SHORT_COUNTS)for(const minimal of MINIMAL_COUNTS)

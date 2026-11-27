@@ -455,6 +455,35 @@ test("cross-coordination stages retain the exact Base origin and their own step 
   assert.deepEqual(TradingEngine.fromOwnedCheckpoint(state).snapshot(),engine.snapshot())
 })
 
+test("Base coordinator selection keeps the hidden Axis probe and retires excluded origins", () => {
+  const defaults = DEFAULT_ENGINE_SETTINGS.coordinations
+  const selections = {base:["axis"],main:["normal"],real:["normal"],exec:["normal"]}
+  const next = {long:["none"],short:[4],last:[1]}
+  const engine = new TradingEngine({...settings,coordinations:{
+    ...settings.coordinations!,
+    axis:{...defaults.axis,enabled:true,previous:4,last:1,reference:"base"},
+  },catalog:{...settings.catalog,strategyStageCoordinations:selections,strategyExecWindows:{
+    base:{...next,long:[10]},main:next,real:next,exec:next,
+  }}})
+  const accepted:ClosedTrade[] = []
+  engine.observeStageCloses(trade=>{if(trade.executed)accepted.push(trade)})
+  engine.processCandles(symbol,bars,{eventLimit:0})
+  assert.ok(accepted.length>0)
+  const state = engine.exportState(), base = Object.values(state.lanes).filter(lane=>lane.stage==="base")
+  assert.ok(base.some(lane=>lane.coordination==="normal"&&lane.baseObservation&&lane.calculationOnly))
+  assert.ok(base.every(lane=>lane.baseObservation||lane.coordination==="axis"))
+  assert.deepEqual(engine.snapshot().stages[0].baseCandidates,{observed:1,enoughSamples:1})
+  assert.ok(accepted.every(trade=>state.lanes[trade.admission![0].laneId].coordination==="axis"))
+  const restored = TradingEngine.fromOwnedCheckpoint(state)
+  assert.deepEqual(restored.snapshot(),engine.snapshot())
+  const catalog = restored.settings.catalog
+  restored.updateSettings({catalog:{...catalog,strategyStageCoordinations:{...selections,base:["normal"]}}})
+  assert.ok(restored.snapshot({laneLimit:Infinity}).lanes.every(lane=>!lane.current))
+  const timestamp = bars.at(-1)!.timestamp + 60_000
+  restored.processCandles(symbol,[{...makeBar(202),timestamp}],{allowExecution:true})
+  assert.equal(restored.pendingIntents().length,0,"a retired Axis branch cannot emit a new exchange intent")
+})
+
 test("each enabled coordination and chosen Short size forms a separately qualified Exec path", () => {
   const windows = checkExecWindows({
     base:{long:[10],short:[4],last:[1]},main:{long:["none"],short:[4],last:[1]},

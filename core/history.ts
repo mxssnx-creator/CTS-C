@@ -1,14 +1,15 @@
 import type { Candle as VenueCandle } from './bingx'
 import type { Candle } from './types'
+import { MIN_WARMUP_CANDLES, MAX_WARMUP_CANDLES, validWarmupCount } from './history-policy.mjs'
 
 interface HistorySource { candles(symbol:string,interval:string,limit:number,endTime?:number):Promise<VenueCandle[]> }
 const MINUTE = 60_000
 const MAX_PAGE_HISTORY_CANDLES = 4320
-export const MAX_WARMUP_CANDLES = 14 * 1440
+export { MAX_WARMUP_CANDLES }
 export interface HistoryPlan { count:number; cutoff:number; cursor:number|null }
 /** Fetch the oldest missing chunk first, even when the interruption exceeds the configured history size. */
 export function planHistory(configuredCount:number,cursor:number|null,now=Date.now()):HistoryPlan {
-  if(!Number.isInteger(configuredCount)||configuredCount<100||configuredCount>MAX_WARMUP_CANDLES)throw new Error(`History count must be 100..${MAX_WARMUP_CANDLES}`)
+  if(!validWarmupCount(configuredCount))throw new Error(`History count must be ${MIN_WARMUP_CANDLES}..${MAX_WARMUP_CANDLES}`)
   const latest=Math.floor(now/MINUTE)*MINUTE
   const page = Math.min(configuredCount,MAX_PAGE_HISTORY_CANDLES)
   if(cursor===null)return {count:page,cutoff:latest-(configuredCount-page)*MINUTE,cursor}
@@ -18,7 +19,7 @@ export function planHistory(configuredCount:number,cursor:number|null,now=Date.n
 }
 /** Reject gaps before mutating the indicator, stage or position ledger. */
 export function validateHistory(symbol:string,candles:Candle[],plan:HistoryPlan):void {
-  if(plan.cursor===null&&candles.length<plan.count)throw new Error(`Incomplete requested history for ${symbol}: ${candles.length}/${plan.count} candles`)
+  if(plan.cursor===null&&candles.length!==plan.count)throw new Error(`Unexpected history count for ${symbol}: ${candles.length}/${plan.count} candles`)
   const unseen=plan.cursor===null?candles:candles.filter(c=>c.timestamp>plan.cursor!)
   if(plan.cursor===plan.cutoff&&unseen.length===0)return
   if(!unseen.length||unseen.at(-1)!.timestamp!==plan.cutoff)throw new Error(`Incomplete observed history for ${symbol}`)

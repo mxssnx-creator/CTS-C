@@ -5,6 +5,7 @@ import { createServer } from 'node:net'
 import { loadEnvFile } from 'node:process'
 import { resolve, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { DEFAULT_WARMUP_CANDLES, MIN_WARMUP_CANDLES, MAX_WARMUP_CANDLES, validWarmupCount } from '../core/history-policy.mjs'
 
 export const STARTUP_REQUEST_TIMEOUT = 120_000
 export const OBSERVATION_REQUEST_TIMEOUT = 30_000
@@ -160,8 +161,8 @@ export async function runX02() {
     if (!canContinue()) return
     const symbolsIndex=process.argv.indexOf('--symbols'),symbolCount=symbolsIndex<0?50:Number(process.argv[symbolsIndex+1])
     if(!Number.isInteger(symbolCount)||symbolCount<1||symbolCount>500)throw new Error('--symbols must be 1..500')
-    const historyIndex=process.argv.indexOf('--history-candles'),historyCandles=historyIndex<0?4320:Number(process.argv[historyIndex+1])
-    if(!Number.isInteger(historyCandles)||historyCandles<100||historyCandles>4320)throw new Error('--history-candles must be 100..4320')
+    const historyIndex=process.argv.indexOf('--history-candles'),historyCandles=historyIndex<0?DEFAULT_WARMUP_CANDLES:Number(process.argv[historyIndex+1])
+    if(!validWarmupCount(historyCandles))throw new Error(`--history-candles must be ${MIN_WARMUP_CANDLES}..${MAX_WARMUP_CANDLES}`)
     // Keep all other saved configuration and ownership state. A fresh database uses engine defaults.
     await saveInitialSettings(request, { symbolCount, historyCandles, volumeFactor: .01,maxOrderNotional:10 }, { sleep, canContinue })
     if (!canContinue()) return
