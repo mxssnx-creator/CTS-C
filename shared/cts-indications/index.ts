@@ -1,3 +1,4 @@
+import { REVERSAL_BY_ID, trendReversalAt, trendReversalSeries } from "../cts-reversal/reversal.ts";
 import {StreamMath} from "./origin/indications/stream-math.ts";
 export {StreamMath};
 import {INDICATIONS,indicationState} from "./origin/indications/registry.ts";
@@ -31,6 +32,16 @@ export function portedStates(symbol:string,tfMin:number,rows:readonly PortedBar[
  k.setMarket(new MarketSource(marketBars));
  const states:Record<string,Int8Array>={},available:Record<string,boolean>={};
  for(const id of new Set(ids)){
+   const reversal = REVERSAL_BY_ID.get(id.startsWith("sig-trend-reversal-") ? id.slice(4) : id);
+   if (reversal) {
+     available[id] = [1, 5, 15, 30].includes(tfMin);
+     states[id] = !available[id] ? new Int8Array(b.n) : stream ? stream.run<{ value: Int8Array }, null>(
+       id, b.n, ["value"], () => null,
+       (i, out) => { out.value[i] = trendReversalAt(b, i, reversal.period, reversal.tactic, tfMin * 60_000); },
+       ["value"],
+     ).value : trendReversalSeries(b, reversal.period, reversal.tactic, tfMin * 60_000);
+     continue;
+   }
    const lowRange = lowRangeIds.has(id);
    if(!PORTED_BY_ID.has(id)&&!SIGNALS_BY_ID.has(id)&&!lowRange&&!isResearchTacticSource(id))throw new Error(`Unknown indication source ${id}`);
    const pair=/^inverse-pair-(btc|eth)-/.exec(id);

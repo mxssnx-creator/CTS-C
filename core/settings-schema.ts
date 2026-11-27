@@ -1,3 +1,4 @@
+import { REVERSAL_SOURCES } from "../shared/cts-reversal/reversal.ts"
 import { checkStageCoordinations } from "./stage-branches"
 import {checkBlockPolicy,type BlockPolicy} from "../shared/cts-lastn/blocks.ts";
 import {relationalVolumeSettings,DEFAULT_RELATIONAL_VOLUME} from "../shared/cts-volume/ratios.ts";
@@ -117,7 +118,7 @@ const ARRAY_FIELDS: Record<string, readonly (string | number)[]> = {
   strategyEnabledRanges: RANGES, strategyTpSteps: STEPS, strategySlRatios: RATIOS,
   strategyStopDistancePcts: SELECTABLE_STOP_DISTANCE_PCTS, strategyTrailDistancePcts: SELECTABLE_TRAIL_DISTANCE_PCTS,
   strategyExitModes: MODES, strategyIndicationTypes: INDICATIONS,
-  strategyIndicationSources:[...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES].map(s=>s.id),
+  strategyIndicationSources:[...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...REVERSAL_SOURCES].map(s=>s.id),
   strategyLowRangeSources:LOW_RANGE_IDS,
   strategySignalsSources:SIGNALS_CATALOG.map(s=>s.id),
   strategySignalPeriods:[10,14,20,40,60],strategyCoreSignalPeriods:CORE_SIGNAL_PERIODS,strategySignalTimeframes:SIGNAL_TIMEFRAMES,
@@ -139,7 +140,7 @@ export const FACTOR_FIELDS = [
 ]
 export const ALL_NUMERIC_FIELDS = [...AUTO_PF_FIELDS, ...NUMERIC_FIELDS, EXEC_PF_FIELD, ...COST_FIELDS, ...EXECUTION_FIELDS, ...COORDINATION_FIELDS, ...FACTOR_FIELDS]
 
-const sourceKinds=new Map([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES].map(s=>[s.id,s.kind]))
+const sourceKinds=new Map([...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...REVERSAL_SOURCES].map(s=>[s.id,s.kind]))
 export function configurationCount(values: Record<string, unknown>) {
   const ranges = values.strategyEnabledRanges as string[]
   const types=values.strategyIndicationTypes as string[]
@@ -157,19 +158,21 @@ export function configurationCount(values: Record<string, unknown>) {
     cells += count
     if (range === "Low-Range" && LOW_RANGE_STEPS.some(candidate => candidate === step)) lowRangeCells += count
   }
-  const portedTypes=types.filter(t=>t==='Tactic'||t==='Inverse')
+  const portedTypes=types.filter(t=>["Tactic","Inverse","Trend-Reversal"].includes(t))
   const sourceIds=values.strategyIndicationSources as string[]
   const timeframes = values.strategySignalTimeframes as number[]
   const extra=portedTypes.reduce((n,t)=>n+sourceIds.filter(id=>sourceKinds.get(id)===t.toLowerCase())
-    .reduce((sum,id)=>sum+timeframes.filter(tf=>t==='Inverse'?[1,5,15].includes(tf):supportsTacticTimeframe(id,tf)).length,0),0)
-  const signals=types.includes('Signals')?1:0,signalSources=(values.strategySignalsSources??DEFAULT_SIGNALS_SOURCES) as string[]
+    .reduce((sum,id)=>sum+timeframes.filter(tf=>t==='Inverse'?[1,5,15].includes(tf):t==='Trend-Reversal'?[1,5,15,30].includes(tf):supportsTacticTimeframe(id,tf)).length,0),0)
+  const signalSources=(values.strategySignalsSources??DEFAULT_SIGNALS_SOURCES) as string[]
+  const signals=types.includes("Signals") ? signalSources.reduce((n,id) =>
+    n + timeframes.filter(tf => !id.startsWith("sig-trend-reversal-") || [1,5,15,30].includes(tf)).length, 0) : 0
   const hasLowRange = types.includes("Low-Range")
   const lowRangeSources = (values.strategyLowRangeSources ?? DEFAULT_LOW_RANGE_SOURCES) as string[]
   const lowRangeCount = hasLowRange
     ? lowRangeCells * lowRangeSources.length * timeframes.filter(tf => LOW_RANGE_TIMEFRAMES.some(minutes => tf === minutes)).length : 0
-  const native = types.filter(type=>!["Tactic","Inverse","Signals","Low-Range"].includes(type)).reduce((count,type)=>
+  const native = types.filter(type=>!["Tactic","Inverse","Trend-Reversal","Signals","Low-Range"].includes(type)).reduce((count,type)=>
     count+indicationPeriods(type,values.strategySignalPeriods as number[],(values.strategyCoreSignalPeriods??[0]) as number[]).length,0)
-  const count = lowRangeCount + cells * ((native+signals*signalSources.length)*timeframes.length+extra)
+  const count = lowRangeCount + cells * (native*timeframes.length+signals+extra)
   return values.stageGateMode === "exec-branches" ? count : count * lastNVariantCount((values.strategyLastNGrid ?? {}) as LastNGrid)
 }
 

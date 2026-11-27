@@ -1,4 +1,5 @@
 "use client"
+import { REVERSAL_SOURCES } from "@/shared/cts-reversal/reversal"
 import {BlockPolicyFields} from "../../shared/cts-lastn/fields";
 import type {BlockPolicy} from "../../shared/cts-lastn/blocks";
 import {PORTED_CATALOG,DEFAULT_TACTIC_SOURCES,DEFAULT_INVERSE_SOURCES} from "@/shared/cts-indications/catalog"
@@ -30,7 +31,7 @@ const EXIT_LABELS: Record<ExitMode, string> = {
   "trailing-fixed": "Fixed-distance trailing",
   "trailing-only-fixed": "Fixed-distance trailing-only",
 }
-const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES]
+const STRATEGY_SOURCES = [...PORTED_CATALOG,...RESEARCH_TACTIC_SOURCES,...REVERSAL_SOURCES]
 const OSCILLATOR_FAMILIES = [["RSI configurations",[...RSI_VARIANTS,...RSI_CONTINUATION_SOURCES]],["Parabolic SAR configurations",[...PARABOLIC_SAR_VARIANTS,...SAR_CONTINUATION_SOURCES]]] as const
 const OSCILLATOR_IDS = new Set<string>(OSCILLATOR_FAMILIES.flatMap(([,sources])=>sources.map(source=>source.id)))
 
@@ -169,11 +170,11 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
     <>
     <form onSubmit={save} className="space-y-5">
       <fieldset disabled={busy || saving || importing} className="min-w-0 space-y-5">
-      <section className="terminal-panel space-y-3 p-5"><h3 className="text-sm font-semibold">Tactic & Inverse · independent indication sources</h3><p className="terminal-muted text-xs">Tactic includes conventional indicators, RSI momentum, quarter-hour order flow and DCA recovery. Inverse qualifies its own results. Market and pair sources require observed reference symbols.</p>
+      <section className="terminal-panel space-y-3 p-5"><h3 className="text-sm font-semibold">Tactic, Inverse and Trend-Reversal sources</h3><p className="terminal-muted text-xs">Tactic includes conventional indicators, RSI momentum, quarter-hour order flow and DCA recovery. Inverse qualifies its own results. Market and pair sources require observed reference symbols.</p>
         <button type="button" className="terminal-button" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic','Inverse'])]);change('strategyIndicationSources',[...DEFAULT_TACTIC_SOURCES,...DEFAULT_INVERSE_SOURCES])}}>Prepare Tactic + Inverse</button>
         <button type="button" className="terminal-button ml-2" onClick={()=>{change('strategyIndicationTypes',[...new Set([...(draft.strategyIndicationTypes as string[]),'Tactic'])]);change('strategyIndicationSources',[...new Set([...(draft.strategyIndicationSources as string[]),...RESEARCH_TACTIC_SOURCES.filter(source=>!OSCILLATOR_IDS.has(source.id)).map(source=>source.id)])])}}>Add indicator variants</button>
         <label className="block text-xs">Search source configurations<input className="terminal-input mt-2 w-full" value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} placeholder="Decline, recovery, trend, pair…" /></label>
-        <label className="block text-xs">Independent source configurations<select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Tactic and Inverse source configurations" value={draft.strategyIndicationSources as string[]} onChange={e=>change('strategyIndicationSources',Array.from(e.target.selectedOptions,o=>o.value))}>{sourceChoices.map(s=><option key={s.id} value={s.id}>{s.label} · {s.id}</option>)}</select></label>
+        <label className="block text-xs">Independent source configurations<select multiple size={7} className="terminal-input mt-2 w-full" aria-label="Independent indication source configurations" value={draft.strategyIndicationSources as string[]} onChange={e=>change('strategyIndicationSources',Array.from(e.target.selectedOptions,o=>o.value))}>{sourceChoices.map(s=><option key={s.id} value={s.id}>{s.label} · {s.id}</option>)}</select></label>
         <p className="terminal-muted text-xs">{(draft.strategyIndicationSources as string[]).length} selected · {STRATEGY_SOURCES.length} available. Conventional and RSI momentum variants also support 60m. Inverse and quarter-hour sources use 1/5/15m.</p>
         <details className="space-y-3 border-t border-[var(--terminal-border)] pt-4">
           <summary className="cursor-pointer text-sm font-semibold">RSI and Parabolic SAR</summary>

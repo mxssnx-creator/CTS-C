@@ -1,6 +1,6 @@
 export const CORE_INDICATIONS = ["MA_Cross", "RSI_Band", "MACD_Signal", "Bollinger_Bounce"] as const
 export const TECHNICAL_INDICATIONS = ["Trend","Trend_ADX","Trend_Efficiency","Trend_Fade","Break","Break_ATR","Break_Volume","Break_Retest","Break_Reversal","Break_Continuation"] as const
-export const LEGACY_INDICATIONS = [...CORE_INDICATIONS,"MA_Inverse","Trend_Pullback","RSI_Momentum","Bollinger_Breakout",...TECHNICAL_INDICATIONS,"Tactic","Inverse"] as const
+export const LEGACY_INDICATIONS = [...CORE_INDICATIONS,"MA_Inverse","Trend_Pullback","RSI_Momentum","Bollinger_Breakout",...TECHNICAL_INDICATIONS,"Tactic","Inverse","Trend-Reversal"] as const
 export const INDICATIONS = [...LEGACY_INDICATIONS,"Signals","Low-Range"] as const
 
 export const CORE_SIGNAL_PERIODS = [0,5,8,10,14,20,30,40,60] as const

@@ -1,3 +1,4 @@
+import { REVERSAL_SOURCES } from "../cts-reversal/reversal.ts"
 import sources from './signals-sources.json'
 
 /** Pure metadata/identities, safe to share with Settings without importing indicator computations. */
@@ -17,6 +18,7 @@ export function signalsCoordinationId(names:readonly string[],ratio:number,minSo
   return `sig-coord-v2-r${Math.round(ratio*100)}-n${minSources}-i${mask}-b${bits.toString(36)}`
 }
 export const SIGNALS_CATALOG:readonly {id:string;label:string;category:string;variant:string}[]=[
+  ...REVERSAL_SOURCES.map(source => ({ id: `sig-${source.id}`, label: source.label, category: "Trend-Reversal", variant: "source" })),
   ...sources.flatMap(s=>['short','medium'].map(variant=>({id:s[variant as 'short'|'medium'],label:`${s.label} · ${variant}`,category:s.name.startsWith('r-')?'Research':s.name.startsWith('s2-')?'Legacy':'Source',variant}))),
   ...Object.entries(pools).flatMap(([category,names])=>SIGNAL_RATIOS.flatMap(ratio=>[2,3,5].flatMap(min=>[1,2,3].map(mask=>({id:signalsCoordinationId(names,ratio,min,mask),label:`${category} · ${Math.round(ratio*100)}% band · minimum ${min} sources · ${mask===1?'short':mask===2?'medium':'both'}`,category,variant:'coordination'})))))
 ]
