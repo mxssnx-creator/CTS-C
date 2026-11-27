@@ -12,7 +12,7 @@ async function main() {
   const active = mode === "profile"
   const symbols=Array.from({length:active?50:500},(_,i)=>`PERF${i+1}-USDT`)
   const catalog = active ? {...DEFAULT_ENGINE_SETTINGS.catalog,strategyTrendDcaEnabled:true,strategySarDcaEnabled:true,
-    strategyEnabledRanges:["Minimal"],strategyIndicationTypes:["MA_Cross"],strategyTpSteps:[6],strategySlRatios:[1],strategyExitModes:["fixed"]}
+    strategyEnabledRanges:["Minimal"],strategyIndicationTypes:["MA_Cross"],strategyTpSteps:[6],strategyShortStopPcts:[.6],strategyLongStopPcts:[],strategySlRatios:[1],strategyExitModes:["fixed"]}
     : {...DEFAULT_ENGINE_SETTINGS.catalog,strategyTrendDcaEnabled:false}
   const build=(sign:number): Candle[] => {
     let close=100
@@ -47,7 +47,8 @@ async function main() {
     assert.ok(live.longOpen>0&&live.shortOpen>0)
     assert.ok(heapMiB<200,`Active profile retained ${heapMiB.toFixed(1)} MiB`)
   } else {
-    assert.equal(snapshot.catalogCount,252)
+    const hasFixedBands = DEFAULT_ENGINE_SETTINGS.catalog.strategyShortStopPcts !== undefined
+    assert.equal(snapshot.catalogCount,hasFixedBands ? 1140 : 252)
     assert.equal(exec.executed!.closed,0)
     if(source===".")assert.ok(catalogMiB<8,`Shared catalog retained ${catalogMiB.toFixed(1)} MiB`)
   }
