@@ -15,7 +15,7 @@ test('ported entry events equal original AO Follow onsets on every closed candle
  }
 });
 test('Tactic and Inverse catalog expansion preserves own source identities, timeframe gates, and saved controls',()=>{
- const cfg={...DEFAULTS,strategyIndicationTypes:['Tactic','Inverse'],strategyIndicationSources:['inverse-known-ema-9-21','tactic-dca-sweep-20-percent-0.5-2-0.25'],strategySignalTimeframes:[1,5,15,30],strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed']};
+ const cfg={...DEFAULTS,strategyShortStopPcts:[.3],strategyIndicationTypes:['Tactic','Inverse'],strategyIndicationSources:['inverse-known-ema-9-21','tactic-dca-sweep-20-percent-0.5-2-0.25'],strategySignalTimeframes:[1,5,15,30],strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:['fixed']};
  const v=validateConfiguration(cfg);assert.deepEqual(hydrate(Object.fromEntries(Object.entries(v).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)]))),v);
  const configs=generateStrategyCatalog('test',v);assert.equal(configs.length,7);assert.equal(configurationCount(v),7);assert.equal(new Set(configs.map(c=>c.id)).size,7);assert.ok(configs.every(c=>c.indicationSourceId));assert.ok(configs.filter(c=>c.type==='Inverse').every(c=>c.signalTimeframeMinutes!==30));
 });
@@ -23,7 +23,7 @@ test('Tactic and Inverse catalog expansion preserves own source identities, time
 test("Low-Range ports each source and supported timeframe into its own Low-Range Set", () => {
  const ids = ["low-range-6-edge-turn-standalone", "low-range-6-breakout-activity"]
  const settings = validateConfiguration({
-  ...DEFAULTS, strategyIndicationTypes: ["Low-Range"], strategyLowRangeSources: ids,
+  ...DEFAULTS, strategyShortStopPcts:[.3], strategyIndicationTypes: ["Low-Range"], strategyLowRangeSources: ids,
   strategyEnabledRanges: ["Micro", "Low-Range"], strategySignalTimeframes: [1, 5, 15, 30],
   strategyTpSteps: [2, 6, 8], strategySlRatios: [1], strategyExitModes: ["trailing", "trailing-fixed"],
  })
@@ -87,12 +87,12 @@ test("Wilder RSI reclaim and momentum trigger differently and SAR acceleration k
   assert.ok(output[ids[3]].includes(1)&&output[ids[3]].includes(-1))
   const settings = validateConfiguration({...DEFAULTS,strategyEnabledRanges:["Micro"],strategyTpSteps:[3],
     strategyIndicationTypes:["Tactic"],strategyIndicationSources:THIN_OSCILLATOR_SOURCE_IDS,
-    strategyPriceDistancesEnabled:true,strategyStopDistancePcts:[.1,.15],strategyTrailDistancePcts:[.05,.1,.15],
+    strategyPriceDistancesEnabled:true,strategyShortStopPcts:[.2,.3],strategyTrailDistancePcts:[.05,.1,.15],
     strategyExitModes:["fixed","trailing-fixed"]})
   const configs = generateStrategyCatalog("oscillator-test",settings)
   assert.equal(configs.length,64)
   assert.equal(configurationCount(settings),configs.length)
   assert.equal(new Set(configs.map(config=>config.id)).size,configs.length)
-  assert.deepEqual(new Set(configs.map(config=>config.stoploss)),new Set([.001,.0015]))
+  assert.deepEqual(new Set(configs.map(config=>config.stoploss)),new Set([.002,.003]))
   assert.deepEqual(new Set(configs.filter(config=>config.trailing).map(config=>config.trailDistancePct)),new Set([.05,.1,.15]))
 })

@@ -20,7 +20,7 @@ import {formatProfitFactor} from './profit-factor'
 import { DEFAULT_EXIT_MODES, type ProfitFactorState, type Stage, type Coordination, type ExitMode } from '@/core/types'
 
 import { RANGES, STEPS, RATIOS, BALANCED_STEPS, BALANCED_RATIOS, MODES, INDICATIONS, DEFAULTS, NUMERIC_FIELDS, EXEC_PF_FIELD, SIGNAL_PF_FIELD, AUTO_PF_FIELDS, COST_FIELDS, COORDINATION_FIELDS, EXECUTION_FIELDS, FACTOR_FIELDS, configurationCount, validateConfiguration, hydrate } from "@/core/settings-schema"
-import { SELECTABLE_STOP_DISTANCE_PCTS, SELECTABLE_TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
+import { STOP_BANDS, SELECTABLE_TRAIL_DISTANCE_PCTS } from "@/core/protection-grid"
 import { BRANCH_COORDINATIONS, type StageCoordinations } from "@/core/stage-branches"
 import { EXEC_EVALUATION_STAGES, EXEC_LONG_COUNTS, EXEC_LAST_COUNTS, EXEC_LONG_MODES, EXEC_OUTCOMES, POSITIVE_EXEC_OUTCOME, LAST_N_STAGES, execPathCount, stageShortCounts, type ExecWindows, type LastNGrid } from "@/core/last-n-grid"
 
@@ -258,13 +258,15 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
       <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
         <div className="space-y-5">
           <section className="terminal-panel space-y-7 p-5">
-            <MultiChoice title="Strategy ranges" description="Micro 2–5 · Low-Range 2–8 · Minimal 6–8 · Short 9–12 · Normal 13–18 · Long 19–24 · Wide 25–30 TP steps." values={RANGES} selected={selected("strategyEnabledRanges")} onChange={value => change("strategyEnabledRanges", value)} />
-            <MultiChoice title="Take-profit steps" description="TP distance = estimated round-trip position cost × selected step. Only steps within enabled ranges produce configurations." values={STEPS} selected={selected("strategyTpSteps")} onChange={value => change("strategyTpSteps", value)} />
-            <label className="flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.strategyPriceDistancesEnabled === true} onChange={event => change("strategyPriceDistancesEnabled", event.target.checked)} />Use price percentages for stop-loss and trailing</label>
-            {draft.strategyPriceDistancesEnabled === true ? <>
-              <MultiChoice title="Stop-loss price distance" description="Each selected distance creates its own Set. Micro and Low-Range enforce their configured minimum distance." values={SELECTABLE_STOP_DISTANCE_PCTS} selected={selected("strategyStopDistancePcts")} onChange={value => change("strategyStopDistancePcts", value)} format={value => Number(value).toFixed(2) + "%"} />
-              <MultiChoice title="Trailing price gap" description="Each selected gap has independent dynamic and fixed-distance Sets when those exit modes are enabled." values={SELECTABLE_TRAIL_DISTANCE_PCTS} selected={selected("strategyTrailDistancePcts")} onChange={value => change("strategyTrailDistancePcts", value)} format={value => Number(value).toFixed(2) + "%"} />
-            </> : <MultiChoice title="Stop-loss / take-profit ratio" description="Each ratio creates an independent configuration. SL distance = TP distance × ratio. Micro and Low-Range use 0.2–1.6 in 0.1 steps." values={RATIOS} selected={selected("strategySlRatios")} onChange={value => change("strategySlRatios", value)} format={value => Number(value).toFixed(1) + "×"} />}
+            <MultiChoice title="Strategy ranges" description="Micro 1–5 · Low-Range 2–8 · Minimal 6–8 · Short 9–12 · Normal 13–18 · Long 19–24 · Wide 25–50 TP steps." values={RANGES} selected={selected("strategyEnabledRanges")} onChange={value => change("strategyEnabledRanges", value)} />
+            <MultiChoice title="Take-profit steps" description="Each step is 0.1% of price before the TP factor. Only steps within enabled ranges produce configurations." values={STEPS} selected={selected("strategyTpSteps")} onChange={value => change("strategyTpSteps", value)} />
+            {(["short", "long"] as const).map(band => {
+              const key = band === "short" ? "strategyShortStopPcts" : "strategyLongStopPcts"
+              const b = STOP_BANDS[band]
+              return <MultiChoice key={band} title={`Fixed SL for TP ${b.minTpPct}–${b.maxTpPct}%`} description="Each stop has independent stage evidence in this TP band." values={b.stops} selected={selected(key)} onChange={v => change(key,v)} format={v => Number(v).toFixed(1)+"%"} />
+            })}
+            <label className="flex items-center gap-3 text-xs"><input type="checkbox" checked={draft.strategyPriceDistancesEnabled === true} onChange={e => change("strategyPriceDistancesEnabled", e.target.checked)} />Use explicit trailing gaps</label>
+            {draft.strategyPriceDistancesEnabled === true && <MultiChoice title="Trailing price gap" description="Percentage of entry price" values={SELECTABLE_TRAIL_DISTANCE_PCTS} selected={selected("strategyTrailDistancePcts")} onChange={value => change("strategyTrailDistancePcts", value)} format={value => Number(value).toFixed(2)+"%"} />}
             <MultiChoice title="Exit modes" description="Fixed-distance trailing keeps the original entry-price offset. Dynamic trailing recalculates the gap from each new peak." values={MODES} selected={selected("strategyExitModes")} onChange={value => change("strategyExitModes", value)} format={mode => EXIT_LABELS[mode as ExitMode]} />
             <MultiChoice title="Indications" description="Each selected indication evaluates its own configuration history." values={INDICATIONS} selected={selected("strategyIndicationTypes")} onChange={value => change("strategyIndicationTypes", value)} format={value => String(value).replaceAll("_", " ")} />
             <MultiChoice title="Trend & Break lookbacks" description="Each lookback has an independent Set." values={[10,14,20,40,60]} selected={selected('strategySignalPeriods')} onChange={value=>change('strategySignalPeriods',value)} />

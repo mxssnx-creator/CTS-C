@@ -1,3 +1,4 @@
+import { STOP_BANDS } from "../shared/cts-protection/fixed-stop-bands.ts"
 import preset from "../research-data/exec-dca-trend-preset.json"
 import type { Coordination, EngineSettings } from "./types"
 import { checkExecWindows } from "./last-n-grid"
@@ -45,6 +46,8 @@ export function execProfileEnabled(settings: EngineSettings, profile: ExecProfil
 
 /** Adopt the product default for old checkpoints without overriding a saved preference. */
 export function withDefaultExecProfile(settings: EngineSettings): EngineSettings {
+  if (settings.catalog.strategyShortStopPcts === undefined || settings.catalog.strategyLongStopPcts === undefined)
+    settings = {...settings,catalog:{strategyShortStopPcts:STOP_BANDS.short.stops,strategyLongStopPcts:STOP_BANDS.long.stops,...settings.catalog}}
   const defaults = EXEC_PROFILES.filter(profile=>settings.catalog[profile.setting]===undefined)
   if (!defaults.length) return settings
   return {...settings,catalog:{...settings.catalog,...Object.fromEntries(defaults.map(profile=>[profile.setting,profile.enabledByDefault]))}}

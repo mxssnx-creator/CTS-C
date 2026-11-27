@@ -3,7 +3,7 @@ import { test } from "node:test"
 import { generateStrategyCatalog } from "../core/catalog"
 import { DEFAULT_ENGINE_SETTINGS, TradingEngine } from "../core/engine"
 import { LAST_N_STAGES } from "../core/last-n-grid"
-import { STOP_DISTANCE_PCTS, TRAIL_DISTANCE_PCTS } from "../core/protection-grid"
+import { STOP_BANDS, TRAIL_DISTANCE_PCTS } from "../core/protection-grid"
 import { DEFAULTS, configurationCount, hydrate, validateConfiguration } from "../core/settings-schema"
 import { EXIT_MODES, type Candle } from "../core/types"
 
@@ -12,10 +12,10 @@ test("all exact protection distances and both trailing types have their own cata
     strategyIndicationTypes: ["Trend"], strategyExitModes: [...EXIT_MODES], strategyPriceDistancesEnabled: true,
     strategyLastNGrid: { base: [8, 12] }, autoPfEnabled: true })
   const rows = generateStrategyCatalog("offline", settings)
-  assert.equal(rows.length, 2 * 21 * (1 + 25 * 4))
+  assert.equal(rows.length, 2 * (15 + 12) * (1 + 25 * 4))
   assert.equal(configurationCount(settings), rows.length)
   assert.equal(new Set(rows.map(row => row.id)).size, rows.length)
-  assert.deepEqual([...new Set(rows.map(row => +(row.stoploss * 100).toFixed(1)))], STOP_DISTANCE_PCTS)
+  assert.deepEqual([...new Set(rows.map(row => +(row.stoploss * 100).toFixed(1)))], [...new Set([...STOP_BANDS.short.stops,...STOP_BANDS.long.stops])])
   assert.deepEqual([...new Set(rows.filter(row => row.trailing).map(row => row.trailDistancePct))], TRAIL_DISTANCE_PCTS)
   assert.ok(rows.every(row => (row.autoPfPolicy?.fallback ?? 0) > 1 && row.stageLastN?.base))
   assert.deepEqual(hydrate(Object.fromEntries(Object.entries(settings).map(([key, value]) =>
@@ -65,3 +65,18 @@ test("Base, Main, Real and restored Live retain the owning exact geometry and La
   }
   assert.deepEqual(restored.pendingIntents(), [])
 })
+
+
+test("fixed stops use the saved inclusive ratio ceiling and retain both overlapping band owners", () => {
+  const base = {...DEFAULTS, strategyEnabledRanges:["Micro","Short"], strategyIndicationTypes:["Trend"],
+    strategyExitModes:["fixed"], strategyTpSteps:[4,12], strategyShortStopPcts:[.4,1,1.1], strategyLongStopPcts:[.4,2.6]};
+  for (const limit of [.5,1,2.5]) {
+    const settings=validateConfiguration({...base,maxStopLossRatio:limit});
+    const rows=generateStrategyCatalog("test",settings);
+    assert.equal(configurationCount(settings),rows.length);
+    assert.ok(rows.every(r=>r.stoploss<=r.takeprofit*limit+1e-12));
+    const overlap=rows.filter(r=>r.tpStep===12 && r.stoploss===.004);
+    assert.equal(new Set(overlap.map(r=>r.id)).size,2);
+    if(limit===2.5)assert.deepEqual(rows.filter(r=>r.tpStep===4).map(r=>r.stoploss),[.004,.01]);
+  }
+});

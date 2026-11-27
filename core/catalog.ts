@@ -8,7 +8,7 @@ import { DEFAULT_EXIT_MODES, EXIT_MODES, type EngineSettings, type StrategyConfi
 import { createHash } from "node:crypto"
 import { resolveTradingCostPct } from "./metrics"
 import { CORE_INDICATIONS, CORE_SIGNAL_PERIODS, INDICATIONS,TECHNICAL_INDICATIONS, indicationPeriods } from "./indications"
-import { EXPANDED_CATALOG_MAX, priceProtection, protectionVariants } from "./protection-grid"
+import { EXPANDED_CATALOG_MAX, STOP_BANDS, priceProtection, protectionVariants } from "./protection-grid"
 import { checkLastNGrid, lastNVariants } from "./last-n-grid"
 import { AUTO_PF_DEFAULTS, autoPfPolicy } from "./auto-pf"
 import { RESEARCH_TACTIC_SOURCES, SIGNAL_TIMEFRAMES, supportsTacticTimeframe } from "../shared/cts-indications/research-sources"
@@ -19,14 +19,14 @@ export const STRATEGY_RANGES = ["Micro", "Minimal", "Short", "Normal", "Long", "
 export const STRATEGY_TYPES = INDICATIONS
 export { EXIT_MODES, type ExitMode } from "./types"
 export type StrategyRange = typeof STRATEGY_RANGES[number]
-const bounds = [5, 8, 12, 18, 24, 30]
+const bounds = [5, 8, 12, 18, 24, 50]
 const holdMinutes = [15, 30, 60, 240, 720, 1440]
 const distanceKey = (pct:number) => {
   const tenths = Math.round(pct*10)
   return Math.abs(pct*10-tenths)<1e-9 ? String(tenths) : `${Math.round(pct*100)}bps`
 }
 export function strategyRangeForStep(step: number): StrategyRange {
-  if (!Number.isInteger(step) || step < 2 || step > 30) throw new Error("TP step must be an integer from 2 to 30")
+  if (!Number.isInteger(step) || step < 1 || step > 50) throw new Error("TP step must be an integer from 1 to 50")
   return STRATEGY_RANGES[bounds.findIndex(bound => step <= bound)]
 }
 function values(settings: Record<string, unknown>, name: string, defaults: readonly unknown[]): unknown[] {
@@ -42,7 +42,7 @@ function selected<T extends string>(settings: Record<string, unknown>, name: str
   return parsed as T[]
 }
 /** Complete, deterministic Cartesian catalog. No head truncation can silently omit a tactic or range. */
-export function generateStrategyCatalog(connectionId: string, settings: Record<string, unknown> = {}, now = new Date().toISOString()): StrategyConfig[] {
+export function generateStrategyCatalog(connectionId: string, settings: Record<string, unknown> = {strategyShortStopPcts:STOP_BANDS.short.stops, strategyLongStopPcts:STOP_BANDS.long.stops}, now = new Date().toISOString()): StrategyConfig[] {
   if(settings.relationalVolumeRatios!==undefined)relationalVolumeSettings(settings.relationalVolumeRatios,true)
   for (const key of ["strategyNormalEnabled", "strategyTrailingEnabled"]) if (settings[key] !== undefined && typeof settings[key] !== "boolean") throw new Error(`${key} must be boolean`)
   if (settings.strategyProcessingByRange !== undefined) validateProcessingByRange(settings.strategyProcessingByRange)
@@ -53,13 +53,14 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   if(!periods.length||periods.some(p=>![10,14,20,40,60].includes(p))||!timeframes.length||timeframes.some(t=>!SIGNAL_TIMEFRAMES.some(tf=>tf===t)))throw new Error('Unsupported signal periods or timeframes')
   const commonPeriods=values(settings,"strategyCoreSignalPeriods",[0]).map(Number)
   if (!commonPeriods.length||commonPeriods.some(p=>!CORE_SIGNAL_PERIODS.some(period=>period===p))) throw new Error("Unsupported common indication periods")
-  const steps = [...new Set(values(settings, "strategyTpSteps", Array.from({length: 29}, (_, i) => i + 2)).map(Number))]
-  if (steps.some(step => !Number.isInteger(step) || step < 2 || step > 30)) throw new Error("strategyTpSteps must contain integers 2..30")
+  const price = priceProtection(settings)
+  const defaultSteps = price.fixedStops ? Array.from({length:50}, (_, i) => i+1) : Array.from({length:29}, (_, i) => i+2)
+  const steps = [...new Set(values(settings, "strategyTpSteps", defaultSteps).map(Number))]
+  if (steps.some(step => !Number.isInteger(step) || step < 1 || step > 50)) throw new Error("strategyTpSteps must contain integers 1..50")
   const ratios = [...new Set(values(settings, "strategySlRatios", Array.from({length: 15}, (_, i) => (i + 2) / 10)).map(Number))]
   if (ratios.some(r => !Number.isFinite(r) || r < .2 || r > 2.2 || Math.abs(r * 10 - Math.round(r * 10)) > 1e-9)) throw new Error("strategySlRatios must be 0.2..2.2 in steps of 0.1")
-  const price = priceProtection(settings)
   const windowVariants = lastNVariants(checkLastNGrid(settings.strategyLastNGrid))
-  const expanded = price.enabled || windowVariants[0] !== undefined
+  const expanded = !!price.fixedStops || price.enabled || windowVariants[0] !== undefined
   for (const key of ["makerFeePct", "takerFeePct", "slippagePctOfFees"]) {
     if (settings[key] !== undefined && (!Number.isFinite(Number(settings[key])) || Number(settings[key]) < 0 || Number(settings[key]) > 100)) throw new Error(`Invalid ${key}`)
   }
@@ -83,14 +84,14 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
   const distancePf = settings.autoPfEnabled === true && !adaptivePf
   const autoPfRatio=Number(settings.autoPfRatio??AUTO_PF_DEFAULTS.autoPfRatio),autoPfMax=Number(settings.autoPfMax??AUTO_PF_DEFAULTS.autoPfMax)
   const configs: StrategyConfig[] = []
-  const variants = new Map(ranges.map(range => [range, protectionVariants(range,
-    modes.filter(mode => mode === "fixed" || strategyProcessing(settings, { range }).trailing),
-    ratios, price, microDistance('microMinSlDistancePct', .1), microMinTrail)]))
   for (const step of steps) for(const range of [strategyRangeForStep(step),...(step<=8?["Low-Range" as const]:[])]) {
     if (!ranges.includes(range)) continue
+    const takeprofit = (price.fixedStops ? step / 1000 : cost / 100 * step) * tpFactor
+    const variants = protectionVariants(range, modes.filter(mode => mode === "fixed" || strategyProcessing(settings, { range }).trailing),
+      ratios, price, microDistance('microMinSlDistancePct', .1), microMinTrail, takeprofit * 100)
     const applicableTypes = range === "Low-Range" && LOW_RANGE_STEPS.some(candidate => candidate === step)
       ? types : types.filter(type => type !== "Low-Range")
-    for (const type of applicableTypes) for (const indicationSourceId of sourceList(type)) for (const geometry of variants.get(range)!) {
+    for (const type of applicableTypes) for (const indicationSourceId of sourceList(type)) for (const geometry of variants) {
      const { exitMode, stopPct, trailPct } = geometry
      const technical=(TECHNICAL_INDICATIONS as readonly string[]).includes(type),ported=!!indicationSourceId
      for(const period of periodsByType.get(type)!)for(const timeframe of timeframes){
@@ -98,7 +99,6 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
       if(type==='Tactic'&&!supportsTacticTimeframe(indicationSourceId!,timeframe))continue
       if(indicationSourceId?.includes("trend-reversal-") && ![1,5,15,30].includes(timeframe))continue
       if (type === "Low-Range" && !LOW_RANGE_TIMEFRAMES.some(minutes => minutes === timeframe)) continue
-      const takeprofit = cost / 100 * step*tpFactor
       const micro=range==="Micro"||range==="Low-Range"
       const stoploss = stopPct === undefined ? Math.max(takeprofit * geometry.ratio * slFactor, micro ? microMinSl : 0) : stopPct / 100
       const ratio = geometry.ratio ?? stoploss / takeprofit
@@ -109,7 +109,7 @@ export function generateStrategyCatalog(connectionId: string, settings: Record<s
       const maxHoldMinutes = (range==="Low-Range"?15:holdMinutes[STRATEGY_RANGES.indexOf(range)])*holdFactor
       const autoPfFloor=distancePf?Math.max(1.01,Math.min(autoPfMax,1+Math.floor(takeprofit*1000+1e-9)/10*autoPfRatio)):undefined
       const economics = createHash("sha256").update(JSON.stringify([type, takeprofit, stoploss, cost, maxHoldMinutes, lookback, exitMode,trailDistancePct, "ratcheted-trailing-v2",...(indicationSourceId?[indicationSourceId]:[]),...(timeframe!==1||technical||ported?[timeframe,'closed-ohlcv-v1']:[]),autoPfFloor,...(adaptivePf?["set-auto-pf-v1",adaptivePf]:[]),...(type==='Signals'?['signals-risk-v1',maxWindowDrawdownPct]:[])])).digest("hex").slice(0, 20)
-      const distanceId = stopPct === undefined ? `sl${Math.round(ratio * 10)}` : `sp${distanceKey(stopPct)}_gp${distanceKey(trailPct!)}`
+      const distanceId = stopPct === undefined ? `sl${Math.round(ratio * 10)}` : `sp${distanceKey(stopPct)}_gp${distanceKey(trailDistancePct)}${geometry.band ? "_"+geometry.band : ""}`
       const id = `v4_${type}_${range}_tp${step}_${distanceId}_${exitMode}_${economics}`
       if (expanded && configs.length + windowVariants.length > EXPANDED_CATALOG_MAX) {
         throw new Error(`Expanded catalog exceeds ${EXPANDED_CATALOG_MAX} configurations. Select fewer distances, sources, timeframes or windows.`)
@@ -138,7 +138,7 @@ export function generateEngineCatalog(settings: EngineSettings, fees?: NonNullab
   for (const profile of EXEC_PROFILES) if (execProfileEnabled(settings,profile)) {
     for (const variant of profile.catalogs) {
       const geometries = generateStrategyCatalog(settings.connectionId,{
-        ...preset,...variant,makerFeePct:catalog.makerFeePct,takerFeePct:catalog.takerFeePct,slippagePctOfFees:catalog.slippagePctOfFees,
+        ...preset,...variant,maxStopLossRatio:catalog.maxStopLossRatio,strategyShortStopPcts:catalog.strategyShortStopPcts,strategyLongStopPcts:catalog.strategyLongStopPcts,makerFeePct:catalog.makerFeePct,takerFeePct:catalog.takerFeePct,slippagePctOfFees:catalog.slippagePctOfFees,
       },createdAt)
       for (const geometry of geometries) configs.push({...geometry,id:`${geometry.id}.${profile.id}`,execProfile:profile.id})
     }

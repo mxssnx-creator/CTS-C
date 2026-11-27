@@ -11,7 +11,7 @@ const catalog={strategyTpSteps:[3,10],strategySlRatios:[1],strategyExitModes:["f
 const bars:Candle[]=Array.from({length:600},(_,i)=>{const p=100+10*Math.sin(i/5)+2*Math.sin(i/13);return {timestamp:1790000000000+i*60000,open:p,close:p,high:p,low:p,volume:100}})
 test("global and independent range switches survive settings validation, hydration and catalog generation",()=>{
   for(const normal of [false,true])for(const trailing of [false,true]){
-    const values={...DEFAULTS,...catalog,strategyNormalEnabled:normal,strategyTrailingEnabled:trailing,strategyProcessingByRange:{Micro:{normal:false,trailing:false},Short:{normal:true,trailing:true}}}
+    const values={...DEFAULTS,...catalog,strategyShortStopPcts:[.3],strategyNormalEnabled:normal,strategyTrailingEnabled:trailing,strategyProcessingByRange:{Micro:{normal:false,trailing:false},Short:{normal:true,trailing:true}}}
     assert.deepEqual(validateConfiguration(values),values)
     const hydrated=hydrate(Object.fromEntries(Object.entries(values).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)])))
     assert.deepEqual(hydrated,values)

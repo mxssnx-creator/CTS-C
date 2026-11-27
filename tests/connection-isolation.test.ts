@@ -33,7 +33,7 @@ test('settings are strict and independent across account state stores and restar
   assert.equal(demo.control.symbolCount,100);assert.equal(main.control.symbolCount,35)
   assert.equal(main.control.running,false);assert.equal(demo.control.running,false)
   const before=main.engine.serializeState()
-  for(const settings of [{axisVolumeRatio:'3'},{volumeFactor:true},{apiSecret:'forbidden'},{strategyTpFactor:10,strategySlFactor:10}])assert.throws(()=>main.saveFlatSettings(settings))
+  for(const settings of [{axisVolumeRatio:'3'},{volumeFactor:true},{apiSecret:'forbidden'},{maxStopLossRatio:-1},{strategyShortStopPcts:[.25]}])assert.throws(()=>main.saveFlatSettings(settings))
   assert.equal(main.engine.serializeState(),before)
   assert.equal(main.snapshot().execution.lots.length,0);assert.equal(demo.snapshot().execution.lots.length,0)
   main.shutdown()

@@ -1,3 +1,4 @@
+import { STOP_BANDS } from "../shared/cts-protection/fixed-stop-bands.ts"
 import {blockPrefix,blockRequired,blockPolicyKey,checkBlockPolicy,evaluateBlocks,type BlockPolicy,type BlockPrefix} from "../shared/cts-lastn/blocks.ts";
 import {blockRoundBudget,settleBlockRound,consumeBlockPause} from "./block-rounds"
 import { checkBlockPyramidAdd, settleBlockSteps } from "./block-auto"
@@ -82,7 +83,7 @@ export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   stageWindowScope:"context", microStageWindowScope:"inherit",
   liveEntryMode:'independent',
   stageMinPF: { base: 1.1, main: 1.1, real: 1.1 }, maxSamples: 250,
-  catalog: { ...AUTO_PF_DEFAULTS, strategyTpSteps: [3, 5, 8, 12, 18, 24, 30], strategySlRatios: [.6, 1, 1.4] },
+  catalog: { ...AUTO_PF_DEFAULTS, maxStopLossRatio:2.5, strategyShortStopPcts:STOP_BANDS.short.stops, strategyLongStopPcts:STOP_BANDS.long.stops, strategyTpSteps: [3, 5, 8, 12, 18, 24, 30], strategySlRatios: [.6, 1, 1.4] },
   coordinations: { axis: { enabled: true, previous: 8, last: 3, outcome: "any",reference:'same-stage' },
     block: { enabled: true, steps: 3, ratio: .2, mode: "shared" },
     dca: { enabled: true, steps: 2, distancePct: 1, multiplier: 2 }, relate: DEFAULT_RELATE },

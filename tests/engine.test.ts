@@ -19,10 +19,15 @@ function settings(overrides: Partial<EngineSettings> = {}): EngineSettings {
 }
 const bar = (timestamp: number, price: number): Candle => ({ timestamp, open: price, close: price, high: price, low: price, volume: 100 })
 
-test("default catalog covers all 5220 independent configurations and full tactics", () => {
+test("default catalog covers every eligible fixed-stop band across the full TP and tactic ranges", () => {
   const catalog = generateStrategyCatalog("bingx-x02")
-  assert.equal(catalog.length, 5220)
-  assert.equal(new Set(catalog.map(c => c.id)).size, 5220)
+  let geometries = 0
+  for(let step=1;step<=50;step++){
+    if(step<=16)geometries += Array.from({length:15},(_,i)=>i+2).filter(stop=>stop<=step*2.5).length
+    if(step>=12)geometries += Array.from({length:12},(_,i)=>(i+2)*2).filter(stop=>stop<=step*2.5).length
+  }
+  assert.equal(catalog.length,geometries*4*3)
+  assert.equal(new Set(catalog.map(c => c.id)).size,catalog.length)
   for (const range of ["Micro", "Minimal", "Short", "Normal", "Long", "Wide"]) assert.ok(catalog.some(c => c.range === range))
   for (const type of ["MA_Cross", "RSI_Band", "MACD_Signal", "Bollinger_Bounce"]) assert.ok(catalog.some(c => c.type === type))
 })
@@ -249,9 +254,10 @@ test("validation is atomic, duplicate numeric catalog values deduplicate, and in
   assert.throws(() => validateEngineSettings({ ...settings(), maxSamples: 1 }))
 })
 
-test("balanced 252-config preset processes 100 symbols × 300 bars and ticks without synthetic exchange outcomes", () => {
+test("archived balanced 252-config preset processes 100 symbols × 300 bars and ticks without synthetic exchange outcomes", () => {
   const symbols = Array.from({ length: 100 }, (_, i) => `B${i}-USDT`)
-  const engine = new TradingEngine({ symbols })
+  const catalog = {strategyTpSteps:[3,5,8,12,18,24,30],strategySlRatios:[.6,1,1.4]}
+  const engine = new TradingEngine({ symbols, catalog })
   const start = performance.now()
   for (const symbol of symbols) engine.processCandles(symbol, candles(300))
   const barsMs = performance.now() - start
@@ -260,7 +266,7 @@ test("balanced 252-config preset processes 100 symbols × 300 bars and ticks wit
   const tickMs = performance.now() - tickStart
   const state = engine.exportState()
   assert.equal(state.processedCandles, 30_000)
-  assert.equal(generateStrategyCatalog("x", DEFAULT_ENGINE_SETTINGS.catalog).length, 252)
+  assert.equal(generateStrategyCatalog("x", catalog).length, 252)
   assert.equal(Object.keys(state.lastTimestamp).length, 100)
   assert.ok(Object.values(state.lanes).every(l => l.samples.length <= 250))
   assert.equal(state.intents.length, 0)
