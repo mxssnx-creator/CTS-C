@@ -287,10 +287,10 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
             <details className="mt-5 space-y-4">
               <summary className="cursor-pointer text-sm font-semibold">Independent Last-N Sets</summary>
               <p className="terminal-muted text-xs">{execEnabled ? "Every combination gets its own Set under each qualifying parent. Long uses the oldest block, Short follows it, and Last uses the newest completed positions." : "Each combination of selected stage sizes runs in its own Set. An empty stage selection uses that stage’s existing window policy."}</p>
-              {(execEnabled || draft.stageGateMode === "parent-branches") && (execEnabled ? (["main","real","exec"] as const) : (["main","real"] as const)).map(stage => {
+              {(execEnabled || draft.stageGateMode === "parent-branches") && (execEnabled ? EXEC_EVALUATION_STAGES : (["main","real"] as const)).map(stage => {
                 const map = (draft.strategyStageCoordinations ?? {}) as StageCoordinations
-                return <MultiChoice key={stage} title={stage[0].toUpperCase()+stage.slice(1)+" child coordinations"}
-                  description={execEnabled?"Each eligible parent creates the selected enabled coordinations. An empty selection runs all enabled coordinations.":"Each eligible parent creates the selected enabled coordinations. An empty selection inherits its coordination."}
+                return <MultiChoice key={stage} title={stage==="base"?"Base coordinations":stage[0].toUpperCase()+stage.slice(1)+" child coordinations"}
+                  description={stage==="base"?"Select which enabled coordinations can start an ordinary Base Set. An empty selection runs all enabled coordinations.":execEnabled?"Each eligible parent creates the selected enabled coordinations. An empty selection runs all enabled coordinations.":"Each eligible parent creates the selected enabled coordinations. An empty selection inherits its coordination."}
                   values={[...BRANCH_COORDINATIONS]} selected={[...(map[stage] ?? [])]} optional
                   onChange={value => change("strategyStageCoordinations", { ...map, [stage]: value })} />
               })}

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {closedHistory,MAX_WARMUP_CANDLES,planHistory,validateHistory} from '../core/history'
+import {DEFAULT_WARMUP_CANDLES,validWarmupCount} from '../core/history-policy.mjs'
+import {DEFAULTS} from '../core/settings-schema'
 
 test('three-day warmup uses capped venue pages and validates every completed minute',async()=>{
  const start=1700000040000,cutoff=start+4320*60000,source=Array.from({length:4320},(_,i)=>({time:start+i*60000,open:100,high:101,low:99,close:100,volume:1}))
@@ -29,7 +31,21 @@ test('extended cold warm-up requests oldest bounded pages and resumes with no ov
 test('initial history requires its full requested span while incremental recovery needs only the unseen gap',()=>{
  const cutoff=1700000640000,rows=Array.from({length:50},(_,i)=>({timestamp:cutoff-(49-i)*60000,open:100,high:100,low:100,close:100,volume:1}))
  assert.throws(()=>validateHistory('BTC-USDT',rows,{cursor:null,count:100,cutoff}),/50\/100/)
+ assert.throws(()=>validateHistory('BTC-USDT',rows,{cursor:null,count:49,cutoff}),/50\/49/)
  assert.doesNotThrow(()=>validateHistory('BTC-USDT',rows,{cursor:cutoff-60000,count:100,cutoff}))
+})
+
+test('the default seven-day prehistory uses the same bounds as the launchers and settings',()=>{
+ const cutoff=1700000040000
+ assert.equal(DEFAULTS.historyCandles,7*1440)
+ assert.equal(DEFAULT_WARMUP_CANDLES,DEFAULTS.historyCandles)
+ const start=planHistory(DEFAULT_WARMUP_CANDLES,null,cutoff)
+ assert.deepEqual(start,{count:4320,cutoff:cutoff-5760*60_000,cursor:null})
+ const middle=planHistory(DEFAULT_WARMUP_CANDLES,start.cutoff,cutoff)
+ assert.equal(middle.count,4320)
+ assert.equal(planHistory(DEFAULT_WARMUP_CANDLES,middle.cutoff,cutoff).count,1440)
+ assert.ok(validWarmupCount(100)&&validWarmupCount(MAX_WARMUP_CANDLES))
+ assert.ok(!validWarmupCount(99)&&!validWarmupCount(MAX_WARMUP_CANDLES+1)&&!validWarmupCount(100.5))
 })
 
 test('restart history uses retained cursors without dropping the unseen closed tail',async()=>{

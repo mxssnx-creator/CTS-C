@@ -5,6 +5,7 @@ import { connectionClient, connectionCredentials,type BingxClient,type ClientOpt
 import {CONNECTIONS,connectionInfo,type ConnectionId} from './connections'
 import { planExecutionIntents } from './runtime-policy'
 import { closedHistory, planHistory, validateHistory, type HistoryPlan } from './history'
+import { DEFAULT_WARMUP_CANDLES } from './history-policy.mjs'
 import { DemoExecutor } from './executor'
 import { getStore,type StateStore } from './store'
 import type { Candle, EngineSettings, EngineEvent } from './types'
@@ -18,7 +19,7 @@ interface Control { running: boolean; exchangeExecution: boolean; warmed: string
 interface Bar { bucket: number; candle: Candle; lastObservation: number }
 interface HistoryJob {data?:Candle[];error?:string;plan?:HistoryPlan;live?:boolean;validated?:boolean;offset?:number;cursor?:number|null;readyAt?:number;batchSize?:number}
 interface TradeBatch {trades:{trade:ObservedTrade;bar?:TradeBar}[];bars:{symbol:string;bar:TradeBar}[];offset:number}
-const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:4320,lastTick:null,lastError:null,feeReadFailures:[],feeCheckedAt:null }
+const DEFAULT_CONTROL: Control = { running:false,exchangeExecution:false,warmed:[],symbolCount:100,historyCandles:DEFAULT_WARMUP_CANDLES,lastTick:null,lastError:null,feeReadFailures:[],feeCheckedAt:null }
 const EXECUTION_INTERVAL_MS = 250
 const RECONCILIATION_INTERVAL_MS = 1000
 const MARKET_CLIENT_OPTIONS: ClientOptions = {minRequestIntervalMs:45,pacePublicMarket:true}

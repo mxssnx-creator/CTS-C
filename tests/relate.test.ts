@@ -3,7 +3,7 @@ import { test } from "node:test"
 import { generateStrategyCatalog } from "../core/catalog"
 import { TradingEngine, validateEngineSettings } from "../core/engine"
 import { DEFAULT_RELATE, DEFAULT_RELATE_AUTO, relateAllocation, validateRelateAuto } from "../core/relate"
-import type { Candle } from "../core/types"
+import type { Candle, LaneState } from "../core/types"
 
 const catalog = {
   strategyEnabledRanges: ["Short"], strategyTpSteps: [12], strategySlRatios: [.5, 1],
@@ -280,6 +280,35 @@ test("inherited Relate evidence is the ancestor's older stream: never overlappin
     assert.ok(call.values, "the values are exactly the ancestor's returns, newest first")
   }
   assert.equal(original({parentProof: undefined, admittedAt: 1}, 5, 10), undefined, "a Base-stage Set has nothing to inherit")
+})
+
+test("Relate Auto cannot calibrate on the older returns of a DCA parent", () => {
+  const defaults = validateEngineSettings()
+  const child = {long:["none"],short:[4],last:[1]}
+  const engine = new TradingEngine({
+    symbols:[symbol],stageGateMode:"exec-branches",
+    catalog:{...catalog,strategyStageCoordinations:{base:["dca"],main:["relate"],real:["relate"],exec:["relate"]},
+      strategyExecWindows:{base:{...child,long:[10]},main:child,real:child,exec:child}},
+    coordinations:{...defaults.coordinations,dca:{...defaults.coordinations.dca,enabled:true},
+      axis:{...defaults.coordinations.axis,enabled:false},block:{...defaults.coordinations.block,enabled:false},
+      relate:{...DEFAULT_RELATE,enabled:true,auto}},
+  })
+  const bars = Array.from({length:120},(_,index)=>{
+    const close=100*1.02**index
+    return {timestamp:1_790_000_040_000+index*60_000,open:close,high:close,low:close,close,volume:1}
+  })
+  for (const bar of bars) {
+    const events = engine.processCandles(symbol,[bar])
+    if (events.some(event=>event.type==="opened"&&event.stage==="main")) break
+  }
+  const book = engine.exportState().lanes
+  const main = Object.values(book).find(lane=>lane.stage==="main"&&lane.coordination==="relate")!
+  const base = book[main.parentProof![0].laneId]
+  assert.equal(base.coordination,"dca")
+  assert.ok(base.sampleTimes!.some(timestamp=>timestamp<main.admittedAt!))
+  const inherited = (engine as unknown as {relateInherited:(lane:LaneState,at:number,limit:number)=>number[]|undefined})
+    .relateInherited(main,bars.at(-1)!.timestamp,30)
+  assert.deepEqual(inherited,[])
 })
 
 const lossPolicy = {...DEFAULT_RELATE, enabled:true, stepMode:"loss" as const, steps:4, ratio:.4, maxMultiplier:4, auto}

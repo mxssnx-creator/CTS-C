@@ -10,7 +10,7 @@ import { describeProfitFactor } from "../core/metrics"
 import { EXIT_MODES, type Candle, type ClosedTrade, type EngineSettings, type GateProof } from "../core/types"
 import { checkExecWindows } from "../core/last-n-grid"
 
-type Scenario = { tapeMinutes?: number; warmupMinutes?: number; fitMinutes?: number; groupSources?: boolean; market?: boolean; settings?: Partial<EngineSettings> }
+type Scenario = { tapeMinutes?: number; warmupMinutes?: number; fitMinutes?: number; groupSources?: boolean; detailed?: boolean; market?: boolean; settings?: Partial<EngineSettings> }
 type Job = { files: string[]; family: "ordinary" | "signals"; profile: "short" | "mixed" | "full"; scenario: Scenario }
 type Totals = { closes:number; wins:number; profit:number; loss:number; fees:number; pnl:number; cashProfit:number; cashLoss:number }
 const empty = (): Totals => ({ closes:0,wins:0,profit:0,loss:0,fees:0,pnl:0,cashProfit:0,cashLoss:0 })
@@ -98,8 +98,13 @@ function run({files,family,profile,scenario}: Job) {
   const groups: Record<string, Cohort> = {}
   const postSigns: Record<string, Cohort> = {}
   const executedSigns: Record<string, Cohort> = {}
-  const sources = scenario.groupSources ? new Map(symbols.flatMap(symbol=>generateEngineCatalog(settings,settings.symbolFees?.[symbol])
+  const sources = scenario.groupSources || scenario.detailed ? new Map(symbols.flatMap(symbol=>generateEngineCatalog(settings,settings.symbolFees?.[symbol])
     .map(config=>[config.id,config] as const))) : undefined
+  const detailKeys = scenario.detailed ? new Map([...sources!.values()].map(config=>[config.id,JSON.stringify([
+    config.type,config.indicationSourceId??config.type,config.range,config.tpStep,config.takeprofit*100,
+    config.stoploss*100,config.exitMode,config.signalTimeframeMinutes??1,config.position_cost_step,config.execProfile??null,
+  ])])) : undefined
+  const detail: Record<string, Cohort> = {}, hourly: Record<string, Cohort> = {}
   const distinct = {fit:new Map<string,{n:number;returns:number}>(),holdout:new Map<string,{n:number;returns:number}>()}
   const shortPaths = Object.fromEntries(execShorts.map(count=>[count,{fit:new Set<string>(),holdout:new Set<string>()}]))
   const awaitingMirror = new Map<string,Readonly<ClosedTrade>>()
@@ -145,15 +150,26 @@ function run({files,family,profile,scenario}: Job) {
       record(postStages[trade.stage][period])
       const {key} = signed?.at(-1) ?? signedWindow(trade,progression)
       record((postSigns[key]??=cohort())[period])
+      if (detailKeys) {
+        const hour = Math.floor((trade.closedAt-1)/3_600_000)*3_600_000
+        record((hourly[`${trade.stage}/${hour}`]??=cohort())[period])
+      }
     }
     if (trade.stage === "exec") {
       const short = shortWidth(trade.configId)
       record(shortBooks[short][period])
       if (trade.executed) record(shortAccepted[short][period])
     }
-    const geometry = trade.configId.split(".branch2")[0]
-    if (sources) {
-      const config = sources.get(geometry)
+    const geometry = trade.configId.split(".branch2",1)[0]
+    if (detailKeys) {
+      const setup = detailKeys.get(geometry)
+      if (!setup) throw new Error(`Missing detailed geometry for ${trade.configId}`)
+      const key = `${setup}/${trade.coordination}`
+      record((detail[`${key}/${trade.stage}`]??=cohort())[period])
+      if (progression) record((detail[`${key}/post-${trade.stage}`]??=cohort())[period])
+    }
+    if (scenario.groupSources) {
+      const config = sources!.get(geometry)
       if (!config) throw new Error(`Missing geometry for ${trade.configId}`)
       const source = config.execProfile ?? config.indicationSourceId ?? config.type
       const family = source.startsWith("rsi-") ? "RSI" : source.startsWith("parabolic-sar-") || source.startsWith("sar-") ? "Parabolic SAR" : source
@@ -215,6 +231,7 @@ function run({files,family,profile,scenario}: Job) {
     baseCandidates:snapshot.stages[0].baseCandidates,
     open:snapshot.positions.filter(position=>position.executed&&position.openedAt>=from).length,
     unique,distinctReturns,crossingCloses,stages,postStages,shortBooks,shortAccepted,shortCoverage,variants,groups,postSigns,executedSigns,
+    ...(detailKeys&&{detail,detailCatalog:[...new Set(detailKeys.values())],hourly}),
     shortUnique:Object.fromEntries(execShorts.map(n=>[n,{fit:shortPaths[n].fit.size,holdout:shortPaths[n].holdout.size}])) }
 }
 
@@ -259,6 +276,7 @@ async function main() {
   const stages:Record<string,Cohort> = {}, variants:Record<string,Cohort> = {}, groups:Record<string,Cohort> = {}
   const postStages:Record<string,Cohort> = {}, shortBooks:Record<string,Cohort> = {}, shortAccepted:Record<string,Cohort> = {}
   const postSigns:Record<string,Cohort> = {}, executedSigns:Record<string,Cohort> = {}
+  const detail:Record<string,Cohort> = {}, hourly:Record<string,Cohort> = {}, detailCatalog = new Set<string>()
   const shortCoverage:Record<string,{sets:number;ready:number}> = {}
   const shortUnique:Record<string,{fit:number;holdout:number}> = {}
   // Worker completion order must not change floating-point sums across repeated replays.
@@ -267,6 +285,11 @@ async function main() {
     merge(stages,result.stages); merge(variants,result.variants); merge(groups,result.groups)
     merge(postStages,result.postStages); merge(shortBooks,result.shortBooks); merge(shortAccepted,result.shortAccepted)
     merge(postSigns,result.postSigns); merge(executedSigns,result.executedSigns)
+    if (result.detail && result.hourly) {
+      merge(detail,result.detail)
+      merge(hourly,result.hourly)
+      for (const key of result.detailCatalog!) detailCatalog.add(key)
+    }
     for (const [count,observed] of Object.entries(result.shortCoverage)) {
       const row = shortCoverage[count]??={sets:0,ready:0}
       row.sets += observed.sets
@@ -293,6 +316,7 @@ async function main() {
     warmupMinutes, fitMinutes, holdoutMinutes:tapeMinutes-warmupMinutes-fitMinutes, settings:scenario.settings,
     stages:scoredCohorts(stages),postStages:scoredCohorts(postStages),groups:scoredCohorts(groups),
     signedWindows:{postStage:scoredCohorts(postSigns),executedByAncestor:scoredCohorts(executedSigns)},
+    ...(scenario.detailed&&{detailCatalog:[...detailCatalog].sort(),details:scoredCohorts(detail),hourly:scoredCohorts(hourly)}),
     execShort:{coverage:shortCoverage,book:scoredCohorts(shortBooks),accepted:scoredCohorts(shortAccepted),unique:shortUnique},
     unique:Object.fromEntries(periods.map(period=>[period,distinctReturns[period].closed])),
     distinctReturns,rank,results,
