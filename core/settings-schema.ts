@@ -229,6 +229,10 @@ export function validateConfiguration(input: unknown, { partial = false, formNum
   if (!partial) {
     autoPfPolicy(output)
     if (output.axisPrevEnabled && Number(output.axisPrevious) + Number(output.axisLast) > 250) throw new Error("Axis previous and recent windows must total 250 samples or fewer.")
+    if ((output.strategyIndicationTypes as string[]).includes("Trend-Reversal")) {
+      if (!(output.strategyIndicationSources as string[]).some(id => sourceKinds.get(id) === "trend-reversal")) throw new Error("Choose at least one Trend-Reversal source.")
+      if (!(output.strategySignalTimeframes as number[]).some(tf => [1, 5, 15, 30].includes(tf))) throw new Error("Trend-Reversal requires a 1, 5, 15 or 30 minute timeframe.")
+    }
     const count = configurationCount(output)
     if (count === 0) throw new Error("Choose at least one active configuration across your ranges, exit modes, sources and timeframes.")
     const windows = output.strategyLastNGrid as LastNGrid
