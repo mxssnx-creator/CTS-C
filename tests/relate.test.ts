@@ -87,6 +87,34 @@ test("Relate increases volume only when its own recent PF clears the disjoint Au
   assert.ok(relateAllocation(weak,config,settings,weak.length-1)>1,"untimed older returns leave the fallback in force")
 })
 
+test("closed Relate orders retain each exact Overall relation's entry-time recovery receipt", () => {
+  const defaults = validateEngineSettings();
+  const setup = new TradingEngine({ symbols: [symbol], stageGateMode: "processed-sets", catalog,
+    stageLastN: { base: 1, main: 1, real: 1 }, stageMinPF: { base: 0, main: 0, real: 0 },
+    coordinations: { ...defaults.coordinations, relate: { ...policy, scope: "overall" } } });
+  const first = 1_790_000_000_000;
+  const bars = Array.from({ length: 320 }, (_, i): Candle => {
+    const close = 100 + 8 * Math.sin(i / 5) + Math.sin(i / 11);
+    return { timestamp: first + i * 60_000, open: close, high: close, low: close, close, volume: 1 };
+  });
+  let index = 180;
+  setup.processCandles(symbol, bars.slice(0, index));
+  let state = setup.exportState();
+  let lane = Object.values(state.lanes).find(l => l.coordination === "relate" && l.stage === "real" && l.open);
+  while (!lane && index < 270) {
+    setup.processCandles(symbol, [bars[index++]]);
+    state = setup.exportState();
+    lane = Object.values(state.lanes).find(l => l.coordination === "relate" && l.stage === "real" && l.open);
+  }
+  assert.ok(lane?.open);
+  lane.open.relateRelationTrials = { overall: { step: 2, size: 1.44 }, symbol: { step: 3, size: 1.72 } };
+  const resumed = TradingEngine.fromOwnedCheckpoint(state);
+  resumed.processCandles(symbol, bars.slice(index));
+  const settled = Object.values(resumed.exportState().relateWindows ?? {}).flat().filter(row => row[2] === lane.id && row[3]);
+  assert.ok(settled.some(row => row[3]?.step === 2 && row[3].size === 1.44));
+  assert.ok(settled.some(row => row[3]?.step === 3 && row[3].size === 1.72));
+});
+
 test("Overall sizes each relation from its own window only after the exact Set qualifies", () => {
   const [config] = generateStrategyCatalog("test", catalog)
   const settings = {...policy, scope: "overall" as const,

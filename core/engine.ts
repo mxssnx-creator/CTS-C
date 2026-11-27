@@ -653,7 +653,7 @@ export class TradingEngine {
       return {samples, trials} satisfies RelateEvidence
     })
   }
-  private settleRelateRelations(lane: LaneState, at: number, value: number): void {
+  private settleRelateRelations(lane: LaneState, order: PaperPosition, at: number, value: number): void {
     const policy = this.state.settings.coordinations.relate
     if (!policy?.enabled || policy.scope !== "overall" || lane.coordination !== "relate" || lane.stage === "base" || !this.currentLane(lane)) return
     const keys = this.relateKeysFor(lane)
@@ -669,7 +669,7 @@ export class TradingEngine {
         if (time > at || (time === at && id < lane.id)) lo = mid + 1
         else hi = mid
       }
-      const receipt = lane.open?.relateRelationTrials?.[source]
+      const receipt = order.relateRelationTrials?.[source]
       samples.splice(lo, 0, receipt ? [at, value, lane.id, receipt] : [at, value, lane.id])
       if (samples.length > policy.lastN * 2) samples.length = policy.lastN * 2
     }
@@ -883,7 +883,7 @@ export class TradingEngine {
       const retention = this.state.settings.coordinations.relate!.lastN + 1
       if (trials.length > retention) trials.length = retention
     }
-    this.settleRelateRelations(lane,candle.timestamp,netReturnPct)
+    this.settleRelateRelations(lane,open,candle.timestamp,netReturnPct)
     this.configWindows.settled(lane,candle.timestamp)
     lane.closedCount++; lane.wins += netPnl > 0 ? 1 : 0; lane.netPnl += netPnl
     if(lane.costTotal!==undefined)lane.costTotal+=cost
