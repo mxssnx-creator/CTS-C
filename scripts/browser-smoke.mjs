@@ -39,7 +39,7 @@ try{
  await page.getByRole('button',{name:'Strategy lab',exact:true}).click()
  const main=page.getByLabel('Main completed samples',{exact:true})
  await page.getByRole('button',{name:'Prepare Tactic + Inverse',exact:true}).click()
- await page.getByLabel('Tactic and Inverse source configurations',{exact:true}).selectOption(['tactic-dca-bounce-8-percent-0.5-1-0.25','inverse-known-ema-9-21'])
+ await page.getByLabel('Independent indication source configurations',{exact:true}).selectOption(['tactic-dca-bounce-8-percent-0.5-1-0.25','inverse-known-ema-9-21'])
  await page.getByLabel('Micro normal processing',{exact:true}).uncheck()
  await page.getByLabel('Micro trailing processing',{exact:true}).uncheck()
  await page.getByLabel('Live entries',{exact:true}).selectOption('real-mirror')

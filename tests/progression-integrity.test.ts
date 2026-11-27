@@ -4,6 +4,7 @@ import { TradingEngine } from "../core/engine"
 import { generateStrategyCatalog } from "../core/catalog"
 import { INDICATIONS } from "../core/indications"
 import { replayStrategy } from "../core/replay"
+import { REVERSAL_SOURCES } from "../shared/cts-reversal/reversal"
 
 const start=1700000040000
 const bars=Array.from({length:1200},(_,i)=>{const close=100+8*Math.sin(i/9)+2*Math.sin(i/23);return {timestamp:start+i*60000,open:close,high:close,low:close,close,volume:1}})
@@ -11,7 +12,8 @@ const coordinations={axis:{enabled:false,previous:8,last:3,outcome:"any" as cons
 
 test("research and engine produce identical independent long/short exits for all indications and modes",()=>{
   for(const type of INDICATIONS)for(const mode of ["fixed","trailing","trailing-only"]){
-    const catalog={strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:[mode],strategyIndicationTypes:[type]}
+    const catalog={strategyTpSteps:[3],strategySlRatios:[1],strategyExitModes:[mode],strategyIndicationTypes:[type],
+      ...(type==="Trend-Reversal"?{strategyIndicationSources:REVERSAL_SOURCES.map(s=>s.id)}:{})}
     const configs=generateStrategyCatalog("parity",catalog)
     const engine=new TradingEngine({connectionId:"parity",symbols:["BTC-USDT"],catalog,coordinations,stageLastN:{base:1000,main:1000,real:1000},maxSamples:1000})
     const events=engine.processCandles("BTC-USDT",bars)

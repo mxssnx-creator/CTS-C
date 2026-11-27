@@ -10,10 +10,14 @@ import {generateStrategyCatalog} from '../core/catalog'
 import {TradingEngine,windowMetrics} from '../core/engine'
 import {DEFAULTS,validateConfiguration,configurationCount,hydrate} from '../core/settings-schema'
 import {LEGACY_INDICATIONS} from '../core/indications'
+import {REVERSAL_SOURCES} from '../shared/cts-reversal/reversal'
 
 test('all 103 Signals source families and 225 disjoint coordinators keep their pinned oracle states',()=>{
- assert.equal(SIGNAL_SOURCES.length,103);assert.equal(SIGNALS_CATALOG.length,431)
- const ids=SIGNALS_CATALOG.map(s=>s.id);assert.equal(new Set(ids).size,ids.length)
+ const allIds=SIGNALS_CATALOG.map(s=>s.id);assert.equal(new Set(allIds).size,allIds.length)
+ const added=new Set(REVERSAL_SOURCES.map(s=>`sig-${s.id}`))
+ assert.deepEqual(allIds.filter(id=>added.has(id)),[...added])
+ const ids=allIds.filter(id=>!added.has(id))
+ assert.equal(SIGNAL_SOURCES.length,103);assert.equal(ids.length,431)
  const data=portedStates('BTC-USDT',1,waveBars(600),ids),hash=createHash('sha256')
  for(const id of ids){assert.equal(data.available[id],true);hash.update(id);hash.update(data.states[id]);assert.ok(data.states[id].every(v=>[-1,0,1].includes(v)))}
  assert.equal(hash.digest('hex'),'ec8e903b2a95632523083cecc33795b6540ba301457716237e86ec34a8768467')
