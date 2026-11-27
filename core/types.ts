@@ -55,17 +55,30 @@ export interface EngineSettings {
   /** Retention ceiling; each lane keeps only the samples its stage/Axis windows need. Lifetime metrics are retained separately. */
   maxSamples: number
 }
+export type RelateStepMode = "loss" | "wins"
 export interface RelateSettings {
   enabled: boolean
+  /** N: most increases a relation can accumulate. */
   steps: number
+  /** X: volume added per step, as a fraction of the base allocation. */
   ratio: number
+  /** "loss": every losing order raises the next one by X until a win, at most N rounds; a series that loses all N rounds restarts at base. "wins": the same ladder climbed by consecutive wins. Absent means "wins" (checkpoints from before this setting). */
+  stepMode?: RelateStepMode
   lastN: number
   minTrades: number
   minPF: number
   maxMultiplier: number
   maxSlRatio: number
+  /** Evidence-adaptive sizing for short tapes; replaces the 60-sample manual gate when enabled. */
+  auto?: RelateAutoSettings
 }
 export interface StepAutoPolicy { enabled: boolean; lastN: number; minSamples: number; minPF: number }
+export interface RelateAutoSettings extends StepAutoPolicy {
+  /** One-sided z-score the mean return must clear over its standard error; 0 disables the check. */
+  confidence: number
+  /** Extend a short own tape with older, non-overlapping returns of the same trade stream in ancestor Sets. */
+  inherit: boolean
+}
 export type DcaAutoPolicy = StepAutoPolicy
 export interface StepVerdict {
   step: number; samples: number; required: number; profitFactor: number | null; state: "warming" | "unknown" | "held" | "qualified"
