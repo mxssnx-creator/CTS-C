@@ -294,7 +294,7 @@ export function StrategyLab({ settings, onSave, busy,connectionName='x02',coordi
                 <input type="checkbox" checked={draft.strategyExecSingleEntry === true} onChange={event=>change("strategyExecSingleEntry",event.target.checked)}/>
                 One funded Exec sibling per signal
               </label>
-              <p className="terminal-muted">All Sets still qualify independently. When the same symbol, side, configuration and coordination qualify together, the largest complete Exec window gets the order.</p>
+              <p className="terminal-muted">Enabled by default. All Sets qualify independently. When the same symbol, side, configuration and coordination qualify together, the largest complete Exec window gets the order.</p>
             </div>}
             {!execEnabled&&(["base","main","real"] as const).map(stage=><BlockPolicyFields key={stage} label={stage+" Last-N blocks"} value={(draft.stageBlocks as Partial<Record<string,BlockPolicy>>|undefined)?.[stage]} onChange={policy=>{const next={...(draft.stageBlocks as Partial<Record<string,BlockPolicy>>??{})};if(policy)next[stage]=policy;else delete next[stage];change("stageBlocks",next)}}/>)}
             <details className="mt-5 space-y-4">

@@ -32,10 +32,12 @@ Im VST-Vergleich verringerte eine zusätzliche Exec-Mindestschwelle von 1,50 die
 
 ## Einstellungen und Reproduktion
 
+Die Einzelauswahl gehört zum Exec-Standard für x01 und x02. Checkpoints ohne gespeicherten Wert übernehmen diesen Standard. In Strategy Lab lässt sich der Schalter pro Verbindung speichern.
+
 In Strategy Lab lädt **Prepare Trend + SAR reference** das [gespeicherte Profil](../research-data/exec-trend-sar-reference.json) mit vier Geometrien, zehn Tagen Vorlauf und Einzelauswahl. Gebühren und Budget kommen aus der Verbindung. Der Schalter lässt sich separat abwählen. Die Regression prüft die identischen Exec-Set-Stichproben mit und ohne Auswahl, die vier Freigaben am Einstiegszeitpunkt, genau eine gespiegelte Order je Gruppe und die Fortsetzung nach Neustart.
 
 ```sh
-node -e 'const study=require("./research-data/ctsc-exec-profiles-20261122.json"); console.log(JSON.stringify(study.cases["enabled-nov"].scenario))' > /tmp/cts-c-trend-sar-original.json
+node -e 'const study=require("./research-data/ctsc-exec-profiles-20261122.json"); const scenario=study.cases["enabled-nov"].scenario; scenario.settings.catalog.strategyExecSingleEntry=false; console.log(JSON.stringify(scenario))' > /tmp/cts-c-trend-sar-original.json
 node --import tsx scripts/replay-exec-stages.ts /path/to/original-tapes /tmp/cts-c-original.json short ordinary 12 1 /tmp/cts-c-trend-sar-original.json
 node -e 'const scenario=require("/tmp/cts-c-trend-sar-original.json"); scenario.settings.catalog.strategyExecSingleEntry=true; console.log(JSON.stringify(scenario))' > /tmp/cts-c-trend-sar-single-entry.json
 node --import tsx scripts/replay-exec-stages.ts /path/to/original-tapes /tmp/cts-c-single-entry.json short ordinary 12 1 /tmp/cts-c-trend-sar-single-entry.json

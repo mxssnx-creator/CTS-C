@@ -8,7 +8,7 @@ import {normalizedVolumeFactor,relationalVolumeSettings,SYSTEM_VOLUME_DIVISOR,VO
 import { strategyProcessing, strategyTrailing } from "./strategy-processing"
 import { createHash } from "node:crypto"
 import { generateEngineCatalog } from "./catalog"
-import { EXEC_PROFILES, PROFILE_BASE_COORDINATIONS, PROFILE_DCA_SIZING, execProfileEnabled } from "./exec-profile"
+import { DEFAULT_EXEC_SINGLE_ENTRY, EXEC_PROFILES, PROFILE_BASE_COORDINATIONS, PROFILE_DCA_SIZING, execProfileEnabled } from "./exec-profile"
 import { BRANCH_COORDINATIONS as COORDINATIONS, ParentBranches, checkStageCoordinations } from "./stage-branches"
 import { checkExecWindows, checkLastNGrid, DEFAULT_EXEC_MIN_PF, EXEC_EVALUATION_STAGES, LAST_N_STAGES, lastNVariantCount, type EvaluationStage } from "./last-n-grid"
 import { advanceConfiguredSignal, advancePortedSources, historicalPortedSignals, marketReferenceBars, newSignalState } from "./replay"
@@ -84,7 +84,7 @@ export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   stageWindowScope:"context", microStageWindowScope:"inherit",
   liveEntryMode:'independent',
   stageMinPF: { base: 1.1, main: 1.1, real: 1.1 }, maxSamples: 250,
-  catalog: { ...AUTO_PF_DEFAULTS, strategyTpSteps: [3, 5, 8, 12, 18, 24, 30], strategySlRatios: [.6, 1, 1.4] },
+  catalog: { ...AUTO_PF_DEFAULTS, strategyExecSingleEntry: DEFAULT_EXEC_SINGLE_ENTRY, strategyTpSteps: [3, 5, 8, 12, 18, 24, 30], strategySlRatios: [.6, 1, 1.4] },
   coordinations: { axis: { enabled: true, previous: 8, last: 3, outcome: "any",reference:'same-stage' },
     block: { enabled: true, steps: 3, ratio: .2, mode: "shared" },
     dca: { enabled: true, steps: 2, distancePct: 1, multiplier: 2 }, relate: DEFAULT_RELATE },
@@ -114,8 +114,11 @@ export function validateEngineSettings(input: Partial<EngineSettings> = {}): Eng
   finite(settings.initialEquity, "initialEquity", .01, 1e12); finite(settings.baseNotional, "baseNotional", .000001, 1e9)
   finite(settings.volumeFactor, "volumeFactor", .000001, 100); finite(settings.maxSamples, "maxSamples", 1, 1000, true)
   checkStageCoordinations(settings.catalog.strategyStageCoordinations)
-  if (settings.catalog.strategyExecSingleEntry !== undefined && typeof settings.catalog.strategyExecSingleEntry !== "boolean")
+  if (settings.catalog.strategyExecSingleEntry === undefined) {
+    settings.catalog.strategyExecSingleEntry = DEFAULT_EXEC_SINGLE_ENTRY
+  } else if (typeof settings.catalog.strategyExecSingleEntry !== "boolean") {
     throw new Error("Exec single entry must be enabled or disabled")
+  }
   for (const profile of EXEC_PROFILES) {
     const enabled = settings.catalog[profile.setting]
     if (enabled !== undefined && typeof enabled !== "boolean") throw new Error(`${profile.label} profile must be enabled or disabled`)

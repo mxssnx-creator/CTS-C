@@ -2,6 +2,8 @@ import preset from "../research-data/exec-dca-trend-preset.json"
 import type { Coordination, EngineSettings } from "./types"
 import { checkExecWindows } from "./last-n-grid"
 
+export const DEFAULT_EXEC_SINGLE_ENTRY = true
+
 const signed = {short:[4],last:[1],shortOutcomes:["positive","negative"],lastOutcomes:["positive","negative"]}
 const recoveryWindows = checkExecWindows({base:{...signed,long:[10,20]},main:{...signed,long:["none"]},
   real:{...signed,long:["none"]},exec:{...signed,long:["none"],short:[4,8,12]}})

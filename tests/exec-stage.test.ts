@@ -135,15 +135,16 @@ test("additional signals reuse an unchanged Base observation", (t) => {
   assert.equal(cache.mock.callCount(),0,"no identity or registration work for the open probe")
 })
 
-test("funding one Exec sibling retains all exact Set samples and mirrors a complete proof after restart", () => {
-  const limitedCatalog = {...settings.catalog,strategyExecSingleEntry:true}
-  assert.equal(validateConfiguration({strategyExecSingleEntry:true},{partial:true}).strategyExecSingleEntry,true)
-  assert.equal(hydrate({strategyExecSingleEntry:"true"}).strategyExecSingleEntry,true)
-  assert.equal(validateConfiguration(DEFAULTS).strategyExecSingleEntry,false)
-  assert.throws(()=>new TradingEngine({...settings,catalog:{...limitedCatalog,strategyExecSingleEntry:"true"}}),/Exec single entry/)
+test("the default Exec selection retains all exact Set samples and mirrors a complete proof after restart", () => {
+  const legacyForm = {...DEFAULTS}
+  delete legacyForm.strategyExecSingleEntry
+  assert.equal(validateConfiguration(legacyForm).strategyExecSingleEntry,true)
+  assert.equal(hydrate({}).strategyExecSingleEntry,true)
+  assert.equal(hydrate({strategyExecSingleEntry:"false"}).strategyExecSingleEntry,false)
+  assert.throws(()=>new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecSingleEntry:"true"}}),/Exec single entry/)
 
-  const all = new TradingEngine(settings)
-  const limited = new TradingEngine({...settings,catalog:limitedCatalog})
+  const all = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecSingleEntry:false}})
+  const limited = new TradingEngine(settings)
   const closing: Record<"all"|"limited",ClosedTrade[]> = {all:[],limited:[]}
   all.observeStageCloses(trade=>closing.all.push(trade))
   limited.observeStageCloses(trade=>closing.limited.push(trade))
@@ -170,6 +171,28 @@ test("funding one Exec sibling retains all exact Set samples and mirrors a compl
   const intents = reloaded.pendingIntents().filter(intent=>intent.kind==="entry")
   assert.ok(intents.length>0)
   assert.equal(intents.length,new Set(intents.map(intent=>intent.timestamp)).size)
+})
+
+test("a checkpoint adopting default Exec selection still closes every previously funded sibling", () => {
+  const old = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecSingleEntry:false}})
+  old.processCandles(symbol,bars.slice(0,110),{eventLimit:0})
+  let cursor = 110
+  let open = old.snapshot({positionStage:"live"}).positions
+  while (open.length<2 && cursor<bars.length-1) {
+    old.processCandles(symbol,[bars[cursor++]],{allowExecution:true,eventLimit:0})
+    open = old.snapshot({positionStage:"live"}).positions
+  }
+  assert.ok(open.length>=2)
+  const checkpoint = old.exportState()
+  delete checkpoint.settings.catalog.strategyExecSingleEntry
+  const upgraded = TradingEngine.fromOwnedCheckpoint(checkpoint)
+  assert.equal(upgraded.settings.catalog.strategyExecSingleEntry,true)
+  assert.deepEqual(upgraded.snapshot({positionStage:"live"}).positions,open)
+
+  const closes:ClosedTrade[] = []
+  upgraded.observeLiveCloses(trade=>closes.push(trade))
+  upgraded.processCandles(symbol,[bars[cursor]],{allowExecution:true,eventLimit:0})
+  assert.deepEqual(new Set(closes.map(trade=>trade.id)),new Set(open.map(position=>position.id)))
 })
 
 test("post-stage cash PF uses funded settled P&L and preserves legacy coverage", () => {
@@ -528,7 +551,7 @@ test("each enabled coordination and chosen Short size forms a separately qualifi
     real:{long:["none"],short:[4],last:[1]},exec:{long:["none"],short:[4,8],last:[1]},
   })
   const defaults = DEFAULT_ENGINE_SETTINGS.coordinations
-  const engine = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows},
+  const engine = new TradingEngine({...settings,catalog:{...settings.catalog,strategyExecWindows:windows,strategyExecSingleEntry:false},
     coordinations:{...defaults,axis:{...defaults.axis,previous:4,last:1,reference:"same-stage"},relate:{...defaults.relate!,enabled:true}}})
   const routes = new Set<string>()
   engine.observeStageCloses(trade=>{
